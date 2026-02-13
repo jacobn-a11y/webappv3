@@ -19,10 +19,12 @@ model Organization {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  users    User[]
-  accounts Account[]
-  calls    Call[]
-  stories  Story[]
+  users        User[]
+  accounts     Account[]
+  calls        Call[]
+  stories      Story[]
+  landingPages LandingPage[]
+  orgSettings  OrgSettings?
 
   @@map("organizations")
 }
@@ -44,7 +46,11 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
+  organization      Organization       @relation(fields: [organizationId], references: [id])
+  landingPages      LandingPage[]      @relation("CreatedBy")
+  landingPageEdits  LandingPageEdit[]
+  permissions       UserPermission[]
+  accountAccess     UserAccountAccess[]
 
   @@index([organizationId])
   @@map("users")
@@ -80,6 +86,7 @@ model Account {
   salesforceEvents SalesforceEvent[]
   stories         Story[]
   domainAliases   AccountDomain[]
+  userAccess      UserAccountAccess[]
 
   @@unique([organizationId, domain])
   @@unique([organizationId, salesforceId])
@@ -299,6 +306,7 @@ model Story {
   organization Organization @relation(fields: [organizationId], references: [id])
   account      Account      @relation(fields: [accountId], references: [id])
   quotes       HighValueQuote[]
+  landingPages LandingPage[]
 
   @@index([organizationId, accountId])
   @@map("stories")
@@ -328,4 +336,152 @@ model HighValueQuote {
 
   @@index([storyId])
   @@map("high_value_quotes")
+}
+
+// ─── Landing Pages (Publishable Story Pages) ────────────────────────────────
+
+model LandingPage {
+  id              String            @id @default(cuid())
+  organizationId  String
+  storyId         String
+  createdById     String
+  slug            String            @unique   // URL slug: /s/{slug}
+  title           String
+  subtitle        String?
+  editableBody    String            // rich Markdown edited by the rep
+  scrubbedBody    String            // company-name-scrubbed version for public
+  heroImageUrl    String?
+  calloutBoxes    Json?             // array of {title, body, icon} callout blocks
+  totalCallHours  Float             @default(0) // for the "Compiled from X hours" badge
+  visibility      PageVisibility    @default(PRIVATE)
+  status          PageStatus        @default(DRAFT)
+  password        String?           // optional password for SHARED_WITH_LINK pages
+  includeCompanyName Boolean        @default(false) // admin-only: named landing page
+  noIndex         Boolean           @default(true)
+  customCss       String?
+  viewCount       Int               @default(0)
+  publishedAt     DateTime?
+  expiresAt       DateTime?         // optional expiration for shared links
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id])
+  story        Story               @relation(fields: [storyId], references: [id])
+  createdBy    User                @relation("CreatedBy", fields: [createdById], references: [id])
+  edits        LandingPageEdit[]
+
+  @@index([organizationId, status])
+  @@index([slug])
+  @@map("landing_pages")
+}
+
+enum PageVisibility {
+  PRIVATE           // only visible to org members
+  SHARED_WITH_LINK  // anyone with the link (optionally password-protected)
+}
+
+enum PageStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model LandingPageEdit {
+  id            String   @id @default(cuid())
+  landingPageId String
+  editedById    String
+  previousBody  String   // snapshot before this edit
+  newBody       String   // snapshot after this edit
+  editSummary   String?
+  createdAt     DateTime @default(now())
+
+  landingPage LandingPage @relation(fields: [landingPageId], references: [id], onDelete: Cascade)
+  editedBy    User        @relation(fields: [editedById], references: [id])
+
+  @@index([landingPageId])
+  @@map("landing_page_edits")
+}
+
+// ─── Permissions & Org Settings ──────────────────────────────────────────────
+
+model OrgSettings {
+  id                        String   @id @default(cuid())
+  organizationId            String   @unique
+  landingPagesEnabled       Boolean  @default(true)
+  defaultPageVisibility     PageVisibility @default(PRIVATE)
+  requireApprovalToPublish  Boolean  @default(false)
+  allowedPublishers         UserRole[] @default([OWNER, ADMIN]) // roles that can publish
+  maxPagesPerUser           Int?     // null = unlimited
+  companyNameReplacements   Json?    // custom scrub mappings: {"Acme Corp": "the client"}
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@map("org_settings")
+}
+
+model UserPermission {
+  id             String           @id @default(cuid())
+  userId         String
+  permission     PermissionType
+  grantedById    String?
+  createdAt      DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permission])
+  @@map("user_permissions")
+}
+
+enum PermissionType {
+  CREATE_LANDING_PAGE
+  PUBLISH_LANDING_PAGE
+  PUBLISH_NAMED_LANDING_PAGE  // publish with real company name visible
+  EDIT_ANY_LANDING_PAGE
+  DELETE_ANY_LANDING_PAGE
+  MANAGE_PERMISSIONS
+  VIEW_ANALYTICS
+}
+
+// ─── Account-Scoped Access Control ───────────────────────────────────────────
+// Admins can restrict which accounts a user can generate landing pages for.
+// Access can be granted to individual accounts or via a CRM report/list.
+
+model UserAccountAccess {
+  id             String           @id @default(cuid())
+  userId         String
+  organizationId String
+  scopeType      AccountScopeType
+  // For SINGLE_ACCOUNT: the specific account
+  accountId      String?
+  // For CRM_REPORT: the Salesforce report ID or HubSpot list ID
+  crmReportId    String?
+  crmProvider    CRMProvider?
+  crmReportName  String?          // human-readable name for display
+  // Cached account IDs from the last CRM report sync
+  cachedAccountIds String[]       @default([])
+  lastSyncedAt   DateTime?
+  grantedById    String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id])
+
+  @@index([userId, organizationId])
+  @@index([userId, accountId])
+  @@map("user_account_access")
+}
+
+enum AccountScopeType {
+  ALL_ACCOUNTS       // no restriction (default for admins)
+  SINGLE_ACCOUNT     // access to one specific account
+  ACCOUNT_LIST       // access to a manually curated list (stored in cachedAccountIds)
+  CRM_REPORT         // access defined by a Salesforce report or HubSpot list
+}
+
+enum CRMProvider {
+  SALESFORCE
+  HUBSPOT
 }

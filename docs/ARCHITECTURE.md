@@ -129,3 +129,66 @@ Calls are tagged against a comprehensive B2B case-study taxonomy:
 - **Internal**: Sales enablement, lessons learned, cross-functional, VoC, pricing validation, churn saves, deal anatomy, health trajectory, reference-ability
 
 See `src/types/taxonomy.ts` for the full enumeration.
+
+## 5. Landing Pages & Story Publishing
+
+Reps can generate editable Markdown stories from AI output, then publish them as
+standalone landing pages.
+
+### Flow
+
+```
+Story Builder → Editable Draft → Rep edits on screen → Publish
+                                                         │
+                     ┌───────────────────────────────────┤
+                     │                                   │
+                  [Named]                          [Scrubbed]
+               (Admin-only)                    (Default for all)
+                     │                                   │
+          Company name + "Name,              Company scrubbed,
+          Title, Company" quotes            "a senior exec at
+          e.g., "Jeff Bezos,                the client" quotes
+          CEO, Amazon"                               │
+                     │                                   │
+                     └──────────┬────────────────────────┘
+                                │
+                          Published at /s/{slug}
+                          • noindex, nofollow
+                          • Floating AI badge
+                          • Callout boxes
+                          • Password-optional
+                          • Private or shared link
+```
+
+### Permission Model
+
+| Permission | Who | Description |
+|---|---|---|
+| CREATE_LANDING_PAGE | Granted by admin | Can create drafts from stories |
+| PUBLISH_LANDING_PAGE | Granted by admin | Can publish scrubbed (anonymous) pages |
+| PUBLISH_NAMED_LANDING_PAGE | Admin-only grant | Can publish with real company name |
+| EDIT_ANY_LANDING_PAGE | Granted by admin | Can edit pages they didn't create |
+| DELETE_ANY_LANDING_PAGE | Granted by admin | Can delete any page |
+
+### Account Access Scoping
+
+Admins can restrict which accounts a user can generate pages for:
+
+- **ALL_ACCOUNTS** — unrestricted (default for admins)
+- **SINGLE_ACCOUNT** — one specific CRM account
+- **ACCOUNT_LIST** — manually curated list of account IDs
+- **CRM_REPORT** — defined by a Salesforce Report or HubSpot List (synced periodically)
+
+### Company Scrubbing
+
+The scrubber removes:
+1. Company name + all variations (abbreviations, normalized forms)
+2. Contact names + titles → anonymized by seniority level
+3. Email domains → `[client-domain]`
+4. Domain aliases
+
+Quote attribution format:
+- **Named pages**: "Jeff Bezos, CEO, Amazon"
+- **Scrubbed pages**: "a senior executive at the client"
+
+See `src/services/company-scrubber.ts` for implementation.
