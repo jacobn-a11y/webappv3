@@ -9,6 +9,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
 import { LandingPageEditor } from "../services/landing-page-editor.js";
+import { CompanyScrubber } from "../services/company-scrubber.js";
 import {
   requireLandingPagesEnabled,
   requirePermission,
@@ -249,6 +250,124 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
       } catch (err) {
         console.error("Publish landing page error:", err);
         res.status(500).json({ error: "Failed to publish landing page" });
+      }
+    }
+  );
+
+  // ── PREVIEW SCRUB (side-by-side comparison before publish) ─────────
+
+  router.post(
+    "/:pageId/preview-scrub",
+    requirePageOwnerOrPermission(prisma),
+    async (req: AuthReq, res: Response) => {
+      try {
+        const page = await prisma.landingPage.findUniqueOrThrow({
+          where: { id: req.params.pageId },
+          include: {
+            story: { select: { accountId: true } },
+          },
+        });
+
+        const scrubber = new CompanyScrubber(prisma);
+        const skipScrub = page.includeCompanyName;
+
+        const bodyScrub = await scrubber.scrubForAccount(
+          page.story.accountId,
+          page.editableBody,
+          { skipScrub }
+        );
+
+        const titleScrub = await scrubber.scrubForAccount(
+          page.story.accountId,
+          page.title,
+          { skipScrub }
+        );
+
+        const subtitleScrub = page.subtitle
+          ? await scrubber.scrubForAccount(
+              page.story.accountId,
+              page.subtitle,
+              { skipScrub }
+            )
+          : null;
+
+        res.json({
+          original: {
+            title: page.title,
+            subtitle: page.subtitle,
+            body: page.editableBody,
+          },
+          scrubbed: {
+            title: titleScrub.scrubbedText,
+            subtitle: subtitleScrub?.scrubbedText ?? null,
+            body: bodyScrub.scrubbedText,
+          },
+          replacements_made: bodyScrub.replacementsMade + titleScrub.replacementsMade + (subtitleScrub?.replacementsMade ?? 0),
+          terms_replaced: [
+            ...new Set([
+              ...bodyScrub.termsReplaced,
+              ...titleScrub.termsReplaced,
+              ...(subtitleScrub?.termsReplaced ?? []),
+            ]),
+          ],
+          include_company_name: page.includeCompanyName,
+        });
+      } catch (err) {
+        console.error("Preview scrub error:", err);
+        res.status(500).json({ error: "Failed to generate scrub preview" });
+      }
+    }
+  );
+
+  // ── PUBLISH OPTIONS (permissions & defaults for the publish modal) ──
+
+  router.get(
+    "/:pageId/publish-options",
+    requirePageOwnerOrPermission(prisma),
+    async (req: AuthReq, res: Response) => {
+      try {
+        const page = await prisma.landingPage.findUniqueOrThrow({
+          where: { id: req.params.pageId },
+          select: {
+            id: true,
+            status: true,
+            visibility: true,
+            password: true,
+            expiresAt: true,
+            includeCompanyName: true,
+          },
+        });
+
+        // Check if the user has PUBLISH_NAMED_LANDING_PAGE permission
+        let canPublishNamed = false;
+        const userRole = req.userRole;
+        const ADMIN_ROLES = ["OWNER", "ADMIN"];
+        if (userRole && ADMIN_ROLES.includes(userRole)) {
+          canPublishNamed = true;
+        } else if (req.userId) {
+          const namedPerm = await prisma.userPermission.findUnique({
+            where: {
+              userId_permission: {
+                userId: req.userId,
+                permission: "PUBLISH_NAMED_LANDING_PAGE",
+              },
+            },
+          });
+          canPublishNamed = !!namedPerm;
+        }
+
+        res.json({
+          page_id: page.id,
+          current_status: page.status,
+          current_visibility: page.visibility,
+          has_password: !!page.password,
+          current_expires_at: page.expiresAt,
+          include_company_name: page.includeCompanyName,
+          can_publish_named: canPublishNamed,
+        });
+      } catch (err) {
+        console.error("Publish options error:", err);
+        res.status(500).json({ error: "Failed to load publish options" });
       }
     }
   );
