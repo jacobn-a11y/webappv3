@@ -18,6 +18,8 @@ import { createStoryRoutes } from "./api/story-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
+import { createMergeRoutes } from "./api/merge-routes.js";
+import { MergeApiClient } from "./services/merge-api-client.js";
 import {
   createTrialGate,
   createCheckoutHandler,
@@ -57,6 +59,8 @@ const transcriptProcessor = new TranscriptProcessor(
   ragEngine
 );
 
+// Merge.dev API client — initialized after processingQueue is created (below)
+
 // ─── BullMQ Queue ────────────────────────────────────────────────────────────
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
@@ -83,6 +87,14 @@ worker.on("completed", (job) => {
 
 worker.on("failed", (job, err) => {
   console.error(`Job ${job?.id} failed:`, err.message);
+});
+
+// Merge.dev API client — manages OAuth tokens, historical fetch, and CRM polling
+const mergeApiKey = process.env.MERGE_API_KEY ?? "";
+const mergeClient = new MergeApiClient({
+  prisma,
+  processingQueue,
+  mergeApiKey,
 });
 
 // ─── Express App ─────────────────────────────────────────────────────────────
@@ -140,6 +152,9 @@ app.use("/api/pages", trialGate, createLandingPageRoutes(prisma));
 // Dashboard — stats, page list, admin settings, permissions, account access
 app.use("/api/dashboard", trialGate, createDashboardRoutes(prisma));
 
+// Merge.dev — OAuth link token exchange, linked account management, manual sync
+app.use("/api/merge", trialGate, createMergeRoutes(mergeClient, prisma));
+
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
@@ -151,13 +166,20 @@ app.listen(PORT, () => {
   console.log(`  Stories:    http://localhost:${PORT}/api/stories/build`);
   console.log(`  Pages:      http://localhost:${PORT}/api/pages`);
   console.log(`  Dashboard:  http://localhost:${PORT}/api/dashboard`);
+  console.log(`  Merge:      http://localhost:${PORT}/api/merge`);
   console.log(`  Public:     http://localhost:${PORT}/s/:slug`);
   console.log(`  Webhook:    http://localhost:${PORT}/api/webhooks/merge`);
+
+  // Start the 15-minute CRM polling sync as a webhook fallback
+  if (mergeApiKey) {
+    mergeClient.startPolling();
+  }
 });
 
 // Graceful shutdown
 process.on("SIGTERM", async () => {
   console.log("SIGTERM received, shutting down...");
+  mergeClient.stopPolling();
   await worker.close();
   await processingQueue.close();
   await prisma.$disconnect();

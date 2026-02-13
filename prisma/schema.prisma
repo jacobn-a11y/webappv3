@@ -19,12 +19,13 @@ model Organization {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  users        User[]
-  accounts     Account[]
-  calls        Call[]
-  stories      Story[]
-  landingPages LandingPage[]
-  orgSettings  OrgSettings?
+  users          User[]
+  accounts       Account[]
+  calls          Call[]
+  stories        Story[]
+  landingPages   LandingPage[]
+  orgSettings    OrgSettings?
+  linkedAccounts LinkedAccount[]
 
   @@map("organizations")
 }
@@ -484,4 +485,40 @@ enum AccountScopeType {
 enum CRMProvider {
   SALESFORCE
   HUBSPOT
+}
+
+// ─── Merge.dev Linked Accounts ──────────────────────────────────────────────
+// Tracks each end-user integration connected via Merge Link.
+// Stores the account_token used to make API calls for that linked account.
+
+model LinkedAccount {
+  id               String             @id @default(cuid())
+  organizationId   String
+  mergeLinkedAccountId String         @unique  // Merge.dev's linked_account ID
+  accountToken     String             // permanent token from Merge Link exchange
+  integrationSlug  String             // e.g., "salesforce", "hubspot", "gong"
+  category         MergeCategory      // CRM, HRIS, ATS, or FILE_STORAGE — we use CRM and RECORDING
+  status           LinkedAccountStatus @default(ACTIVE)
+  lastSyncedAt     DateTime?          // last successful polling sync
+  initialSyncDone  Boolean            @default(false) // whether historical fetch completed
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, category])
+  @@index([status])
+  @@map("linked_accounts")
+}
+
+enum MergeCategory {
+  CRM
+  RECORDING
+}
+
+enum LinkedAccountStatus {
+  ACTIVE
+  PAUSED
+  ERROR
+  REVOKED
 }
