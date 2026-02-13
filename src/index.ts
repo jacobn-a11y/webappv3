@@ -10,7 +10,7 @@ import cors from "cors";
 import helmet from "helmet";
 import { PrismaClient } from "@prisma/client";
 import Stripe from "stripe";
-import { Queue, Worker } from "bullmq";
+import { Queue, Worker, UnrecoverableError } from "bullmq";
 
 import { createMergeWebhookHandler } from "./webhooks/merge-webhook.js";
 import { createRAGRoutes } from "./api/rag-routes.js";
@@ -30,6 +30,12 @@ import {
   TranscriptProcessor,
   type ProcessCallJob,
 } from "./services/transcript-processor.js";
+import {
+  TranscriptFetcher,
+  TranscriptFetchError,
+  transcriptFetchBackoffStrategy,
+  type TranscriptFetchJob,
+} from "./services/transcript-fetcher.js";
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -65,7 +71,21 @@ const processingQueue = new Queue("call-processing", {
   connection: { url: REDIS_URL },
 });
 
-// Worker processes calls asynchronously
+const transcriptFetchQueue = new Queue("transcript-fetching", {
+  connection: { url: REDIS_URL },
+});
+
+// ─── Transcript Fetcher Service ─────────────────────────────────────────────
+
+const transcriptFetcher = new TranscriptFetcher({
+  prisma,
+  processingQueue,
+  mergeApiKey: process.env.MERGE_API_KEY ?? "",
+});
+
+// ─── Workers ────────────────────────────────────────────────────────────────
+
+// Worker: process calls (chunking → PII masking → tagging → embedding)
 const worker = new Worker<ProcessCallJob>(
   "call-processing",
   async (job) => {
@@ -83,6 +103,55 @@ worker.on("completed", (job) => {
 
 worker.on("failed", (job, err) => {
   console.error(`Job ${job?.id} failed:`, err.message);
+});
+
+// Worker: poll Merge.dev for transcripts not included in webhooks
+const transcriptFetchWorker = new Worker<TranscriptFetchJob>(
+  "transcript-fetching",
+  async (job) => {
+    try {
+      await transcriptFetcher.fetchTranscript(job.data);
+    } catch (err) {
+      if (err instanceof TranscriptFetchError && !err.retryable) {
+        // Non-retryable errors (e.g. 404) should not be retried
+        throw new UnrecoverableError(err.message);
+      }
+      throw err;
+    }
+  },
+  {
+    connection: { url: REDIS_URL },
+    concurrency: 2,
+    settings: {
+      backoffStrategy: transcriptFetchBackoffStrategy as (
+        attemptsMade: number,
+        type: string | undefined,
+        err: Error | undefined,
+        job: unknown
+      ) => number,
+    },
+  }
+);
+
+transcriptFetchWorker.on("completed", (job) => {
+  console.log(
+    `Transcript fetch completed for call ${job.data.callId} ` +
+      `(${job.data.provider})`
+  );
+});
+
+transcriptFetchWorker.on("failed", (job, err) => {
+  if (job && job.attemptsMade < (job.opts?.attempts ?? 0)) {
+    console.log(
+      `Transcript fetch attempt ${job.attemptsMade} failed for ` +
+        `call ${job.data.callId} (${job.data.provider}), will retry: ${err.message}`
+    );
+  } else {
+    console.error(
+      `Transcript fetch exhausted all retries for call ${job?.data.callId} ` +
+        `(${job?.data.provider}): ${err.message}`
+    );
+  }
 });
 
 // ─── Express App ─────────────────────────────────────────────────────────────
@@ -112,7 +181,7 @@ app.get("/api/health", (_req, res) => {
 // Merge.dev webhook (authenticated by signature, not user auth)
 app.post(
   "/api/webhooks/merge",
-  createMergeWebhookHandler({ prisma, processingQueue })
+  createMergeWebhookHandler({ prisma, processingQueue, transcriptFetchQueue })
 );
 
 // Public landing pages — no auth, served at /s/:slug
@@ -159,7 +228,9 @@ app.listen(PORT, () => {
 process.on("SIGTERM", async () => {
   console.log("SIGTERM received, shutting down...");
   await worker.close();
+  await transcriptFetchWorker.close();
   await processingQueue.close();
+  await transcriptFetchQueue.close();
   await prisma.$disconnect();
   process.exit(0);
 });

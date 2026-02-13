@@ -21,6 +21,10 @@ import {
   normalizeCompanyName,
   extractEmailDomain,
 } from "../services/entity-resolution.js";
+import {
+  type TranscriptFetchJob,
+  getProviderPollingConfig,
+} from "../services/transcript-fetcher.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -115,8 +119,9 @@ function mapIntegrationToProvider(integration: string): CallProvider {
 export function createMergeWebhookHandler(deps: {
   prisma: PrismaClient;
   processingQueue: Queue;
+  transcriptFetchQueue: Queue;
 }) {
-  const { prisma, processingQueue } = deps;
+  const { prisma, processingQueue, transcriptFetchQueue } = deps;
   const resolver = new EntityResolver(prisma);
 
   return async (req: Request, res: Response) => {
@@ -158,6 +163,7 @@ export function createMergeWebhookHandler(deps: {
             prisma,
             resolver,
             processingQueue,
+            transcriptFetchQueue,
             org.id,
             payload
           );
@@ -194,6 +200,7 @@ async function handleRecordingEvent(
   prisma: PrismaClient,
   resolver: EntityResolver,
   processingQueue: Queue,
+  transcriptFetchQueue: Queue,
   organizationId: string,
   payload: MergeWebhookPayload
 ): Promise<void> {
@@ -258,22 +265,47 @@ async function handleRecordingEvent(
         wordCount: recording.transcript.split(/\s+/).length,
       },
     });
-  }
 
-  // ── Queue async processing (chunking → tagging → embedding) ────────
-  await processingQueue.add(
-    "process-call",
-    {
+    // Transcript available inline — queue for immediate processing
+    await processingQueue.add(
+      "process-call",
+      {
+        callId: call.id,
+        organizationId,
+        accountId: resolution.accountId || null,
+        hasTranscript: true,
+      },
+      {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 5000 },
+      }
+    );
+  } else {
+    // No inline transcript — queue a fetch job to poll Merge.dev.
+    // Providers like Gong process recordings asynchronously and the
+    // transcript may not be ready for several minutes.
+    const pollingConfig = getProviderPollingConfig(provider);
+
+    const fetchJob: TranscriptFetchJob = {
       callId: call.id,
       organizationId,
       accountId: resolution.accountId || null,
-      hasTranscript: !!recording.transcript,
-    },
-    {
-      attempts: 3,
-      backoff: { type: "exponential", delay: 5000 },
-    }
-  );
+      mergeRecordingId: recording.id,
+      linkedAccountId: payload.linked_account.id,
+      provider,
+    };
+
+    await transcriptFetchQueue.add("fetch-transcript", fetchJob, {
+      delay: pollingConfig.initialDelayMs,
+      attempts: pollingConfig.maxAttempts,
+      backoff: { type: "custom" },
+    });
+
+    console.log(
+      `No inline transcript for call ${call.id} (${provider}), ` +
+        `queued fetch with ${pollingConfig.initialDelayMs}ms initial delay`
+    );
+  }
 }
 
 async function handleCRMContactEvent(
