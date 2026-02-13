@@ -18,6 +18,7 @@ import { createStoryRoutes } from "./api/story-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
+import { createSetupRoutes } from "./api/setup-routes.js";
 import {
   createTrialGate,
   createCheckoutHandler,
@@ -128,6 +129,9 @@ const trialGate = createTrialGate(prisma, stripe);
 // Billing
 app.post("/api/billing/checkout", createCheckoutHandler(prisma, stripe));
 
+// Connections Setup Wizard — first-run onboarding (no trial gate; org may be brand new)
+app.use("/api/setup", createSetupRoutes(prisma, stripe));
+
 // RAG Chatbot Connector (behind trial gate)
 app.use("/api/rag", trialGate, createRAGRoutes(ragEngine));
 
@@ -151,6 +155,7 @@ app.listen(PORT, () => {
   console.log(`  Stories:    http://localhost:${PORT}/api/stories/build`);
   console.log(`  Pages:      http://localhost:${PORT}/api/pages`);
   console.log(`  Dashboard:  http://localhost:${PORT}/api/dashboard`);
+  console.log(`  Setup:      http://localhost:${PORT}/api/setup/status`);
   console.log(`  Public:     http://localhost:${PORT}/s/:slug`);
   console.log(`  Webhook:    http://localhost:${PORT}/api/webhooks/merge`);
 });

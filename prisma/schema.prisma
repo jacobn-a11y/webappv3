@@ -25,6 +25,7 @@ model Organization {
   stories      Story[]
   landingPages LandingPage[]
   orgSettings  OrgSettings?
+  setupWizard  SetupWizard?
 
   @@map("organizations")
 }
@@ -484,4 +485,49 @@ enum AccountScopeType {
 enum CRMProvider {
   SALESFORCE
   HUBSPOT
+}
+
+// ─── Connections Setup Wizard ─────────────────────────────────────────────────
+// Tracks first-run onboarding progress for new organizations.
+
+model SetupWizard {
+  id                      String             @id @default(cuid())
+  organizationId          String             @unique
+  currentStep             SetupWizardStep    @default(RECORDING_PROVIDER)
+  completedAt             DateTime?
+
+  // Step 1: Recording Provider (Merge.dev Auth)
+  recordingProvider       CallProvider?
+  mergeLinkedAccountId    String?            // Merge.dev linked account for recordings
+
+  // Step 2: CRM Connection
+  crmProvider             CRMProvider?
+  crmMergeLinkedAccountId String?            // Merge.dev linked account for CRM
+
+  // Step 3: Account Sync Review
+  syncedAccountCount      Int                @default(0)
+  unresolvedCount         Int                @default(0)
+  syncReviewedAt          DateTime?
+
+  // Step 4: Plan Selection
+  selectedPlan            Plan?
+
+  // Step 5: Default Permissions
+  permissionsConfiguredAt DateTime?
+
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@map("setup_wizards")
+}
+
+enum SetupWizardStep {
+  RECORDING_PROVIDER   // Step 1
+  CRM                  // Step 2
+  ACCOUNT_SYNC         // Step 3
+  PLAN                 // Step 4
+  PERMISSIONS          // Step 5
+  COMPLETED
 }
