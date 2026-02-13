@@ -358,21 +358,31 @@ export class LandingPageEditor {
 
   /**
    * Dashboard: list all landing pages for an org.
+   * Supports filtering by status, visibility, creator, and title search.
+   * Supports sorting by any summary field.
    */
   async listForOrg(
     organizationId: string,
     filters?: {
       status?: PageStatus;
+      visibility?: PageVisibility;
       createdById?: string;
       search?: string;
+      sortBy?: string;
+      sortDir?: "asc" | "desc";
     }
   ): Promise<LandingPageSummary[]> {
     const where: Record<string, unknown> = { organizationId };
     if (filters?.status) where.status = filters.status;
+    if (filters?.visibility) where.visibility = filters.visibility;
     if (filters?.createdById) where.createdById = filters.createdById;
     if (filters?.search) {
       where.title = { contains: filters.search, mode: "insensitive" };
     }
+
+    const sortField = filters?.sortBy ?? "updatedAt";
+    const sortDir = filters?.sortDir ?? "desc";
+    const orderBy: Record<string, string> = { [sortField]: sortDir };
 
     const pages = await this.prisma.landingPage.findMany({
       where,
@@ -382,7 +392,7 @@ export class LandingPageEditor {
           include: { account: { select: { name: true } } },
         },
       },
-      orderBy: { updatedAt: "desc" },
+      orderBy,
     });
 
     return pages.map((p) => ({
@@ -400,6 +410,56 @@ export class LandingPageEditor {
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
     }));
+  }
+
+  /**
+   * Dashboard: aggregate stats scoped to a user (non-admin) or whole org (admin).
+   */
+  async getDashboardStatsForUser(
+    organizationId: string,
+    userId: string
+  ): Promise<{
+    totalPages: number;
+    publishedPages: number;
+    draftPages: number;
+    totalViews: number;
+  }> {
+    const scope = { organizationId, createdById: userId };
+    const [total, published, drafts, viewsAgg] = await Promise.all([
+      this.prisma.landingPage.count({ where: scope }),
+      this.prisma.landingPage.count({ where: { ...scope, status: "PUBLISHED" } }),
+      this.prisma.landingPage.count({ where: { ...scope, status: "DRAFT" } }),
+      this.prisma.landingPage.aggregate({ where: scope, _sum: { viewCount: true } }),
+    ]);
+
+    return {
+      totalPages: total,
+      publishedPages: published,
+      draftPages: drafts,
+      totalViews: viewsAgg._sum.viewCount ?? 0,
+    };
+  }
+
+  /**
+   * Returns the list of distinct creators for pages in an org.
+   */
+  async getCreatorsForOrg(
+    organizationId: string
+  ): Promise<Array<{ userId: string; name: string | null; email: string }>> {
+    const byUser = await this.prisma.landingPage.groupBy({
+      by: ["createdById"],
+      where: { organizationId },
+    });
+
+    const userIds = byUser.map((b) => b.createdById);
+    if (userIds.length === 0) return [];
+
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, name: true, email: true },
+    });
+
+    return users.map((u) => ({ userId: u.id, name: u.name, email: u.email }));
   }
 
   /**
