@@ -10,14 +10,17 @@ import cors from "cors";
 import helmet from "helmet";
 import { PrismaClient } from "@prisma/client";
 import Stripe from "stripe";
+import { WorkOS } from "@workos-inc/node";
 import { Queue, Worker } from "bullmq";
 
 import { createMergeWebhookHandler } from "./webhooks/merge-webhook.js";
+import { createAuthRoutes } from "./api/auth-routes.js";
 import { createRAGRoutes } from "./api/rag-routes.js";
 import { createStoryRoutes } from "./api/story-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
+import { createAuthMiddleware } from "./middleware/auth.js";
 import {
   createTrialGate,
   createCheckoutHandler,
@@ -38,6 +41,8 @@ const prisma = new PrismaClient();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "", {
   apiVersion: "2024-11-20.acacia",
 });
+
+const workos = new WorkOS(process.env.WORKOS_API_KEY ?? "");
 
 const openaiApiKey = process.env.OPENAI_API_KEY ?? "";
 const pineconeApiKey = process.env.PINECONE_API_KEY ?? "";
@@ -118,10 +123,14 @@ app.post(
 // Public landing pages — no auth, served at /s/:slug
 app.use("/s", createPublicPageRoutes(prisma));
 
+// ─── Auth Routes (public — no JWT required) ─────────────────────────────────
+
+app.use("/api/auth", createAuthRoutes(prisma, workos));
+
 // ─── Authenticated Routes ────────────────────────────────────────────────────
-// In production, WorkOS auth middleware would go here to set req.organizationId,
-// req.userId, and req.userRole.
-// Omitted for architectural clarity — see docs/ARCHITECTURE.md for flow.
+// WorkOS middleware verifies JWT and sets req.organizationId, req.userId, req.userRole.
+
+app.use(createAuthMiddleware(prisma, workos));
 
 const trialGate = createTrialGate(prisma, stripe);
 
@@ -151,6 +160,7 @@ app.listen(PORT, () => {
   console.log(`  Stories:    http://localhost:${PORT}/api/stories/build`);
   console.log(`  Pages:      http://localhost:${PORT}/api/pages`);
   console.log(`  Dashboard:  http://localhost:${PORT}/api/dashboard`);
+  console.log(`  Auth:       http://localhost:${PORT}/api/auth/login`);
   console.log(`  Public:     http://localhost:${PORT}/s/:slug`);
   console.log(`  Webhook:    http://localhost:${PORT}/api/webhooks/merge`);
 });
