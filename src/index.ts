@@ -17,6 +17,7 @@ import { createRAGRoutes } from "./api/rag-routes.js";
 import { createStoryRoutes } from "./api/story-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
+import { createEditorPageRoutes } from "./api/editor-page-renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
 import {
   createTrialGate,
@@ -137,6 +138,9 @@ app.use("/api/stories", trialGate, createStoryRoutes(storyBuilder, prisma));
 // Landing Pages — CRUD, edit, publish, share (behind trial gate)
 app.use("/api/pages", trialGate, createLandingPageRoutes(prisma));
 
+// Landing Page Editor — full-screen split-pane UI (behind trial gate)
+app.use("/editor", trialGate, createEditorPageRoutes(prisma));
+
 // Dashboard — stats, page list, admin settings, permissions, account access
 app.use("/api/dashboard", trialGate, createDashboardRoutes(prisma));
 
@@ -151,6 +155,7 @@ app.listen(PORT, () => {
   console.log(`  Stories:    http://localhost:${PORT}/api/stories/build`);
   console.log(`  Pages:      http://localhost:${PORT}/api/pages`);
   console.log(`  Dashboard:  http://localhost:${PORT}/api/dashboard`);
+  console.log(`  Editor:     http://localhost:${PORT}/editor/:pageId`);
   console.log(`  Public:     http://localhost:${PORT}/s/:slug`);
   console.log(`  Webhook:    http://localhost:${PORT}/api/webhooks/merge`);
 });

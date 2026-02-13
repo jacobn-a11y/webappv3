@@ -70,6 +70,9 @@ export function createStoryRoutes(
           metric_value: q.metricValue,
           call_id: q.callId,
         })),
+        _links: {
+          create_landing_page: `/editor/new?storyId=${result.id}&title=${encodeURIComponent(result.title)}`,
+        },
       });
     } catch (err) {
       console.error("Story build error:", err);
@@ -117,6 +120,9 @@ export function createStoryRoutes(
             metric_type: q.metricType,
             metric_value: q.metricValue,
           })),
+          _links: {
+            create_landing_page: `/editor/new?storyId=${s.id}&title=${encodeURIComponent(s.title)}`,
+          },
         })),
       });
     } catch (err) {
