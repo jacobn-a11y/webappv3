@@ -21,8 +21,10 @@ import { createDashboardRoutes } from "./api/dashboard-routes.js";
 import {
   createTrialGate,
   createCheckoutHandler,
+  createPortalHandler,
   createStripeWebhookHandler,
 } from "./middleware/billing.js";
+import { startUsageReportingCron } from "./services/usage-reporter.js";
 import { AITagger } from "./services/ai-tagger.js";
 import { RAGEngine } from "./services/rag-engine.js";
 import { StoryBuilder } from "./services/story-builder.js";
@@ -127,6 +129,7 @@ const trialGate = createTrialGate(prisma, stripe);
 
 // Billing
 app.post("/api/billing/checkout", createCheckoutHandler(prisma, stripe));
+app.post("/api/billing/portal", createPortalHandler(prisma, stripe));
 
 // RAG Chatbot Connector (behind trial gate)
 app.use("/api/rag", trialGate, createRAGRoutes(ragEngine));
@@ -140,7 +143,9 @@ app.use("/api/pages", trialGate, createLandingPageRoutes(prisma));
 // Dashboard — stats, page list, admin settings, permissions, account access
 app.use("/api/dashboard", trialGate, createDashboardRoutes(prisma));
 
-// ─── Start ───────────────────────────────────────────────────────────────────
+// ─── Usage Reporting Cron ────────────────────────────────────────────────────
+
+const usageCron = startUsageReportingCron(prisma, stripe);
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 
@@ -151,6 +156,7 @@ app.listen(PORT, () => {
   console.log(`  Stories:    http://localhost:${PORT}/api/stories/build`);
   console.log(`  Pages:      http://localhost:${PORT}/api/pages`);
   console.log(`  Dashboard:  http://localhost:${PORT}/api/dashboard`);
+  console.log(`  Billing:    http://localhost:${PORT}/api/billing`);
   console.log(`  Public:     http://localhost:${PORT}/s/:slug`);
   console.log(`  Webhook:    http://localhost:${PORT}/api/webhooks/merge`);
 });
@@ -158,6 +164,7 @@ app.listen(PORT, () => {
 // Graceful shutdown
 process.on("SIGTERM", async () => {
   console.log("SIGTERM received, shutting down...");
+  usageCron.stop();
   await worker.close();
   await processingQueue.close();
   await prisma.$disconnect();
