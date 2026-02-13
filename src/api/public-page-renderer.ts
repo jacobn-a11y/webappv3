@@ -91,7 +91,7 @@ const CALLOUT_ICONS: Record<string, string> = {
 
 // ─── HTML Template ───────────────────────────────────────────────────────────
 
-function renderLandingPageHtml(page: {
+export function renderLandingPageHtml(page: {
   title: string;
   subtitle: string | null;
   body: string;

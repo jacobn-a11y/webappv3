@@ -9,6 +9,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
 import { LandingPageEditor } from "../services/landing-page-editor.js";
+import { renderLandingPageHtml } from "./public-page-renderer.js";
 import {
   requireLandingPagesEnabled,
   requirePermission,
@@ -184,6 +185,26 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
         });
       } catch (err) {
         console.error("Get landing page error:", err);
+        res.status(404).json({ error: "Landing page not found" });
+      }
+    }
+  );
+
+  // ── PREVIEW (render public page from current draft) ─────────────────
+
+  router.get(
+    "/:pageId/preview",
+    requirePageOwnerOrPermission(prisma),
+    async (req: AuthReq, res: Response) => {
+      try {
+        const preview = await editor.getPreview(req.params.pageId);
+
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("X-Robots-Tag", "noindex, nofollow");
+        res.setHeader("Cache-Control", "private, no-store");
+        res.send(renderLandingPageHtml(preview));
+      } catch (err) {
+        console.error("Preview landing page error:", err);
         res.status(404).json({ error: "Landing page not found" });
       }
     }
