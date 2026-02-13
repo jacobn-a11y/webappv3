@@ -16,6 +16,7 @@ const BuildStorySchema = z.object({
   funnel_stages: z.array(z.string()).optional(),
   filter_topics: z.array(z.string()).optional(),
   title: z.string().optional(),
+  format: z.string().optional(),
 });
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
