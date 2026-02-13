@@ -18,6 +18,7 @@ import { createStoryRoutes } from "./api/story-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
+import { createTranscriptViewerRoutes } from "./api/transcript-viewer-routes.js";
 import {
   createTrialGate,
   createCheckoutHandler,
@@ -139,6 +140,9 @@ app.use("/api/pages", trialGate, createLandingPageRoutes(prisma));
 
 // Dashboard — stats, page list, admin settings, permissions, account access
 app.use("/api/dashboard", trialGate, createDashboardRoutes(prisma));
+
+// Transcript Viewer — server-rendered transcript page per call
+app.use("/api/calls", trialGate, createTranscriptViewerRoutes(prisma));
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 
