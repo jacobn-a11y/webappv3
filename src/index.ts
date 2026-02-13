@@ -18,6 +18,7 @@ import { createStoryRoutes } from "./api/story-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
+import { createChatbotConnectorRoutes } from "./api/chatbot-connector.js";
 import {
   createTrialGate,
   createCheckoutHandler,
@@ -129,7 +130,10 @@ const trialGate = createTrialGate(prisma, stripe);
 app.post("/api/billing/checkout", createCheckoutHandler(prisma, stripe));
 
 // RAG Chatbot Connector (behind trial gate)
-app.use("/api/rag", trialGate, createRAGRoutes(ragEngine));
+app.use("/api/rag", trialGate, createRAGRoutes(ragEngine, prisma));
+
+// Chatbot Connector embedded chat page (behind trial gate)
+app.use("/chat", trialGate, createChatbotConnectorRoutes());
 
 // Story Builder (behind trial gate)
 app.use("/api/stories", trialGate, createStoryRoutes(storyBuilder, prisma));
@@ -148,6 +152,7 @@ app.listen(PORT, () => {
   console.log(`StoryEngine listening on port ${PORT}`);
   console.log(`  Health:     http://localhost:${PORT}/api/health`);
   console.log(`  RAG API:    http://localhost:${PORT}/api/rag/query`);
+  console.log(`  Chat:       http://localhost:${PORT}/chat`);
   console.log(`  Stories:    http://localhost:${PORT}/api/stories/build`);
   console.log(`  Pages:      http://localhost:${PORT}/api/pages`);
   console.log(`  Dashboard:  http://localhost:${PORT}/api/dashboard`);
