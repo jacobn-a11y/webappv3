@@ -9,15 +9,15 @@
  *   2. Load all Contacts with titles (pulled from Salesforce/HubSpot via Merge.dev)
  *   3. Replace "Name, Title" patterns (e.g., "Jeff Bezos, CEO") with anonymized versions
  *   4. Build a replacement map from org-level custom mappings + auto-generated variations
- *   5. Apply case-insensitive replacement across the entire body
+ *   5. Apply case-insensitive replacement with word boundaries across the entire body
  *   6. Scrub email domains
  *
- * Quote Attribution Format:
- *   Original:  "We saved 40%" — Jeff Bezos, CEO
- *   Scrubbed:  "We saved 40%" — a senior executive at the client
- *
- *   Original:  Jeff Bezos, CEO of Acme Corp said...
- *   Scrubbed:  A senior executive at the client said...
+ * Safety mechanisms:
+ *   - Word boundary enforcement (\b) on all replacements to avoid substring matches
+ *   - Minimum length thresholds: 4 chars for auto-generated terms, 2 for custom mappings
+ *   - Short acronyms (<=4 chars) only match when ALL-CAPS in source text
+ *   - Possessives/compounds handled: "Acme's platform", "Acme-powered"
+ *   - Longest-first ordering prevents partial match clobbering
  */
 
 import type { PrismaClient } from "@prisma/client";
@@ -47,10 +47,22 @@ interface ContactInfo {
   emailDomain: string;
 }
 
+interface ReplacementTerm {
+  regex: RegExp;
+  replacement: string;
+  label: string; // human-readable for the report
+}
+
 // ─── Default Placeholders ────────────────────────────────────────────────────
 
 const DEFAULT_PLACEHOLDER = "the client";
 const DOMAIN_PLACEHOLDER = "[client-domain]";
+
+/** Minimum character length for auto-generated scrub terms. */
+const MIN_AUTO_TERM_LENGTH = 4;
+
+/** Acronyms this short or shorter only match ALL-CAPS (case-sensitive). */
+const ACRONYM_CASE_SENSITIVE_THRESHOLD = 4;
 
 /**
  * Maps CRM titles to anonymized descriptors.
@@ -140,24 +152,22 @@ export class CompanyScrubber {
     replaced.push(...contactScrubResult.termsReplaced);
 
     // ── Step 2: Scrub company name and variations ────────────────────
-    const terms = this.buildReplacementTerms(account, customMappings);
+    const terms = this.buildReplacementTerms(account, customMappings, placeholder);
 
-    for (const { pattern, replacement } of terms) {
-      const regex = new RegExp(escapeRegex(pattern), "gi");
-      const matches = scrubbed.match(regex);
+    for (const term of terms) {
+      term.regex.lastIndex = 0;
+      const matches = scrubbed.match(term.regex);
       if (matches) {
         count += matches.length;
-        replaced.push(pattern);
-        scrubbed = scrubbed.replace(
-          regex,
-          replacement === "__DEFAULT__" ? placeholder : replacement
-        );
+        replaced.push(term.label);
+        scrubbed = scrubbed.replace(term.regex, term.replacement);
       }
     }
 
     // ── Step 3: Scrub email domains ─────────────────────────────────
     const domains = this.collectDomains(account);
     for (const domain of domains) {
+      // Domains are always case-insensitive, bounded by non-word chars naturally
       const domainRegex = new RegExp(escapeRegex(domain), "gi");
       const domainMatches = scrubbed.match(domainRegex);
       if (domainMatches) {
@@ -170,7 +180,7 @@ export class CompanyScrubber {
     // ── Step 4: Scrub remaining bare contact names ──────────────────
     // (in case a name appears without its title)
     for (const contact of account.contacts) {
-      if (!contact.name || contact.name.length < 3) continue;
+      if (!contact.name || contact.name.length < 4) continue;
       const nameRegex = new RegExp(
         `\\b${escapeRegex(contact.name)}\\b`,
         "gi"
@@ -254,7 +264,7 @@ export class CompanyScrubber {
 
     for (const name of sorted) {
       if (name.length < 2) continue;
-      const regex = new RegExp(escapeRegex(name), "gi");
+      const regex = buildWordBoundaryRegex(name);
       const matches = scrubbed.match(regex);
       if (matches) {
         count += matches.length;
@@ -275,10 +285,10 @@ export class CompanyScrubber {
   /**
    * Scrubs "Name, Title" attribution patterns from text.
    * Handles formats like:
-   *   - "Jeff Bezos, CEO"          → "a senior executive at the client"
-   *   - "— Jeff Bezos, CEO"        → "— a senior executive at the client"
-   *   - "Jeff Bezos, CEO of Acme"  → "a senior executive at the client"
-   *   - "said Jeff Bezos (CEO)"    → "said a senior executive at the client"
+   *   - "Jeff Bezos, CEO"          -> "a senior executive at the client"
+   *   - "-- Jeff Bezos, CEO"       -> "-- a senior executive at the client"
+   *   - "Jeff Bezos, CEO of Acme"  -> "a senior executive at the client"
+   *   - "said Jeff Bezos (CEO)"    -> "said a senior executive at the client"
    */
   private scrubContactIdentities(
     text: string,
@@ -299,7 +309,7 @@ export class CompanyScrubber {
 
         // Pattern: "Name, Title" or "Name, Title of Company"
         const commaPattern = new RegExp(
-          `${name},?\\s+${title}(?:\\s+(?:of|at)\\s+\\S+)?`,
+          `\\b${name},?\\s+${title}(?:\\s+(?:of|at)\\s+\\S+)?\\b`,
           "gi"
         );
         const commaMatches = scrubbed.match(commaPattern);
@@ -311,7 +321,7 @@ export class CompanyScrubber {
 
         // Pattern: "Name (Title)"
         const parenPattern = new RegExp(
-          `${name}\\s*\\(${title}\\)`,
+          `\\b${name}\\s*\\(${title}\\)`,
           "gi"
         );
         const parenMatches = scrubbed.match(parenPattern);
@@ -333,28 +343,45 @@ export class CompanyScrubber {
       domain: string | null;
       domainAliases: Array<{ domain: string }>;
     },
-    customMappings: Record<string, string>
-  ): Array<{ pattern: string; replacement: string }> {
-    const terms: Array<{ pattern: string; replacement: string }> = [];
+    customMappings: Record<string, string>,
+    placeholder: string
+  ): ReplacementTerm[] {
+    const terms: ReplacementTerm[] = [];
 
-    // Custom mappings first (highest priority)
+    // Custom mappings first (highest priority) — no minimum length, user knows best
     for (const [pattern, replacement] of Object.entries(customMappings)) {
-      terms.push({ pattern, replacement });
+      if (pattern.length < 2) continue;
+      terms.push({
+        regex: buildWordBoundaryRegex(pattern),
+        replacement,
+        label: pattern,
+      });
     }
 
     // Full company name and variations
     const nameVariations = this.generateNameVariations(account.name);
     for (const variation of nameVariations) {
-      terms.push({ pattern: variation, replacement: "__DEFAULT__" });
+      terms.push({
+        regex: buildWordBoundaryRegex(variation),
+        replacement: placeholder,
+        label: variation,
+      });
     }
 
     // Normalized name if different
-    if (account.normalizedName !== account.name.toLowerCase()) {
-      terms.push({ pattern: account.normalizedName, replacement: "__DEFAULT__" });
+    if (
+      account.normalizedName !== account.name.toLowerCase() &&
+      account.normalizedName.length >= MIN_AUTO_TERM_LENGTH
+    ) {
+      terms.push({
+        regex: buildWordBoundaryRegex(account.normalizedName),
+        replacement: placeholder,
+        label: account.normalizedName,
+      });
     }
 
-    // Sort longest-first to avoid partial-match issues
-    terms.sort((a, b) => b.pattern.length - a.pattern.length);
+    // Sort longest-first to avoid partial-match clobbering
+    terms.sort((a, b) => b.label.length - a.label.length);
 
     return terms;
   }
@@ -362,27 +389,43 @@ export class CompanyScrubber {
   private generateNameVariations(name: string): string[] {
     const variations = new Set<string>();
 
+    // Original full name — always safe to scrub
     variations.add(name);
 
+    // Without common suffixes (e.g., "Amazon Web Services" -> "amazon web services")
     const normalized = normalizeCompanyName(name);
-    if (normalized.length > 1) variations.add(normalized);
+    if (normalized.length >= MIN_AUTO_TERM_LENGTH) {
+      variations.add(normalized);
+    }
 
+    // Title case variation
     const titleCase = normalized
       .split(" ")
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
       .join(" ");
-    if (titleCase.length > 1) variations.add(titleCase);
+    if (titleCase.length >= MIN_AUTO_TERM_LENGTH) {
+      variations.add(titleCase);
+    }
 
     const words = name.split(/\s+/);
     if (words.length >= 2) {
+      // First two words (without suffix) — only if long enough
       const shortName = words.slice(0, 2).join(" ");
-      variations.add(shortName);
+      if (shortName.length >= MIN_AUTO_TERM_LENGTH) {
+        variations.add(shortName);
+      }
+    }
 
+    // Acronyms handled separately via buildWordBoundaryRegex (case-sensitive)
+    // Only generate if 3+ chars to avoid "AB" matching everywhere
+    if (words.length >= 3) {
       const acronym = words
         .map((w) => w.charAt(0))
         .join("")
         .toUpperCase();
-      if (acronym.length >= 3) variations.add(acronym);
+      if (acronym.length >= 3) {
+        variations.add(acronym);
+      }
     }
 
     return Array.from(variations).filter((v) => v.length >= 2);
@@ -405,4 +448,26 @@ export class CompanyScrubber {
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Builds a word-boundary-aware regex for a scrub term.
+ *
+ * Key safety behaviors:
+ *  - Short ALL-CAPS terms (<=4 chars, e.g., "AWS", "SAP", "BOX") are matched
+ *    case-sensitively to avoid scrubbing common words.
+ *  - Longer terms are matched case-insensitively.
+ *  - All terms use \b word boundaries to avoid substring matches.
+ *  - Also matches possessive forms ("Acme's") and hyphenated compounds ("Acme-powered").
+ *    The trailing 's or -word is consumed so the output reads naturally.
+ */
+function buildWordBoundaryRegex(term: string): RegExp {
+  const escaped = escapeRegex(term);
+  const isShortAcronym =
+    term.length <= ACRONYM_CASE_SENSITIVE_THRESHOLD && term === term.toUpperCase();
+
+  // Match the term + optional possessive ('s) or hyphenated suffix (-word)
+  const pattern = `\\b${escaped}(?:'s|\\-\\w+)?\\b`;
+
+  return new RegExp(pattern, isShortAcronym ? "g" : "gi");
 }
