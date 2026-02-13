@@ -18,6 +18,10 @@ import { createStoryRoutes } from "./api/story-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
+import { createOrgSettingsRoutes } from "./api/org-settings-routes.js";
+import { createIntegrationsRoutes } from "./api/integrations-routes.js";
+import { createBillingRoutes } from "./api/billing-routes.js";
+import { createApiKeysRoutes } from "./api/api-keys-routes.js";
 import {
   createTrialGate,
   createCheckoutHandler,
@@ -140,6 +144,12 @@ app.use("/api/pages", trialGate, createLandingPageRoutes(prisma));
 // Dashboard — stats, page list, admin settings, permissions, account access
 app.use("/api/dashboard", trialGate, createDashboardRoutes(prisma));
 
+// Admin Settings — organization, integrations, billing, API keys
+app.use("/api/settings/org", trialGate, createOrgSettingsRoutes(prisma));
+app.use("/api/settings/integrations", trialGate, createIntegrationsRoutes(prisma));
+app.use("/api/settings/billing", trialGate, createBillingRoutes(prisma, stripe));
+app.use("/api/settings/api-keys", trialGate, createApiKeysRoutes(prisma));
+
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
@@ -152,6 +162,7 @@ app.listen(PORT, () => {
   console.log(`  Pages:      http://localhost:${PORT}/api/pages`);
   console.log(`  Dashboard:  http://localhost:${PORT}/api/dashboard`);
   console.log(`  Public:     http://localhost:${PORT}/s/:slug`);
+  console.log(`  Settings:   http://localhost:${PORT}/api/settings/org`);
   console.log(`  Webhook:    http://localhost:${PORT}/api/webhooks/merge`);
 });
 

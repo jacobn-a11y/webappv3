@@ -19,12 +19,15 @@ model Organization {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  users        User[]
-  accounts     Account[]
-  calls        Call[]
-  stories      Story[]
-  landingPages LandingPage[]
-  orgSettings  OrgSettings?
+  users              User[]
+  accounts           Account[]
+  calls              Call[]
+  stories            Story[]
+  landingPages       LandingPage[]
+  orgSettings        OrgSettings?
+  invites            OrgInvite[]
+  mergeLinkedAccounts MergeLinkedAccount[]
+  apiKeys            ApiKey[]
 
   @@map("organizations")
 }
@@ -484,4 +487,71 @@ enum AccountScopeType {
 enum CRMProvider {
   SALESFORCE
   HUBSPOT
+}
+
+// ─── Organization Invites ─────────────────────────────────────────────────────
+
+model OrgInvite {
+  id             String    @id @default(cuid())
+  organizationId String
+  email          String
+  role           UserRole  @default(MEMBER)
+  invitedById    String
+  token          String    @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, email])
+  @@map("org_invites")
+}
+
+// ─── Merge.dev Linked Accounts ──────────────────────────────────────────────
+
+model MergeLinkedAccount {
+  id                  String             @id @default(cuid())
+  organizationId      String
+  mergeAccountId      String             @unique
+  integrationSlug     String             // e.g., "gong", "salesforce", "hubspot"
+  category            String             // "crm", "ticketing", "ats", etc.
+  status              MergeAccountStatus @default(CONNECTED)
+  lastSyncStartedAt   DateTime?
+  lastSyncCompletedAt DateTime?
+  lastSyncError       String?
+  crmPollingEnabled   Boolean            @default(true)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@map("merge_linked_accounts")
+}
+
+enum MergeAccountStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+  SYNCING
+}
+
+// ─── API Keys (RAG Chatbot Connector) ────────────────────────────────────────
+
+model ApiKey {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  keyHash        String    @unique
+  keyPrefix      String    // first 8 chars for display: "se_live_..."
+  lastUsedAt     DateTime?
+  createdById    String
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@map("api_keys")
 }
