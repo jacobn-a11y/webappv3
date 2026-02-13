@@ -1,0 +1,331 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth & Tenancy ──────────────────────────────────────────────────────────
+
+model Organization {
+  id               String    @id @default(cuid())
+  name             String
+  workosOrgId      String?   @unique
+  stripeCustomerId String?   @unique
+  plan             Plan      @default(FREE_TRIAL)
+  trialEndsAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  users    User[]
+  accounts Account[]
+  calls    Call[]
+  stories  Story[]
+
+  @@map("organizations")
+}
+
+enum Plan {
+  FREE_TRIAL
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  name           String?
+  workosUserId   String?  @unique
+  organizationId String
+  role           UserRole @default(MEMBER)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+// ─── CRM Entities ────────────────────────────────────────────────────────────
+
+model Account {
+  id              String   @id @default(cuid())
+  organizationId  String
+  name            String
+  normalizedName  String   // lowercase, stripped of Inc/Corp/LLC suffixes
+  domain          String?  // primary email domain (e.g., "bigtech.com")
+  salesforceId    String?
+  hubspotId       String?
+  mergeAccountId  String?
+  industry        String?
+  employeeCount   Int?
+  annualRevenue   Float?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id])
+  contacts        Contact[]
+  calls           Call[]
+  salesforceEvents SalesforceEvent[]
+  stories         Story[]
+  domainAliases   AccountDomain[]
+
+  @@unique([organizationId, domain])
+  @@unique([organizationId, salesforceId])
+  @@index([organizationId, normalizedName])
+  @@map("accounts")
+}
+
+model AccountDomain {
+  id        String @id @default(cuid())
+  accountId String
+  domain    String // additional email domains for the same account
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, domain])
+  @@index([domain])
+  @@map("account_domains")
+}
+
+model Contact {
+  id             String   @id @default(cuid())
+  accountId      String
+  email          String
+  emailDomain    String   // extracted domain portion
+  name           String?
+  title          String?
+  phone          String?
+  salesforceId   String?
+  hubspotId      String?
+  mergeContactId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  account        Account           @relation(fields: [accountId], references: [id])
+  callParticipants CallParticipant[]
+
+  @@unique([accountId, email])
+  @@index([emailDomain])
+  @@map("contacts")
+}
+
+// ─── Calls & Transcripts ─────────────────────────────────────────────────────
+
+model Call {
+  id               String       @id @default(cuid())
+  organizationId   String
+  accountId        String?      // resolved via Entity Resolution; null until matched
+  title            String?
+  provider         CallProvider
+  mergeRecordingId String?      @unique
+  externalId       String?      // provider-native ID
+  recordingUrl     String?
+  duration         Int?         // seconds
+  occurredAt       DateTime
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  account      Account?          @relation(fields: [accountId], references: [id])
+  transcript   Transcript?
+  participants CallParticipant[]
+  tags         CallTag[]
+
+  @@index([organizationId, accountId])
+  @@index([organizationId, occurredAt])
+  @@map("calls")
+}
+
+enum CallProvider {
+  GONG
+  CHORUS
+  ZOOM
+  GOOGLE_MEET
+  TEAMS
+  FIREFLIES
+  DIALPAD
+  AIRCALL
+  RINGCENTRAL
+  SALESLOFT
+  OUTREACH
+  OTHER
+}
+
+model CallParticipant {
+  id        String  @id @default(cuid())
+  callId    String
+  contactId String?
+  email     String?
+  name      String?
+  isHost    Boolean @default(false)
+
+  call    Call     @relation(fields: [callId], references: [id], onDelete: Cascade)
+  contact Contact? @relation(fields: [contactId], references: [id])
+
+  @@index([callId])
+  @@index([email])
+  @@map("call_participants")
+}
+
+model Transcript {
+  id         String   @id @default(cuid())
+  callId     String   @unique
+  fullText   String   // complete transcript text
+  language   String   @default("en")
+  wordCount  Int
+  createdAt  DateTime @default(now())
+
+  call   Call              @relation(fields: [callId], references: [id], onDelete: Cascade)
+  chunks TranscriptChunk[]
+
+  @@map("transcripts")
+}
+
+model TranscriptChunk {
+  id           String   @id @default(cuid())
+  transcriptId String
+  chunkIndex   Int
+  text         String
+  speaker      String?
+  startMs      Int?     // timestamp offset in milliseconds
+  endMs        Int?
+  embeddingId  String?  // Pinecone vector ID
+  createdAt    DateTime @default(now())
+
+  transcript Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+  tags       ChunkTag[]
+
+  @@unique([transcriptId, chunkIndex])
+  @@map("transcript_chunks")
+}
+
+// ─── Taxonomy Tags ───────────────────────────────────────────────────────────
+
+model CallTag {
+  id         String        @id @default(cuid())
+  callId     String
+  funnelStage FunnelStage
+  topic      String        // specific topic from taxonomy
+  confidence Float         // LLM confidence 0.0-1.0
+  createdAt  DateTime      @default(now())
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@unique([callId, funnelStage, topic])
+  @@index([funnelStage])
+  @@map("call_tags")
+}
+
+model ChunkTag {
+  id         String      @id @default(cuid())
+  chunkId    String
+  funnelStage FunnelStage
+  topic      String
+  confidence Float
+  createdAt  DateTime    @default(now())
+
+  chunk TranscriptChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  @@unique([chunkId, funnelStage, topic])
+  @@map("chunk_tags")
+}
+
+enum FunnelStage {
+  TOFU       // Top of Funnel
+  MOFU       // Mid-Funnel
+  BOFU       // Bottom of Funnel
+  POST_SALE
+  INTERNAL
+  VERTICAL   // Vertical/Segment cuts
+}
+
+// ─── CRM Events ──────────────────────────────────────────────────────────────
+
+model SalesforceEvent {
+  id            String          @id @default(cuid())
+  accountId     String
+  eventType     SalesforceEventType
+  stageName     String?         // e.g., "Closed Won", "Closed Lost"
+  opportunityId String?
+  amount        Float?
+  closeDate     DateTime?
+  description   String?
+  rawPayload    Json?
+  createdAt     DateTime        @default(now())
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, eventType])
+  @@map("salesforce_events")
+}
+
+enum SalesforceEventType {
+  OPPORTUNITY_CREATED
+  OPPORTUNITY_STAGE_CHANGE
+  CLOSED_WON
+  CLOSED_LOST
+  CONTACT_CREATED
+  LEAD_CONVERTED
+  TASK_COMPLETED
+  NOTE_ADDED
+}
+
+// ─── Generated Stories ───────────────────────────────────────────────────────
+
+model Story {
+  id             String      @id @default(cuid())
+  organizationId String
+  accountId      String
+  title          String
+  markdownBody   String      // the generated Markdown story
+  storyType      StoryType
+  funnelStages   FunnelStage[] // which stages this story covers
+  filterTags     String[]    // which taxonomy topics were used to filter
+  generatedAt    DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  account      Account      @relation(fields: [accountId], references: [id])
+  quotes       HighValueQuote[]
+
+  @@index([organizationId, accountId])
+  @@map("stories")
+}
+
+enum StoryType {
+  FULL_JOURNEY
+  ONBOARDING
+  ROI_ANALYSIS
+  COMPETITIVE_WIN
+  EXPANSION
+  CUSTOM
+}
+
+model HighValueQuote {
+  id          String   @id @default(cuid())
+  storyId     String
+  speaker     String?
+  quoteText   String
+  context     String?  // surrounding context
+  metricType  String?  // e.g., "cost_savings", "time_saved", "revenue"
+  metricValue String?  // e.g., "40%", "$2M", "3x"
+  callId      String?  // source call
+  createdAt   DateTime @default(now())
+
+  story Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  @@index([storyId])
+  @@map("high_value_quotes")
+}
