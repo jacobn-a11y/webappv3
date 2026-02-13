@@ -18,6 +18,7 @@ import { createStoryRoutes } from "./api/story-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
+import { createAdminAccountAccessPage } from "./api/admin-account-access-page.js";
 import {
   createTrialGate,
   createCheckoutHandler,
@@ -139,6 +140,9 @@ app.use("/api/pages", trialGate, createLandingPageRoutes(prisma));
 
 // Dashboard — stats, page list, admin settings, permissions, account access
 app.use("/api/dashboard", trialGate, createDashboardRoutes(prisma));
+
+// Admin Account Access Page — server-rendered HTML
+app.use("/admin/account-access", trialGate, createAdminAccountAccessPage(prisma));
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 

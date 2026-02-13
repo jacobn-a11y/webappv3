@@ -232,6 +232,152 @@ export class AccountAccessService {
     }
   }
 
+  /**
+   * Lists all users in an organization with their account access grants.
+   * Returns each user with role info and their resolved access grants.
+   */
+  async listAllUserAccess(organizationId: string) {
+    const users = await this.prisma.user.findMany({
+      where: { organizationId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        accountAccess: {
+          include: {
+            account: { select: { id: true, name: true, domain: true } },
+          },
+          orderBy: { createdAt: "desc" },
+        },
+      },
+      orderBy: [{ role: "asc" }, { email: "asc" }],
+    });
+
+    return users;
+  }
+
+  /**
+   * Searches accounts by name or domain for the account picker.
+   */
+  async searchAccounts(
+    organizationId: string,
+    query: string,
+    limit = 20
+  ) {
+    return this.prisma.account.findMany({
+      where: {
+        organizationId,
+        OR: [
+          { name: { contains: query, mode: "insensitive" } },
+          { domain: { contains: query, mode: "insensitive" } },
+        ],
+      },
+      select: { id: true, name: true, domain: true },
+      take: limit,
+      orderBy: { name: "asc" },
+    });
+  }
+
+  /**
+   * Fetches available CRM reports/lists from Salesforce or HubSpot
+   * via Merge.dev passthrough API.
+   *
+   * Returns a list of { id, name } objects representing reports or lists.
+   */
+  async fetchAvailableCrmReports(
+    organizationId: string,
+    provider: CRMProvider
+  ): Promise<Array<{ id: string; name: string }>> {
+    // In production this calls Merge.dev passthrough API:
+    //
+    // Salesforce:
+    //   POST /api/v1/passthrough
+    //   { method: "GET", path: "/analytics/reports" }
+    //   Returns list of Salesforce reports
+    //
+    // HubSpot:
+    //   POST /api/v1/passthrough
+    //   { method: "GET", path: "/contacts/v1/lists" }
+    //   Returns list of HubSpot static/dynamic lists
+    //
+    // For now, fetch from the Merge.dev linked account for this org.
+
+    const mergeApiKey = process.env.MERGE_API_KEY ?? "";
+    const mergeAccountToken = await this.getMergeAccountToken(organizationId);
+
+    if (!mergeApiKey || !mergeAccountToken) {
+      return [];
+    }
+
+    try {
+      if (provider === "SALESFORCE") {
+        const response = await fetch("https://api.merge.dev/api/crm/v1/passthrough", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${mergeApiKey}`,
+            "X-Account-Token": mergeAccountToken,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            method: "GET",
+            path: "/services/data/v59.0/analytics/reports",
+          }),
+        });
+
+        if (!response.ok) return [];
+
+        const data = await response.json() as Array<{ id: string; name: string }>;
+        return (data ?? []).map((r: { id: string; name: string }) => ({
+          id: r.id,
+          name: r.name,
+        }));
+      }
+
+      if (provider === "HUBSPOT") {
+        const response = await fetch("https://api.merge.dev/api/crm/v1/passthrough", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${mergeApiKey}`,
+            "X-Account-Token": mergeAccountToken,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            method: "GET",
+            path: "/contacts/v1/lists",
+          }),
+        });
+
+        if (!response.ok) return [];
+
+        const data = await response.json() as { lists?: Array<{ listId: number; name: string }> };
+        return (data.lists ?? []).map((l: { listId: number; name: string }) => ({
+          id: String(l.listId),
+          name: l.name,
+        }));
+      }
+
+      return [];
+    } catch (err) {
+      console.error(`Failed to fetch CRM reports for ${provider}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Retrieves the Merge.dev account token for an organization.
+   */
+  private async getMergeAccountToken(
+    organizationId: string
+  ): Promise<string | null> {
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { mergeAccountToken: true },
+    });
+
+    return (org as { mergeAccountToken?: string | null })?.mergeAccountToken ?? null;
+  }
+
   // ─── Private: CRM Integration ──────────────────────────────────────
 
   /**
@@ -288,6 +434,6 @@ export class AccountAccessService {
       select: { id: true },
     });
 
-    return accounts.map((a) => a.id);
+    return accounts.map((a: { id: string }) => a.id);
   }
 }

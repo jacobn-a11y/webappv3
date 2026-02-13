@@ -271,6 +271,48 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
   const accessService = new AccountAccessService(prisma);
 
   /**
+   * GET /api/dashboard/access
+   *
+   * Returns all users in the org with their account access grants.
+   * Used by the Admin Account Access page.
+   */
+  router.get(
+    "/access",
+    requirePermission(prisma, "manage_permissions"),
+    async (req: AuthReq, res: Response) => {
+      try {
+        const users = await accessService.listAllUserAccess(req.organizationId!);
+
+        const result = users.map((u: typeof users[number]) => ({
+          user_id: u.id,
+          user_name: u.name,
+          user_email: u.email,
+          role: u.role,
+          grants: u.accountAccess.map((g: typeof u.accountAccess[number]) => ({
+            id: g.id,
+            scope_type: g.scopeType,
+            account: g.account
+              ? { id: g.account.id, name: g.account.name, domain: g.account.domain }
+              : null,
+            cached_account_ids: g.cachedAccountIds,
+            cached_account_count: g.cachedAccountIds.length,
+            crm_report_id: g.crmReportId,
+            crm_provider: g.crmProvider,
+            crm_report_name: g.crmReportName,
+            last_synced_at: g.lastSyncedAt,
+            created_at: g.createdAt,
+          })),
+        }));
+
+        res.json({ users: result });
+      } catch (err) {
+        console.error("Get all access error:", err);
+        res.status(500).json({ error: "Failed to load account access overview" });
+      }
+    }
+  );
+
+  /**
    * GET /api/dashboard/access/:userId
    *
    * Lists all account access grants for a specific user.
@@ -285,7 +327,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           req.organizationId!
         );
         res.json({
-          grants: grants.map((g) => ({
+          grants: grants.map((g: typeof grants[number]) => ({
             id: g.id,
             scope_type: g.scopeType,
             account: g.account
@@ -391,6 +433,64 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
       } catch (err) {
         console.error("Sync CRM report error:", err);
         res.status(500).json({ error: "Failed to sync CRM report" });
+      }
+    }
+  );
+
+  // ── Admin: Account Search & CRM Reports ────────────────────────────
+
+  /**
+   * GET /api/dashboard/accounts/search?q=term
+   *
+   * Searches accounts by name or domain for the account picker.
+   */
+  router.get(
+    "/accounts/search",
+    requirePermission(prisma, "manage_permissions"),
+    async (req: AuthReq, res: Response) => {
+      const query = (req.query.q as string) ?? "";
+      if (query.length < 1) {
+        res.json({ accounts: [] });
+        return;
+      }
+
+      try {
+        const accounts = await accessService.searchAccounts(
+          req.organizationId!,
+          query
+        );
+        res.json({ accounts });
+      } catch (err) {
+        console.error("Account search error:", err);
+        res.status(500).json({ error: "Failed to search accounts" });
+      }
+    }
+  );
+
+  /**
+   * GET /api/dashboard/crm-reports?provider=SALESFORCE
+   *
+   * Fetches available Salesforce reports or HubSpot lists via Merge.dev passthrough.
+   */
+  router.get(
+    "/crm-reports",
+    requirePermission(prisma, "manage_permissions"),
+    async (req: AuthReq, res: Response) => {
+      const provider = req.query.provider as string;
+      if (provider !== "SALESFORCE" && provider !== "HUBSPOT") {
+        res.status(400).json({ error: "provider must be SALESFORCE or HUBSPOT" });
+        return;
+      }
+
+      try {
+        const reports = await accessService.fetchAvailableCrmReports(
+          req.organizationId!,
+          provider as CRMProvider
+        );
+        res.json({ reports });
+      } catch (err) {
+        console.error("CRM reports error:", err);
+        res.status(500).json({ error: "Failed to fetch CRM reports" });
       }
     }
   );
