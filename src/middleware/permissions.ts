@@ -37,6 +37,7 @@ const ACTION_PERMISSION_MAP: Record<string, PermissionType> = {
   delete_any: "DELETE_ANY_LANDING_PAGE",
   manage_permissions: "MANAGE_PERMISSIONS",
   view_analytics: "VIEW_ANALYTICS",
+  manage_entity_resolution: "MANAGE_ENTITY_RESOLUTION",
 };
 
 // ─── Middleware Factories ────────────────────────────────────────────────────

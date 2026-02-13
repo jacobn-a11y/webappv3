@@ -15,7 +15,7 @@
  */
 
 import Fuse from "fuse.js";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, MatchMethod } from "@prisma/client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -29,6 +29,15 @@ export interface ResolvedEntity {
   accountName: string;
   confidence: number; // 0.0–1.0
   matchMethod: "email_domain" | "fuzzy_name" | "none";
+}
+
+/** Maps string matchMethod values to Prisma MatchMethod enum */
+export function toMatchMethodEnum(method: ResolvedEntity["matchMethod"]): MatchMethod {
+  switch (method) {
+    case "email_domain": return "EMAIL_DOMAIN";
+    case "fuzzy_name": return "FUZZY_NAME";
+    case "none": return "NONE";
+  }
 }
 
 interface AccountRecord {
@@ -143,6 +152,7 @@ export class EntityResolver {
 
   /**
    * Also creates or links Contact records for resolved participants.
+   * Persists matchMethod and confidence on the Call record.
    */
   async resolveAndLinkContacts(
     organizationId: string,
@@ -150,6 +160,16 @@ export class EntityResolver {
     participants: CallParticipantInput[]
   ): Promise<ResolvedEntity> {
     const resolution = await this.resolve(organizationId, participants);
+
+    // Always persist the match metadata on the call
+    await this.prisma.call.update({
+      where: { id: callId },
+      data: {
+        matchMethod: toMatchMethodEnum(resolution.matchMethod),
+        matchConfidence: resolution.confidence,
+        accountId: resolution.matchMethod !== "none" ? resolution.accountId : undefined,
+      },
+    });
 
     if (resolution.matchMethod === "none") return resolution;
 
@@ -177,12 +197,6 @@ export class EntityResolver {
         },
       });
     }
-
-    // Link the call to the resolved account
-    await this.prisma.call.update({
-      where: { id: callId },
-      data: { accountId: resolution.accountId },
-    });
 
     return resolution;
   }

@@ -18,6 +18,7 @@ import { createStoryRoutes } from "./api/story-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
+import { createEntityResolutionRoutes } from "./api/entity-resolution-routes.js";
 import {
   createTrialGate,
   createCheckoutHandler,
@@ -140,6 +141,9 @@ app.use("/api/pages", trialGate, createLandingPageRoutes(prisma));
 // Dashboard — stats, page list, admin settings, permissions, account access
 app.use("/api/dashboard", trialGate, createDashboardRoutes(prisma));
 
+// Entity Resolution Review Queue — manual review of unmatched/low-confidence calls
+app.use("/api/entity-resolution", trialGate, createEntityResolutionRoutes(prisma));
+
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
@@ -151,6 +155,7 @@ app.listen(PORT, () => {
   console.log(`  Stories:    http://localhost:${PORT}/api/stories/build`);
   console.log(`  Pages:      http://localhost:${PORT}/api/pages`);
   console.log(`  Dashboard:  http://localhost:${PORT}/api/dashboard`);
+  console.log(`  Resolution: http://localhost:${PORT}/api/entity-resolution`);
   console.log(`  Public:     http://localhost:${PORT}/s/:slug`);
   console.log(`  Webhook:    http://localhost:${PORT}/api/webhooks/merge`);
 });
