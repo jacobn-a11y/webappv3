@@ -485,3 +485,19 @@ enum CRMProvider {
   SALESFORCE
   HUBSPOT
 }
+
+// ─── Confidence Calibration ─────────────────────────────────────────────────
+// Human-labeled ground-truth samples used to calibrate the AI Tagger's
+// self-reported confidence scores against empirical accuracy.
+
+model ValidationSample {
+  id                  String   @id @default(cuid())
+  chunkText           String   // the transcript chunk text
+  expectedFunnelStage String   // ground-truth funnel stage
+  expectedTopic       String   // ground-truth taxonomy topic
+  organizationId      String?  // optional org scope
+  createdAt           DateTime @default(now())
+
+  @@index([expectedFunnelStage, expectedTopic])
+  @@map("validation_samples")
+}
