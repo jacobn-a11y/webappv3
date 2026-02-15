@@ -15,6 +15,10 @@ import {
   PermissionManager,
   requirePermission,
 } from "../middleware/permissions.js";
+import {
+  auditPermissionChange,
+  auditAccessChange,
+} from "../middleware/audit-logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -230,6 +234,16 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           parse.data.permission as PermissionType,
           req.userId!
         );
+
+        // Audit log: permission granted
+        auditPermissionChange(
+          "GRANT",
+          req.userId!,
+          parse.data.user_id,
+          parse.data.permission,
+          req.organizationId!
+        );
+
         res.json({ granted: true });
       } catch (err) {
         console.error("Grant permission error:", err);
@@ -258,6 +272,16 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           parse.data.user_id,
           parse.data.permission as PermissionType
         );
+
+        // Audit log: permission revoked
+        auditPermissionChange(
+          "REVOKE",
+          req.userId!,
+          parse.data.user_id,
+          parse.data.permission,
+          req.organizationId!
+        );
+
         res.json({ revoked: true });
       } catch (err) {
         console.error("Revoke permission error:", err);
@@ -338,6 +362,16 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           grantedById: req.userId!,
         });
 
+        // Audit log: account access granted
+        auditAccessChange(
+          "GRANT",
+          req.userId!,
+          parse.data.user_id,
+          parse.data.scope_type,
+          req.organizationId!,
+          grantId
+        );
+
         // If CRM_REPORT, trigger an initial sync
         if (parse.data.scope_type === "CRM_REPORT") {
           try {
@@ -368,6 +402,17 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
     async (req: AuthReq, res: Response) => {
       try {
         await accessService.revokeAccess(req.params.grantId);
+
+        // Audit log: account access revoked
+        auditAccessChange(
+          "REVOKE",
+          req.userId!,
+          "N/A",
+          "N/A",
+          req.organizationId!,
+          req.params.grantId
+        );
+
         res.json({ revoked: true });
       } catch (err) {
         console.error("Revoke access error:", err);

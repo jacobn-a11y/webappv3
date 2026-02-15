@@ -12,6 +12,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import bcryptjs from "bcryptjs";
 import { LandingPageEditor, type CalloutBox } from "../services/landing-page-editor.js";
 import type { PrismaClient } from "@prisma/client";
 
@@ -88,6 +89,40 @@ const CALLOUT_ICONS: Record<string, string> = {
   success:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22,4 12,14.01 9,11.01"/></svg>',
 };
+
+// ─── CSS Sanitizer ──────────────────────────────────────────────────────────
+
+/**
+ * Sanitizes user-provided custom CSS to prevent XSS attacks.
+ * Removes dangerous patterns that could:
+ *   - Close the <style> tag and inject HTML/JS
+ *   - Use CSS features for data exfiltration (@import, url())
+ *   - Execute JavaScript via expression() or -moz-binding
+ */
+export function sanitizeCustomCss(css: string | null): string | null {
+  if (!css) return null;
+
+  let sanitized = css;
+
+  // Remove any attempts to close the style tag (most critical XSS vector)
+  sanitized = sanitized.replace(/<\s*\/?\s*style\b[^>]*>/gi, "/* [removed] */");
+  // Remove any HTML tags that might be injected
+  sanitized = sanitized.replace(/<\s*\/?[a-z][^>]*>/gi, "/* [removed] */");
+  // Remove @import rules (data exfiltration via external CSS)
+  sanitized = sanitized.replace(/@import\b[^;]*/gi, "/* [removed] */");
+  // Remove javascript: URLs
+  sanitized = sanitized.replace(/javascript\s*:/gi, "/* [removed] */");
+  // Remove expression() (IE CSS expressions)
+  sanitized = sanitized.replace(/expression\s*\(/gi, "/* [removed] */");
+  // Remove -moz-binding (Firefox XBL injection)
+  sanitized = sanitized.replace(/-moz-binding\s*:/gi, "/* [removed] */");
+  // Remove behavior: (IE HTC injection)
+  sanitized = sanitized.replace(/behavior\s*:/gi, "/* [removed] */");
+  // Remove url() with data: URIs (data exfiltration)
+  sanitized = sanitized.replace(/url\s*\(\s*["']?\s*data:/gi, 'url("/* [removed] */');
+
+  return sanitized;
+}
 
 // ─── HTML Template ───────────────────────────────────────────────────────────
 
@@ -328,7 +363,7 @@ function renderLandingPageHtml(page: {
       .callouts { grid-template-columns: 1fr; }
     }
 
-    ${page.customCss ?? ""}
+    ${sanitizeCustomCss(page.customCss) ?? ""}
   </style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -398,7 +433,7 @@ function renderPasswordPage(slug: string): string {
     <h2>This page is protected</h2>
     <p>Enter the password to view this story.</p>
     <div class="error" id="error">Incorrect password. Please try again.</div>
-    <form method="GET" action="/s/${escapeHtml(slug)}">
+    <form method="POST" action="/s/${escapeHtml(slug)}">
       <input type="password" name="p" placeholder="Password" required autofocus />
       <button type="submit">View Story</button>
     </form>
@@ -413,16 +448,17 @@ export function createPublicPageRoutes(prisma: PrismaClient): Router {
   const router = Router();
   const editor = new LandingPageEditor(prisma);
 
+  // Parse URL-encoded POST body for password form submission
+  router.use(require("express").urlencoded({ extended: false }));
+
   /**
-   * GET /s/:slug
-   *
-   * Serves the published, scrubbed landing page as a full HTML page.
-   * No authentication required (it's public), but respects visibility
-   * and password settings.
+   * Shared handler for serving published landing pages.
+   * Supports both GET (initial view) and POST (password submission).
    */
-  router.get("/:slug", async (req: Request, res: Response) => {
+  async function handleSlugRequest(req: Request, res: Response): Promise<void> {
     const { slug } = req.params;
-    const password = req.query.p as string | undefined;
+    // Accept password from POST body (preferred) or query param (legacy)
+    const password = (req.body?.p as string | undefined) ?? (req.query.p as string | undefined);
 
     // Check if page exists and needs a password
     const rawPage = await prisma.landingPage.findUnique({
@@ -450,15 +486,18 @@ export function createPublicPageRoutes(prisma: PrismaClient): Router {
       return;
     }
 
-    // Password check
+    // Password check — passwords are bcrypt-hashed, use timing-safe comparison
     if (rawPage.password && !password) {
       res.status(200).send(renderPasswordPage(slug));
       return;
     }
 
-    if (rawPage.password && password !== rawPage.password) {
-      res.status(200).send(renderPasswordPage(slug));
-      return;
+    if (rawPage.password && password) {
+      const passwordValid = await bcryptjs.compare(password, rawPage.password);
+      if (!passwordValid) {
+        res.status(200).send(renderPasswordPage(slug));
+        return;
+      }
     }
 
     // Fetch and render
@@ -472,7 +511,17 @@ export function createPublicPageRoutes(prisma: PrismaClient): Router {
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.setHeader("Cache-Control", "private, no-cache");
     res.send(renderLandingPageHtml(page));
-  });
+  }
+
+  /**
+   * GET /s/:slug — Initial page view (shows password form if protected)
+   */
+  router.get("/:slug", handleSlugRequest);
+
+  /**
+   * POST /s/:slug — Password submission (password in POST body, not URL)
+   */
+  router.post("/:slug", handleSlugRequest);
 
   return router;
 }

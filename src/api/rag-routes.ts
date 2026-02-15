@@ -8,6 +8,14 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { RAGEngine } from "../services/rag-engine.js";
+import { VALID_FUNNEL_STAGES } from "../types/taxonomy.js";
+
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+interface AuthenticatedRequest extends Request {
+  organizationId?: string;
+  userId?: string;
+}
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -17,9 +25,8 @@ const QuerySchema = z.object({
     .min(3, "Query must be at least 3 characters")
     .max(1000, "Query must be under 1000 characters"),
   account_id: z.string().min(1),
-  organization_id: z.string().min(1),
   top_k: z.number().int().min(1).max(20).optional(),
-  funnel_stages: z.array(z.string()).optional(),
+  funnel_stages: z.array(z.enum(VALID_FUNNEL_STAGES as unknown as [string, ...string[]])).optional(),
 });
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
@@ -31,12 +38,13 @@ export function createRAGRoutes(ragEngine: RAGEngine): Router {
    * POST /api/rag/query
    *
    * Query the RAG engine with a natural language question about an account.
+   * Organization ID is taken from the authenticated session (not from body)
+   * to prevent cross-org data access.
    *
    * Request body:
    *   {
    *     "query": "How was the onboarding for Account X?",
    *     "account_id": "clx123...",
-   *     "organization_id": "clx456...",
    *     "top_k": 8,                   // optional, default 8
    *     "funnel_stages": ["MOFU"]     // optional filter
    *   }
@@ -59,6 +67,15 @@ export function createRAGRoutes(ragEngine: RAGEngine): Router {
    *   }
    */
   router.post("/query", async (req: Request, res: Response) => {
+    const authReq = req as AuthenticatedRequest;
+
+    // SECURITY: Always use org ID from authenticated session, never from request body
+    const organizationId = authReq.organizationId;
+    if (!organizationId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+
     const parseResult = QuerySchema.safeParse(req.body);
     if (!parseResult.success) {
       res.status(400).json({
@@ -68,14 +85,14 @@ export function createRAGRoutes(ragEngine: RAGEngine): Router {
       return;
     }
 
-    const { query, account_id, organization_id, top_k, funnel_stages } =
+    const { query, account_id, top_k, funnel_stages } =
       parseResult.data;
 
     try {
       const result = await ragEngine.query({
         query,
         accountId: account_id,
-        organizationId: organization_id,
+        organizationId, // From auth, not request body
         topK: top_k,
         funnelStages: funnel_stages,
       });

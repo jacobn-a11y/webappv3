@@ -11,6 +11,7 @@
  */
 
 import crypto from "crypto";
+import bcryptjs from "bcryptjs";
 import type { PrismaClient, PageVisibility, PageStatus } from "@prisma/client";
 import { CompanyScrubber } from "./company-scrubber.js";
 
@@ -240,6 +241,12 @@ export class LandingPageEditor {
       scrubbedCallouts = scrubbedArray as unknown as typeof page.calloutBoxes;
     }
 
+    // Hash password with bcrypt before storing (never store plaintext)
+    let hashedPassword: string | null = null;
+    if (options.password) {
+      hashedPassword = await bcryptjs.hash(options.password, 12);
+    }
+
     await this.prisma.landingPage.update({
       where: { id: pageId },
       data: {
@@ -247,7 +254,7 @@ export class LandingPageEditor {
         calloutBoxes: scrubbedCallouts ?? undefined,
         status: "PUBLISHED",
         visibility: options.visibility,
-        password: options.password ?? null,
+        password: hashedPassword,
         expiresAt: options.expiresAt ?? null,
         publishedAt: new Date(),
         noIndex: true, // always noindex
@@ -335,8 +342,12 @@ export class LandingPageEditor {
     // Check visibility
     if (page.visibility === "PRIVATE") return null;
 
-    // Check password
-    if (page.password && page.password !== password) return null;
+    // Check password using bcrypt comparison (timing-safe)
+    if (page.password) {
+      if (!password) return null;
+      const passwordValid = await bcryptjs.compare(password, page.password);
+      if (!passwordValid) return null;
+    }
 
     // Increment view count
     await this.prisma.landingPage.update({

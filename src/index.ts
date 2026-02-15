@@ -23,6 +23,12 @@ import {
   createCheckoutHandler,
   createStripeWebhookHandler,
 } from "./middleware/billing.js";
+import { requireAuth } from "./middleware/auth.js";
+import {
+  apiRateLimiter,
+  webhookRateLimiter,
+  passwordRateLimiter,
+} from "./middleware/rate-limiter.js";
 import { AITagger } from "./services/ai-tagger.js";
 import { RAGEngine } from "./services/rag-engine.js";
 import { StoryBuilder } from "./services/story-builder.js";
@@ -89,19 +95,32 @@ worker.on("failed", (job, err) => {
 
 const app = express();
 
-// Global middleware
+// Global middleware — security headers
 app.use(helmet());
-app.use(cors());
 
-// Stripe webhooks need raw body
+// CORS — restrict origins to configured APP_URL (not wildcard)
+const allowedOrigins = process.env.APP_URL
+  ? [process.env.APP_URL]
+  : ["http://localhost:3000"];
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+// Stripe webhooks need raw body (must be before JSON parser)
 app.post(
   "/api/webhooks/stripe",
   express.raw({ type: "application/json" }),
+  webhookRateLimiter,
   createStripeWebhookHandler(prisma, stripe)
 );
 
-// All other routes use JSON parsing
-app.use(express.json({ limit: "10mb" }));
+// All other routes use JSON parsing — reduced limit from 10mb to 2mb
+app.use(express.json({ limit: "2mb" }));
 
 // ─── Public Routes ───────────────────────────────────────────────────────────
 
@@ -112,21 +131,34 @@ app.get("/api/health", (_req, res) => {
 // Merge.dev webhook (authenticated by signature, not user auth)
 app.post(
   "/api/webhooks/merge",
+  webhookRateLimiter,
   createMergeWebhookHandler({ prisma, processingQueue })
 );
 
 // Public landing pages — no auth, served at /s/:slug
-app.use("/s", createPublicPageRoutes(prisma));
+// Password-protected pages have rate limiting
+app.use("/s", passwordRateLimiter, createPublicPageRoutes(prisma));
 
 // ─── Authenticated Routes ────────────────────────────────────────────────────
-// In production, WorkOS auth middleware would go here to set req.organizationId,
-// req.userId, and req.userRole.
-// Omitted for architectural clarity — see docs/ARCHITECTURE.md for flow.
+// In production, WorkOS auth middleware populates req.organizationId,
+// req.userId, and req.userRole BEFORE these routes are reached.
+//
+// The requireAuth middleware below acts as a fail-closed safety net:
+// if auth context is missing, requests are rejected with 401.
+// This prevents accidentally serving unauthenticated requests if
+// the WorkOS middleware is misconfigured or bypassed.
 
 const trialGate = createTrialGate(prisma, stripe);
 
+// Apply rate limiting and auth check to all authenticated API routes
+app.use("/api/billing", apiRateLimiter, requireAuth);
+app.use("/api/rag", apiRateLimiter, requireAuth);
+app.use("/api/stories", apiRateLimiter, requireAuth);
+app.use("/api/pages", apiRateLimiter, requireAuth);
+app.use("/api/dashboard", apiRateLimiter, requireAuth);
+
 // Billing
-app.post("/api/billing/checkout", createCheckoutHandler(prisma, stripe));
+app.post("/api/billing/checkout", trialGate, createCheckoutHandler(prisma, stripe));
 
 // RAG Chatbot Connector (behind trial gate)
 app.use("/api/rag", trialGate, createRAGRoutes(ragEngine));

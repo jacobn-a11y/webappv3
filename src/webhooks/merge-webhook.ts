@@ -21,6 +21,7 @@ import {
   normalizeCompanyName,
   extractEmailDomain,
 } from "../services/entity-resolution.js";
+import { auditWebhookFailure } from "../middleware/audit-logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -83,10 +84,15 @@ function verifyMergeSignature(
     .createHmac("sha256", secret)
     .update(payload)
     .digest("hex");
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expected)
-  );
+
+  // Ensure buffers are the same length before timing-safe comparison
+  // (timingSafeEqual throws if lengths differ, which would leak length info)
+  const sigBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (sigBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(sigBuffer, expectedBuffer);
 }
 
 // ─── Provider Mapping ────────────────────────────────────────────────────────
@@ -120,17 +126,28 @@ export function createMergeWebhookHandler(deps: {
   const resolver = new EntityResolver(prisma);
 
   return async (req: Request, res: Response) => {
-    // ── Verify signature ──────────────────────────────────────────────
+    // ── Verify signature (ALWAYS required — fail closed) ──────────────
     const signature = req.headers["x-merge-webhook-signature"] as string;
     const webhookSecret = process.env.MERGE_WEBHOOK_SECRET;
 
-    if (webhookSecret && signature) {
-      const rawBody =
-        typeof req.body === "string" ? req.body : JSON.stringify(req.body);
-      if (!verifyMergeSignature(rawBody, signature, webhookSecret)) {
-        res.status(401).json({ error: "Invalid webhook signature" });
-        return;
-      }
+    if (!webhookSecret) {
+      console.error("MERGE_WEBHOOK_SECRET is not configured — rejecting webhook");
+      res.status(500).json({ error: "Webhook verification not configured" });
+      return;
+    }
+
+    if (!signature) {
+      auditWebhookFailure("merge", "Missing signature header", req.ip ?? "unknown");
+      res.status(401).json({ error: "Missing webhook signature" });
+      return;
+    }
+
+    const rawBody =
+      typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+    if (!verifyMergeSignature(rawBody, signature, webhookSecret)) {
+      auditWebhookFailure("merge", "Invalid signature", req.ip ?? "unknown");
+      res.status(401).json({ error: "Invalid webhook signature" });
+      return;
     }
 
     const payload = req.body as MergeWebhookPayload;
