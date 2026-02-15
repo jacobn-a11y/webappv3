@@ -396,14 +396,11 @@ describe("CompanyScrubber", () => {
     testTitleAnonymization("CISO", "a security leader at the client");
 
     testTitleAnonymization("SVP", "a senior leader at the client");
-    // Note: "Senior Vice President" contains "President" which matches the
-    // first TITLE_ANONYMIZER rule (\bPresident\b), so it resolves as a senior executive.
-    testTitleAnonymization("Senior Vice President", "a senior executive at the client");
+    testTitleAnonymization("Senior Vice President", "a senior leader at the client");
     testTitleAnonymization("EVP", "a senior leader at the client");
 
     testTitleAnonymization("VP", "a VP at the client");
-    // Note: "Vice President" likewise matches \bPresident\b first.
-    testTitleAnonymization("Vice President", "a senior executive at the client");
+    testTitleAnonymization("Vice President", "a VP at the client");
 
     testTitleAnonymization("Director", "a director at the client");
 
@@ -465,87 +462,56 @@ describe("CompanyScrubber", () => {
   // ── Email Domain Scrubbing ───────────────────────────────────────────
 
   describe("email domain scrubbing", () => {
-    // Note: When the company name (e.g., "acme") appears within a domain like
-    // "acme.com", the company name scrubbing (Step 2) may replace it before the
-    // domain scrubber (Step 3) runs. To test domain scrubbing in isolation, we
-    // use a company whose name does NOT appear in its domain.
-
-    // Use a company whose name is completely absent from its domain,
-    // so company name scrubbing doesn't interfere with domain replacement.
-    const domainTestAccount: MockAccountData = {
-      name: "Umbrella Corporation",
-      normalizedName: "umbrella",
-      domain: "uc-pharma.com",
-      domainAliases: [{ domain: "uc-pharma.io" }],
-      contacts: [],
-      orgSettings: null,
-    };
-
     it("replaces the primary company domain with [client-domain]", async () => {
-      const prisma = createMockPrisma(domainTestAccount);
-      const scrubber = new CompanyScrubber(prisma);
-
-      const result = await scrubber.scrubForAccount(
-        "acct_1",
-        "Please reach out to support@uc-pharma.com for help."
-      );
-
-      expect(result.scrubbedText).not.toContain("uc-pharma.com");
-      expect(result.scrubbedText).toContain("[client-domain]");
-    });
-
-    it("replaces domain alias domains with [client-domain]", async () => {
-      const prisma = createMockPrisma(domainTestAccount);
-      const scrubber = new CompanyScrubber(prisma);
-
-      const result = await scrubber.scrubForAccount(
-        "acct_1",
-        "Also check docs.uc-pharma.io for documentation."
-      );
-
-      expect(result.scrubbedText).not.toContain("uc-pharma.io");
-      expect(result.scrubbedText).toContain("[client-domain]");
-    });
-
-    it("replaces all occurrences of domains", async () => {
-      const prisma = createMockPrisma(domainTestAccount);
-      const scrubber = new CompanyScrubber(prisma);
-
-      const result = await scrubber.scrubForAccount(
-        "acct_1",
-        "Visit uc-pharma.com or uc-pharma.io for more info. Email us at hello@uc-pharma.com."
-      );
-
-      expect(result.scrubbedText).not.toContain("uc-pharma.com");
-      expect(result.scrubbedText).not.toContain("uc-pharma.io");
-    });
-
-    it("is case-insensitive for domain scrubbing", async () => {
-      const prisma = createMockPrisma(domainTestAccount);
-      const scrubber = new CompanyScrubber(prisma);
-
-      const result = await scrubber.scrubForAccount(
-        "acct_1",
-        "Send mail to info@UC-PHARMA.COM for details."
-      );
-
-      expect(result.scrubbedText).not.toMatch(/uc-pharma\.com/i);
-      expect(result.scrubbedText).toContain("[client-domain]");
-    });
-
-    it("removes company name from domains even when company name scrubbing runs first", async () => {
-      // When the company name is a substring of the domain, Step 2 (company name
-      // scrubbing) replaces it before Step 3 (domain scrubbing) can act. The end
-      // result is the domain is still obfuscated — just via name replacement.
       const prisma = createMockPrisma(DEFAULT_ACCOUNT);
       const scrubber = new CompanyScrubber(prisma);
 
       const result = await scrubber.scrubForAccount(
         "acct_1",
-        "Email support@acme.com for help."
+        "Please reach out to support@acme.com for help."
       );
 
-      expect(result.scrubbedText).not.toMatch(/\bacme\b/i);
+      expect(result.scrubbedText).not.toContain("acme.com");
+      expect(result.scrubbedText).toContain("[client-domain]");
+    });
+
+    it("replaces domain alias domains with [client-domain]", async () => {
+      const prisma = createMockPrisma(DEFAULT_ACCOUNT);
+      const scrubber = new CompanyScrubber(prisma);
+
+      const result = await scrubber.scrubForAccount(
+        "acct_1",
+        "Also check docs.acme.io for documentation."
+      );
+
+      expect(result.scrubbedText).not.toContain("acme.io");
+      expect(result.scrubbedText).toContain("[client-domain]");
+    });
+
+    it("replaces all occurrences of domains", async () => {
+      const prisma = createMockPrisma(DEFAULT_ACCOUNT);
+      const scrubber = new CompanyScrubber(prisma);
+
+      const result = await scrubber.scrubForAccount(
+        "acct_1",
+        "Visit acme.com or acme.io for more info. Email us at hello@acme.com."
+      );
+
+      expect(result.scrubbedText).not.toContain("acme.com");
+      expect(result.scrubbedText).not.toContain("acme.io");
+    });
+
+    it("is case-insensitive for domain scrubbing", async () => {
+      const prisma = createMockPrisma(DEFAULT_ACCOUNT);
+      const scrubber = new CompanyScrubber(prisma);
+
+      const result = await scrubber.scrubForAccount(
+        "acct_1",
+        "Send mail to info@ACME.COM for details."
+      );
+
+      expect(result.scrubbedText).not.toMatch(/acme\.com/i);
+      expect(result.scrubbedText).toContain("[client-domain]");
     });
   });
 
@@ -790,9 +756,7 @@ describe("CompanyScrubber", () => {
       );
 
       expect(result.scrubbedText).not.toContain("Sarah Connor");
-      // "Senior Vice President" contains "President" which the first title
-      // anonymizer rule matches, so it resolves as a senior executive.
-      expect(result.scrubbedText).toContain("a senior executive at the client");
+      expect(result.scrubbedText).toContain("a senior leader at the client");
     });
 
     it("scrubs Director-level contacts from Salesforce", async () => {
