@@ -6,11 +6,18 @@
  *   2. Mask PII from each chunk
  *   3. Tag each chunk with taxonomy topics via the AI Tagger
  *   4. Generate embeddings and index in Pinecone via the RAG Engine
+ *
+ * Resolves the correct AI client per job based on the org's configuration.
+ * Background processing uses the org's own key when available, falling back
+ * to the platform key. Usage is recorded but not billed to a specific user
+ * since transcript processing is triggered by webhooks, not user actions.
  */
 
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, UserRole } from "@prisma/client";
 import { AITagger } from "./ai-tagger.js";
 import { RAGEngine } from "./rag-engine.js";
+import { AIConfigService } from "./ai-config.js";
+import { AIUsageTracker } from "./ai-usage-tracker.js";
 import { maskPII } from "../middleware/pii-masker.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -20,6 +27,8 @@ export interface ProcessCallJob {
   organizationId: string;
   accountId: string | null;
   hasTranscript: boolean;
+  /** Optional: user who triggered the processing (for usage tracking). */
+  userId?: string;
 }
 
 // ─── Chunking Logic ──────────────────────────────────────────────────────────
@@ -63,15 +72,21 @@ export class TranscriptProcessor {
   private prisma: PrismaClient;
   private tagger: AITagger;
   private ragEngine: RAGEngine;
+  private configService: AIConfigService;
+  private usageTracker: AIUsageTracker;
 
   constructor(
     prisma: PrismaClient,
     tagger: AITagger,
-    ragEngine: RAGEngine
+    ragEngine: RAGEngine,
+    configService: AIConfigService,
+    usageTracker: AIUsageTracker
   ) {
     this.prisma = prisma;
     this.tagger = tagger;
     this.ragEngine = ragEngine;
+    this.configService = configService;
+    this.usageTracker = usageTracker;
   }
 
   /**
@@ -115,10 +130,21 @@ export class TranscriptProcessor {
       });
     }
 
-    // ── Step 4: Tag with AI ──────────────────────────────────────────
-    const taggingResults = await this.tagger.tagCallTranscript(callId);
+    // ── Step 4: Resolve AI client for this org ───────────────────────
+    // Use OWNER role to bypass user-level access checks for background jobs.
+    // If a specific user triggered this, we could use their context instead.
+    const aiClient = await this.resolveOrgAIClient(
+      organizationId,
+      job.userId
+    );
 
-    // ── Step 5: Generate embeddings and index ────────────────────────
+    // ── Step 5: Tag with AI ──────────────────────────────────────────
+    const taggingResults = await this.tagger.tagCallTranscript(
+      callId,
+      aiClient
+    );
+
+    // ── Step 6: Generate embeddings and index ────────────────────────
     if (accountId) {
       const chunks = await this.prisma.transcriptChunk.findMany({
         where: { transcriptId: transcript.id },
@@ -141,5 +167,24 @@ export class TranscriptProcessor {
     console.log(
       `Processed call ${callId}: ${rawChunks.length} chunks, ${taggingResults.length} tagged`
     );
+  }
+
+  /**
+   * Resolves an AI client for background processing.
+   * Uses the org's configured provider/model without per-user billing.
+   */
+  private async resolveOrgAIClient(
+    organizationId: string,
+    userId?: string
+  ) {
+    // Resolve the AI client using the org's default configuration.
+    // OWNER role bypasses all user-level access checks.
+    const { client } = await this.configService.resolveClient(
+      organizationId,
+      userId ?? "system",
+      "OWNER" as UserRole
+    );
+
+    return client;
   }
 }

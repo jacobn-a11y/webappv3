@@ -7,16 +7,21 @@
  *
  * Flow:
  *   1. Receive query + account context
- *   2. Generate embedding for the query
+ *   2. Generate embedding for the query (always OpenAI text-embedding-3-small)
  *   3. Search Pinecone for relevant transcript chunks (filtered by account)
  *   4. Build a context window from top-K results
- *   5. Send query + context to LLM for grounded answer
+ *   5. Send query + context to the caller's chosen AI model
  *   6. Return answer with source citations
+ *
+ * Embeddings remain OpenAI-only because existing Pinecone vectors are
+ * OpenAI-based. Switching embedding models would require re-indexing.
+ * Chat completions use the AIClient abstraction for provider flexibility.
  */
 
 import OpenAI from "openai";
 import { Pinecone } from "@pinecone-database/pinecone";
 import type { PrismaClient } from "@prisma/client";
+import type { AIClient } from "./ai-client.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -53,7 +58,6 @@ export class RAGEngine {
   private pinecone: Pinecone;
   private prisma: PrismaClient;
   private indexName: string;
-  private model: string;
 
   constructor(
     prisma: PrismaClient,
@@ -61,21 +65,22 @@ export class RAGEngine {
       openaiApiKey: string;
       pineconeApiKey: string;
       pineconeIndex: string;
-      model?: string;
     }
   ) {
     this.openai = new OpenAI({ apiKey: config.openaiApiKey });
     this.pinecone = new Pinecone({ apiKey: config.pineconeApiKey });
     this.prisma = prisma;
     this.indexName = config.pineconeIndex;
-    this.model = config.model ?? "gpt-4o";
   }
 
   /**
    * Main query method: takes a natural language question, retrieves relevant
    * transcript chunks, and returns a grounded answer.
+   *
+   * @param input - The query parameters
+   * @param aiClient - The AI client to use for chat completion (may be TrackedAIClient)
    */
-  async query(input: RAGQuery): Promise<RAGResponse> {
+  async query(input: RAGQuery, aiClient: AIClient): Promise<RAGResponse> {
     const topK = input.topK ?? 8;
 
     // ── Step 1: Generate query embedding ─────────────────────────────
@@ -119,10 +124,7 @@ export class RAGEngine {
       )
       .join("\n\n---\n\n");
 
-    const response = await this.openai.chat.completions.create({
-      model: this.model,
-      temperature: 0.2,
-      max_tokens: 1500,
+    const result = await aiClient.chatCompletion({
       messages: [
         {
           role: "system",
@@ -143,18 +145,21 @@ TRANSCRIPT SOURCES:
 ${contextBlock}`,
         },
       ],
+      temperature: 0.2,
+      maxTokens: 1500,
     });
 
-    const answer =
-      response.choices[0]?.message?.content ?? "Unable to generate an answer.";
-    const tokensUsed = response.usage?.total_tokens ?? 0;
-
-    return { answer, sources, tokensUsed };
+    return {
+      answer: result.content || "Unable to generate an answer.",
+      sources,
+      tokensUsed: result.totalTokens,
+    };
   }
 
   /**
    * Generates an embedding for a transcript chunk and upserts it to Pinecone.
    * Called during the ingestion pipeline after chunking + tagging.
+   * Always uses OpenAI embeddings for vector consistency.
    */
   async indexChunk(chunk: {
     chunkId: string;

@@ -18,6 +18,8 @@ import { createStoryRoutes } from "./api/story-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
+import { createAISettingsRoutes } from "./api/ai-settings-routes.js";
+import { createPlatformAdminRoutes } from "./api/platform-admin-routes.js";
 import {
   createTrialGate,
   createCheckoutHandler,
@@ -26,6 +28,8 @@ import {
 import { AITagger } from "./services/ai-tagger.js";
 import { RAGEngine } from "./services/rag-engine.js";
 import { StoryBuilder } from "./services/story-builder.js";
+import { AIConfigService } from "./services/ai-config.js";
+import { AIUsageTracker } from "./services/ai-usage-tracker.js";
 import {
   TranscriptProcessor,
   type ProcessCallJob,
@@ -43,18 +47,24 @@ const openaiApiKey = process.env.OPENAI_API_KEY ?? "";
 const pineconeApiKey = process.env.PINECONE_API_KEY ?? "";
 const pineconeIndex = process.env.PINECONE_INDEX ?? "storyengine-transcripts";
 
-// Services
-const aiTagger = new AITagger(prisma, openaiApiKey);
+// AI Configuration & Usage Services
+const aiConfigService = new AIConfigService(prisma);
+const aiUsageTracker = new AIUsageTracker(prisma, aiConfigService);
+
+// Core AI Services
+const aiTagger = new AITagger(prisma);
 const ragEngine = new RAGEngine(prisma, {
   openaiApiKey,
   pineconeApiKey,
   pineconeIndex,
 });
-const storyBuilder = new StoryBuilder(prisma, openaiApiKey);
+const storyBuilder = new StoryBuilder(prisma);
 const transcriptProcessor = new TranscriptProcessor(
   prisma,
   aiTagger,
-  ragEngine
+  ragEngine,
+  aiConfigService,
+  aiUsageTracker
 );
 
 // ─── BullMQ Queue ────────────────────────────────────────────────────────────
@@ -118,6 +128,11 @@ app.post(
 // Public landing pages — no auth, served at /s/:slug
 app.use("/s", createPublicPageRoutes(prisma));
 
+// ─── Platform Admin Routes ───────────────────────────────────────────────────
+// Protected by PLATFORM_ADMIN_API_KEY header check (not user auth)
+
+app.use("/api/platform", createPlatformAdminRoutes(aiConfigService));
+
 // ─── Authenticated Routes ────────────────────────────────────────────────────
 // In production, WorkOS auth middleware would go here to set req.organizationId,
 // req.userId, and req.userRole.
@@ -128,11 +143,26 @@ const trialGate = createTrialGate(prisma, stripe);
 // Billing
 app.post("/api/billing/checkout", createCheckoutHandler(prisma, stripe));
 
+// AI Settings & Usage Management (behind trial gate)
+app.use(
+  "/api/ai",
+  trialGate,
+  createAISettingsRoutes(prisma, aiConfigService, aiUsageTracker)
+);
+
 // RAG Chatbot Connector (behind trial gate)
-app.use("/api/rag", trialGate, createRAGRoutes(ragEngine));
+app.use(
+  "/api/rag",
+  trialGate,
+  createRAGRoutes(ragEngine, aiConfigService, aiUsageTracker)
+);
 
 // Story Builder (behind trial gate)
-app.use("/api/stories", trialGate, createStoryRoutes(storyBuilder, prisma));
+app.use(
+  "/api/stories",
+  trialGate,
+  createStoryRoutes(prisma, storyBuilder, aiConfigService, aiUsageTracker)
+);
 
 // Landing Pages — CRUD, edit, publish, share (behind trial gate)
 app.use("/api/pages", trialGate, createLandingPageRoutes(prisma));
@@ -146,13 +176,15 @@ const PORT = parseInt(process.env.PORT ?? "3000", 10);
 
 app.listen(PORT, () => {
   console.log(`StoryEngine listening on port ${PORT}`);
-  console.log(`  Health:     http://localhost:${PORT}/api/health`);
-  console.log(`  RAG API:    http://localhost:${PORT}/api/rag/query`);
-  console.log(`  Stories:    http://localhost:${PORT}/api/stories/build`);
-  console.log(`  Pages:      http://localhost:${PORT}/api/pages`);
-  console.log(`  Dashboard:  http://localhost:${PORT}/api/dashboard`);
-  console.log(`  Public:     http://localhost:${PORT}/s/:slug`);
-  console.log(`  Webhook:    http://localhost:${PORT}/api/webhooks/merge`);
+  console.log(`  Health:       http://localhost:${PORT}/api/health`);
+  console.log(`  RAG API:      http://localhost:${PORT}/api/rag/query`);
+  console.log(`  Stories:      http://localhost:${PORT}/api/stories/build`);
+  console.log(`  AI Settings:  http://localhost:${PORT}/api/ai/providers`);
+  console.log(`  Platform:     http://localhost:${PORT}/api/platform/providers`);
+  console.log(`  Pages:        http://localhost:${PORT}/api/pages`);
+  console.log(`  Dashboard:    http://localhost:${PORT}/api/dashboard`);
+  console.log(`  Public:       http://localhost:${PORT}/s/:slug`);
+  console.log(`  Webhook:      http://localhost:${PORT}/api/webhooks/merge`);
 });
 
 // Graceful shutdown

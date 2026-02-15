@@ -4,15 +4,17 @@
  * Uses an LLM to classify transcript chunks against the StoryEngine
  * B2B case-study taxonomy. Each chunk is tagged with a funnel stage
  * and one or more specific topics with confidence scores.
+ *
+ * Accepts an AIClient instance so the caller can choose which provider
+ * and model to use. When wrapped with TrackedAIClient, usage is
+ * automatically tracked and billed.
  */
 
-import OpenAI from "openai";
 import type { PrismaClient } from "@prisma/client";
+import type { AIClient } from "./ai-client.js";
 import {
   FunnelStage,
   ALL_TOPICS,
-  STAGE_TOPICS,
-  TOPIC_LABELS,
   type TaxonomyTopic,
 } from "../types/taxonomy.js";
 
@@ -110,24 +112,17 @@ RULES:
 // ─── Core Tagger ─────────────────────────────────────────────────────────────
 
 export class AITagger {
-  private openai: OpenAI;
   private prisma: PrismaClient;
-  private model: string;
 
-  constructor(prisma: PrismaClient, openaiApiKey: string, model = "gpt-4o") {
-    this.openai = new OpenAI({ apiKey: openaiApiKey });
+  constructor(prisma: PrismaClient) {
     this.prisma = prisma;
-    this.model = model;
   }
 
   /**
    * Tags a single transcript chunk against the taxonomy.
    */
-  async tagChunk(chunkText: string): Promise<TagResult[]> {
-    const response = await this.openai.chat.completions.create({
-      model: this.model,
-      temperature: 0.1, // near-deterministic for classification
-      response_format: { type: "json_object" },
+  async tagChunk(chunkText: string, aiClient: AIClient): Promise<TagResult[]> {
+    const result = await aiClient.chatCompletion({
       messages: [
         { role: "system", content: TAGGER_SYSTEM_PROMPT },
         {
@@ -140,18 +135,20 @@ ${chunkText}
 """`,
         },
       ],
+      temperature: 0.1,
+      jsonMode: true,
     });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) return [];
-
-    return this.parseTagResponse(content);
+    return this.parseTagResponse(result.content);
   }
 
   /**
    * Tags all chunks for an entire call transcript. Persists tags to the database.
    */
-  async tagCallTranscript(callId: string): Promise<ChunkTaggingResult[]> {
+  async tagCallTranscript(
+    callId: string,
+    aiClient: AIClient
+  ): Promise<ChunkTaggingResult[]> {
     const transcript = await this.prisma.transcript.findUnique({
       where: { callId },
       include: { chunks: { orderBy: { chunkIndex: "asc" } } },
@@ -164,7 +161,7 @@ ${chunkText}
     const results: ChunkTaggingResult[] = [];
 
     for (const chunk of transcript.chunks) {
-      const tags = await this.tagChunk(chunk.text);
+      const tags = await this.tagChunk(chunk.text, aiClient);
 
       // Persist chunk-level tags
       for (const tag of tags) {
@@ -200,10 +197,13 @@ ${chunkText}
   /**
    * Batch-tags multiple calls. Useful for backfill processing.
    */
-  async tagBatch(callIds: string[]): Promise<Map<string, ChunkTaggingResult[]>> {
+  async tagBatch(
+    callIds: string[],
+    aiClient: AIClient
+  ): Promise<Map<string, ChunkTaggingResult[]>> {
     const resultMap = new Map<string, ChunkTaggingResult[]>();
     for (const callId of callIds) {
-      const results = await this.tagCallTranscript(callId);
+      const results = await this.tagCallTranscript(callId, aiClient);
       resultMap.set(callId, results);
     }
     return resultMap;

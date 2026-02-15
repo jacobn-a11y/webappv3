@@ -25,6 +25,13 @@ model Organization {
   stories      Story[]
   landingPages LandingPage[]
   orgSettings  OrgSettings?
+  orgAISettings       OrgAISettings?
+  orgAIRoleDefaults   OrgAIRoleDefault[]
+  aiProviderConfigs   AIProviderConfig[]
+  aiUsageRecords      AIUsageRecord[]
+  aiUsageLimits       AIUsageLimit[]
+  aiUsageNotifications AIUsageNotification[]
+  userAIBalances      UserAIBalance[]
 
   @@map("organizations")
 }
@@ -51,6 +58,11 @@ model User {
   landingPageEdits  LandingPageEdit[]
   permissions       UserPermission[]
   accountAccess     UserAccountAccess[]
+  aiUsageRecords    AIUsageRecord[]
+  aiUsageLimits     AIUsageLimit[]
+  aiUsageNotifications AIUsageNotification[]
+  aiAccess          UserAIAccess?
+  aiBalance         UserAIBalance?
 
   @@index([organizationId])
   @@map("users")
@@ -300,6 +312,9 @@ model Story {
   storyType      StoryType
   funnelStages   FunnelStage[] // which stages this story covers
   filterTags     String[]    // which taxonomy topics were used to filter
+  aiProvider     String?     // which AI provider was used (e.g., "openai", "anthropic")
+  aiModel        String?     // which model was used (e.g., "gpt-4o", "claude-sonnet-4-20250514")
+  generatedById  String?     // user who triggered the generation
   generatedAt    DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
@@ -309,6 +324,7 @@ model Story {
   landingPages LandingPage[]
 
   @@index([organizationId, accountId])
+  @@index([organizationId, generatedById])
   @@map("stories")
 }
 
@@ -442,24 +458,20 @@ enum PermissionType {
   DELETE_ANY_LANDING_PAGE
   MANAGE_PERMISSIONS
   VIEW_ANALYTICS
+  MANAGE_AI_SETTINGS          // configure AI providers, API keys, and usage limits
 }
 
 // ─── Account-Scoped Access Control ───────────────────────────────────────────
-// Admins can restrict which accounts a user can generate landing pages for.
-// Access can be granted to individual accounts or via a CRM report/list.
 
 model UserAccountAccess {
   id             String           @id @default(cuid())
   userId         String
   organizationId String
   scopeType      AccountScopeType
-  // For SINGLE_ACCOUNT: the specific account
   accountId      String?
-  // For CRM_REPORT: the Salesforce report ID or HubSpot list ID
   crmReportId    String?
   crmProvider    CRMProvider?
-  crmReportName  String?          // human-readable name for display
-  // Cached account IDs from the last CRM report sync
+  crmReportName  String?
   cachedAccountIds String[]       @default([])
   lastSyncedAt   DateTime?
   grantedById    String?
@@ -475,13 +487,275 @@ model UserAccountAccess {
 }
 
 enum AccountScopeType {
-  ALL_ACCOUNTS       // no restriction (default for admins)
-  SINGLE_ACCOUNT     // access to one specific account
-  ACCOUNT_LIST       // access to a manually curated list (stored in cachedAccountIds)
-  CRM_REPORT         // access defined by a Salesforce report or HubSpot list
+  ALL_ACCOUNTS
+  SINGLE_ACCOUNT
+  ACCOUNT_LIST
+  CRM_REPORT
 }
 
 enum CRMProvider {
   SALESFORCE
   HUBSPOT
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// AI PROVIDER CONFIGURATION, BILLING & USAGE
+// ═════════════════════════════════════════════════════════════════════════════
+
+enum AIProviderType {
+  OPENAI
+  ANTHROPIC
+  GOOGLE
+}
+
+// ─── Platform-Level AI Configuration ────────────────────────────────────────
+// Managed by the platform owner (application developer / SaaS operator).
+// These are the AI providers that the platform makes available to all orgs
+// by default. Platform owner sets their own API keys and per-model pricing.
+
+model PlatformAIProvider {
+  id              String         @id @default(cuid())
+  provider        AIProviderType
+  encryptedApiKey String         // AES-256-GCM encrypted platform API key
+  keyIv           String
+  keyAuthTag      String
+  isActive        Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  models PlatformModelPricing[]
+
+  @@unique([provider])
+  @@map("platform_ai_providers")
+}
+
+model PlatformModelPricing {
+  id                      String         @id @default(cuid())
+  platformProviderId      String
+  provider                AIProviderType
+  modelId                 String         // e.g., "gpt-4o", "claude-sonnet-4-20250514"
+  displayName             String         // e.g., "GPT-4o", "Claude 3.5 Sonnet"
+  inputCostPer1kTokens    Float          // cost per 1,000 input tokens (in cents)
+  outputCostPer1kTokens   Float          // cost per 1,000 output tokens (in cents)
+  isAvailable             Boolean        @default(true)
+  sortOrder               Int            @default(0)
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+
+  platformProvider PlatformAIProvider @relation(fields: [platformProviderId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, modelId])
+  @@map("platform_model_pricing")
+}
+
+// ─── Organization AI Settings ───────────────────────────────────────────────
+// Account admins configure how their org uses AI. They can either use
+// platform-provided AI (billed per token at platform pricing) or bring
+// their own API keys.
+
+model OrgAISettings {
+  id                       String    @id @default(cuid())
+  organizationId           String    @unique
+  defaultProvider          String?   // default AI provider name
+  defaultModel             String?   // default model name
+  // Seat-based limits: multiplied by org user count
+  perSeatTokenBudgetPerMonth Int?    // token budget per seat per month
+  perSeatStoriesPerMonth   Int?      // stories per seat per month
+  // Flat org-wide limits (alternative to seat-based)
+  maxStoriesPerMonth       Int?      // total stories per month for the org
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@map("org_ai_settings")
+}
+
+// NOTE: AI source is resolved per-provider, not globally.
+// If the org has configured their own API key for a provider (AIProviderConfig),
+// that key is used exclusively for that provider. For providers without a
+// custom key, the platform's key is used (and billed at platform pricing).
+// This allows orgs to bring their own key for one provider while still
+// purchasing access to other providers from the platform.
+
+// ─── Per-Role AI Defaults ───────────────────────────────────────────────────
+// Admin can set default AI access rules per role (MEMBER, VIEWER, etc.).
+// These serve as the baseline; individual user overrides take precedence.
+
+model OrgAIRoleDefault {
+  id                  String           @id @default(cuid())
+  organizationId      String
+  role                UserRole
+  allowedProviders    AIProviderType[] // empty = all available
+  allowedModels       String[]         // empty = all available
+  maxTokensPerDay     Int?
+  maxTokensPerMonth   Int?
+  maxStoriesPerMonth  Int?
+  maxRequestsPerDay   Int?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, role])
+  @@map("org_ai_role_defaults")
+}
+
+// ─── Per-User AI Access Control ─────────────────────────────────────────────
+// Admin can override which providers/models individual users can access.
+// Takes precedence over role defaults.
+
+model UserAIAccess {
+  id               String           @id @default(cuid())
+  organizationId   String
+  userId           String
+  allowedProviders AIProviderType[] // empty = inherit from role default
+  allowedModels    String[]         // empty = inherit from role default
+  deniedProviders  AIProviderType[] // explicit denials override allows
+  deniedModels     String[]         // explicit denials override allows
+  grantedById      String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@map("user_ai_access")
+}
+
+// ─── Custom Org-Level API Keys ──────────────────────────────────────────────
+// When an org chooses AISource=CUSTOM, their admin configures API keys here.
+// These are encrypted at rest with AES-256-GCM.
+
+model AIProviderConfig {
+  id               String         @id @default(cuid())
+  organizationId   String
+  provider         AIProviderType
+  encryptedApiKey  String
+  keyIv            String
+  keyAuthTag       String
+  displayName      String?
+  defaultModel     String?
+  embeddingModel   String?
+  isDefault        Boolean        @default(false)
+  isActive         Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, provider])
+  @@map("ai_provider_configs")
+}
+
+// ─── Per-User Prepaid Balance ───────────────────────────────────────────────
+// When using platform AI, each user has a prepaid balance that gets drawn
+// down as they use AI features. Admins top up balances for their users.
+
+model UserAIBalance {
+  id               String   @id @default(cuid())
+  organizationId   String
+  userId           String
+  balanceCents     Int      @default(0) // balance in cents (USD)
+  lifetimeSpentCents Int    @default(0) // total spent over all time
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  transactions UserAITransaction[]
+
+  @@unique([organizationId, userId])
+  @@map("user_ai_balances")
+}
+
+model UserAITransaction {
+  id             String            @id @default(cuid())
+  balanceId      String
+  type           AITransactionType
+  amountCents    Int               // always positive; direction determined by type
+  description    String
+  usageRecordId  String?           // links to AIUsageRecord that caused a DEBIT
+  createdAt      DateTime          @default(now())
+
+  balance UserAIBalance @relation(fields: [balanceId], references: [id])
+
+  @@index([balanceId, createdAt])
+  @@map("user_ai_transactions")
+}
+
+enum AITransactionType {
+  CREDIT    // balance top-up
+  DEBIT     // usage charge
+  REFUND    // reversed charge
+}
+
+// ─── AI Usage Tracking & Limits ─────────────────────────────────────────────
+
+enum AIOperation {
+  STORY_GENERATION
+  QUOTE_EXTRACTION
+  TRANSCRIPT_TAGGING
+  RAG_QUERY
+  EMBEDDING
+}
+
+model AIUsageRecord {
+  id               String       @id @default(cuid())
+  organizationId   String
+  userId           String
+  provider         String       // e.g., "openai", "anthropic"
+  model            String       // e.g., "gpt-4o", "claude-sonnet-4-20250514"
+  operation        AIOperation
+  inputTokens      Int
+  outputTokens     Int
+  totalTokens      Int
+  costCents        Float        @default(0) // computed cost in cents
+  createdAt        DateTime     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, userId, createdAt])
+  @@index([organizationId, createdAt])
+  @@map("ai_usage_records")
+}
+
+model AIUsageLimit {
+  id                   String   @id @default(cuid())
+  organizationId       String
+  userId               String?  // null = org-wide default limit
+  maxTokensPerDay      Int?
+  maxTokensPerMonth    Int?
+  maxRequestsPerDay    Int?
+  maxRequestsPerMonth  Int?
+  maxStoriesPerMonth   Int?     // alternative: cap on case studies generated
+  warningThresholdPct  Int      @default(80)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@unique([organizationId, userId])
+  @@map("ai_usage_limits")
+}
+
+model AIUsageNotification {
+  id               String   @id @default(cuid())
+  organizationId   String
+  userId           String
+  limitType        String   // "daily_tokens", "monthly_tokens", "monthly_stories", etc.
+  thresholdPct     Int      // e.g., 80, 90, 100
+  currentUsage     Int
+  limitValue       Int
+  message          String
+  acknowledged     Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([userId, acknowledged, createdAt])
+  @@map("ai_usage_notifications")
 }
