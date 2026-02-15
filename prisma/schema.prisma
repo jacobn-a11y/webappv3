@@ -485,3 +485,32 @@ enum CRMProvider {
   SALESFORCE
   HUBSPOT
 }
+
+// ─── Notifications ──────────────────────────────────────────────────────────
+
+model Notification {
+  id             String             @id @default(cuid())
+  organizationId String
+  userId         String?            // null = broadcast to all org users
+  type           NotificationType
+  title          String
+  body           String
+  metadata       Json?              // type-specific payload (storyId, callId, pageId, etc.)
+  read           Boolean            @default(false)
+  createdAt      DateTime           @default(now())
+
+  @@index([organizationId, userId, read])
+  @@index([organizationId, createdAt])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  STORY_COMPLETED         // story generation finished
+  CALL_PROCESSED          // call recording processed and indexed
+  CALL_PROCESSING_FAILED  // call processing failed
+  TRIAL_EXPIRING          // trial expires within 3 days
+  TRIAL_EXPIRED           // trial has expired
+  PAGE_PUBLISHED          // landing page was published
+  PAGE_NEEDS_APPROVAL     // landing page submitted for approval
+  EXPORT_READY            // an export file is ready for download
+}

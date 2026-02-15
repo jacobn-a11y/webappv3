@@ -30,6 +30,14 @@ import {
   TranscriptProcessor,
   type ProcessCallJob,
 } from "./services/transcript-processor.js";
+import {
+  globalRateLimiter,
+  expensiveRateLimiter,
+  webhookRateLimiter,
+  authRateLimiter,
+} from "./middleware/rate-limiter.js";
+import { NotificationService } from "./services/notification-service.js";
+import { createNotificationRoutes } from "./api/notification-routes.js";
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -77,12 +85,28 @@ const worker = new Worker<ProcessCallJob>(
   }
 );
 
-worker.on("completed", (job) => {
+// Lazy-initialized notification service for the worker (set after app init)
+let workerNotificationService: NotificationService | null = null;
+
+worker.on("completed", async (job) => {
   console.log(`Job ${job.id} completed for call ${job.data.callId}`);
+  if (workerNotificationService && job.data.organizationId) {
+    await workerNotificationService.notifyCallProcessed(
+      job.data.organizationId,
+      job.data.callId
+    ).catch((err) => console.error("Notification error:", err));
+  }
 });
 
 worker.on("failed", (job, err) => {
   console.error(`Job ${job?.id} failed:`, err.message);
+  if (workerNotificationService && job?.data?.organizationId) {
+    workerNotificationService.notifyCallProcessingFailed(
+      job.data.organizationId,
+      job.data.callId,
+      err.message
+    ).catch((notifErr) => console.error("Notification error:", notifErr));
+  }
 });
 
 // ─── Express App ─────────────────────────────────────────────────────────────
@@ -112,6 +136,7 @@ app.get("/api/health", (_req, res) => {
 // Merge.dev webhook (authenticated by signature, not user auth)
 app.post(
   "/api/webhooks/merge",
+  webhookRateLimiter,
   createMergeWebhookHandler({ prisma, processingQueue })
 );
 
@@ -124,21 +149,26 @@ app.use("/s", createPublicPageRoutes(prisma));
 // Omitted for architectural clarity — see docs/ARCHITECTURE.md for flow.
 
 const trialGate = createTrialGate(prisma, stripe);
+const notificationService = new NotificationService(prisma);
+workerNotificationService = notificationService;
 
 // Billing
-app.post("/api/billing/checkout", createCheckoutHandler(prisma, stripe));
+app.post("/api/billing/checkout", authRateLimiter, createCheckoutHandler(prisma, stripe));
 
-// RAG Chatbot Connector (behind trial gate)
-app.use("/api/rag", trialGate, createRAGRoutes(ragEngine));
+// Global rate limiter on all authenticated routes
+app.use("/api/rag", trialGate, expensiveRateLimiter, createRAGRoutes(ragEngine));
 
-// Story Builder (behind trial gate)
-app.use("/api/stories", trialGate, createStoryRoutes(storyBuilder, prisma));
+// Story Builder (behind trial gate + expensive rate limit)
+app.use("/api/stories", trialGate, expensiveRateLimiter, createStoryRoutes(storyBuilder, prisma, notificationService));
 
 // Landing Pages — CRUD, edit, publish, share (behind trial gate)
-app.use("/api/pages", trialGate, createLandingPageRoutes(prisma));
+app.use("/api/pages", trialGate, globalRateLimiter, createLandingPageRoutes(prisma));
 
 // Dashboard — stats, page list, admin settings, permissions, account access
-app.use("/api/dashboard", trialGate, createDashboardRoutes(prisma));
+app.use("/api/dashboard", trialGate, globalRateLimiter, createDashboardRoutes(prisma));
+
+// Notifications
+app.use("/api/notifications", trialGate, globalRateLimiter, createNotificationRoutes(notificationService));
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 

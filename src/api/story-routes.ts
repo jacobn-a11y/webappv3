@@ -8,6 +8,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { StoryBuilder } from "../services/story-builder.js";
 import type { PrismaClient } from "@prisma/client";
+import type { NotificationService } from "../services/notification-service.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -22,7 +23,8 @@ const BuildStorySchema = z.object({
 
 export function createStoryRoutes(
   storyBuilder: StoryBuilder,
-  prisma: PrismaClient
+  prisma: PrismaClient,
+  notificationService?: NotificationService
 ): Router {
   const router = Router();
 
@@ -58,6 +60,14 @@ export function createStoryRoutes(
         filterTopics: filter_topics as never[],
         title,
       });
+
+      // Send notification that story is ready
+      const userId = (req as Record<string, unknown>).userId as string;
+      if (notificationService && userId) {
+        notificationService
+          .notifyStoryCompleted(organizationId, userId, account_id, result.title)
+          .catch((err) => console.error("Story notification error:", err));
+      }
 
       res.json({
         title: result.title,
