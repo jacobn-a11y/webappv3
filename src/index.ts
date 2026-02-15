@@ -30,6 +30,7 @@ import {
   TranscriptProcessor,
   type ProcessCallJob,
 } from "./services/transcript-processor.js";
+import rateLimit from "express-rate-limit";
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,14 @@ const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 
 const processingQueue = new Queue("call-processing", {
   connection: { url: REDIS_URL },
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 5000 },
+  },
+});
+
+const deadLetterQueue = new Queue("call-processing-dlq", {
+  connection: { url: REDIS_URL },
 });
 
 // Worker processes calls asynchronously
@@ -81,8 +90,17 @@ worker.on("completed", (job) => {
   console.log(`Job ${job.id} completed for call ${job.data.callId}`);
 });
 
-worker.on("failed", (job, err) => {
-  console.error(`Job ${job?.id} failed:`, err.message);
+worker.on("failed", async (job, err) => {
+  console.error(`Job ${job?.id} failed (attempt ${job?.attemptsMade}):`, err.message);
+  if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
+    await deadLetterQueue.add("failed-job", {
+      originalJobId: job.id,
+      data: job.data,
+      failedReason: err.message,
+      failedAt: new Date().toISOString(),
+    });
+    console.error(`Job ${job.id} moved to dead letter queue after ${job.attemptsMade} attempts`);
+  }
 });
 
 // ─── Express App ─────────────────────────────────────────────────────────────
@@ -103,6 +121,30 @@ app.post(
 // All other routes use JSON parsing
 app.use(express.json({ limit: "10mb" }));
 
+// ─── Rate Limiting ──────────────────────────────────────────────────────────
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please try again later." },
+});
+
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const publicPageLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ─── Public Routes ───────────────────────────────────────────────────────────
 
 app.get("/api/health", (_req, res) => {
@@ -112,11 +154,12 @@ app.get("/api/health", (_req, res) => {
 // Merge.dev webhook (authenticated by signature, not user auth)
 app.post(
   "/api/webhooks/merge",
+  webhookLimiter,
   createMergeWebhookHandler({ prisma, processingQueue })
 );
 
 // Public landing pages — no auth, served at /s/:slug
-app.use("/s", createPublicPageRoutes(prisma));
+app.use("/s", publicPageLimiter, createPublicPageRoutes(prisma));
 
 // ─── Authenticated Routes ────────────────────────────────────────────────────
 // In production, WorkOS auth middleware would go here to set req.organizationId,
@@ -126,19 +169,19 @@ app.use("/s", createPublicPageRoutes(prisma));
 const trialGate = createTrialGate(prisma, stripe);
 
 // Billing
-app.post("/api/billing/checkout", createCheckoutHandler(prisma, stripe));
+app.post("/api/billing/checkout", apiLimiter, createCheckoutHandler(prisma, stripe));
 
 // RAG Chatbot Connector (behind trial gate)
-app.use("/api/rag", trialGate, createRAGRoutes(ragEngine));
+app.use("/api/rag", apiLimiter, trialGate, createRAGRoutes(ragEngine));
 
 // Story Builder (behind trial gate)
-app.use("/api/stories", trialGate, createStoryRoutes(storyBuilder, prisma));
+app.use("/api/stories", apiLimiter, trialGate, createStoryRoutes(storyBuilder, prisma));
 
 // Landing Pages — CRUD, edit, publish, share (behind trial gate)
-app.use("/api/pages", trialGate, createLandingPageRoutes(prisma));
+app.use("/api/pages", apiLimiter, trialGate, createLandingPageRoutes(prisma));
 
 // Dashboard — stats, page list, admin settings, permissions, account access
-app.use("/api/dashboard", trialGate, createDashboardRoutes(prisma));
+app.use("/api/dashboard", apiLimiter, trialGate, createDashboardRoutes(prisma));
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 
@@ -160,6 +203,7 @@ process.on("SIGTERM", async () => {
   console.log("SIGTERM received, shutting down...");
   await worker.close();
   await processingQueue.close();
+  await deadLetterQueue.close();
   await prisma.$disconnect();
   process.exit(0);
 });

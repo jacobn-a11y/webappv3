@@ -52,8 +52,8 @@ const PII_PATTERNS: Array<{ type: PIIType; regex: RegExp; replacement: string }>
   },
   {
     type: "ssn",
-    // SSN: 123-45-6789 or 123 45 6789
-    regex: /\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b/g,
+    // SSN: 123-45-6789 or 123 45 6789 (with consistent delimiters and valid ranges)
+    regex: /\b(?!000|666|9\d{2})\d{3}([-\s])(?!00)\d{2}\1(?!0000)\d{4}\b/g,
     replacement: "[SSN_REDACTED]",
   },
   {

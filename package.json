@@ -27,7 +27,8 @@
     "winston": "^3.14.0",
     "bullmq": "^5.20.0",
     "markdown-it": "^14.0.0",
-    "bcryptjs": "^2.4.3"
+    "bcryptjs": "^2.4.3",
+    "express-rate-limit": "^7.0.0"
   },
   "devDependencies": {
     "prisma": "^5.20.0",

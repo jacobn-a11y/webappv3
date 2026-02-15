@@ -12,6 +12,7 @@
 
 import crypto from "crypto";
 import type { PrismaClient, PageVisibility, PageStatus } from "@prisma/client";
+import bcrypt from "bcryptjs";
 import { CompanyScrubber } from "./company-scrubber.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -247,7 +248,7 @@ export class LandingPageEditor {
         calloutBoxes: scrubbedCallouts ?? undefined,
         status: "PUBLISHED",
         visibility: options.visibility,
-        password: options.password ?? null,
+        password: options.password ? await bcrypt.hash(options.password, 10) : null,
         expiresAt: options.expiresAt ?? null,
         publishedAt: new Date(),
         noIndex: true, // always noindex
@@ -336,7 +337,11 @@ export class LandingPageEditor {
     if (page.visibility === "PRIVATE") return null;
 
     // Check password
-    if (page.password && page.password !== password) return null;
+    if (page.password) {
+      if (!password) return null;
+      const valid = await bcrypt.compare(password, page.password);
+      if (!valid) return null;
+    }
 
     // Increment view count
     await this.prisma.landingPage.update({

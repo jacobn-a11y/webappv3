@@ -11,65 +11,18 @@
  *   - Optionally password-protected
  */
 
-import { Router, type Request, type Response } from "express";
+import express, { Router, type Request, type Response } from "express";
+import bcrypt from "bcryptjs";
+import MarkdownIt from "markdown-it";
 import { LandingPageEditor, type CalloutBox } from "../services/landing-page-editor.js";
 import type { PrismaClient } from "@prisma/client";
 
-// ─── Markdown to HTML (simple converter) ─────────────────────────────────────
+// ─── Markdown to HTML ────────────────────────────────────────────────────────
 
-function markdownToHtml(md: string): string {
-  let html = md
-    // Headers
-    .replace(/^#### (.+)$/gm, "<h4>$1</h4>")
-    .replace(/^### (.+)$/gm, "<h3>$1</h3>")
-    .replace(/^## (.+)$/gm, "<h2>$1</h2>")
-    .replace(/^# (.+)$/gm, "<h1>$1</h1>")
-    // Bold
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    // Italic
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    // Blockquotes
-    .replace(/^> (.+)$/gm, '<blockquote><p>$1</p></blockquote>')
-    // Unordered lists
-    .replace(/^- (.+)$/gm, "<li>$1</li>")
-    // Horizontal rules
-    .replace(/^---$/gm, "<hr>")
-    // Tables (basic)
-    .replace(/^\|(.+)\|$/gm, (_, content: string) => {
-      const cells = content.split("|").map((c: string) => c.trim());
-      const tds = cells.map((c: string) => `<td>${c}</td>`).join("");
-      return `<tr>${tds}</tr>`;
-    })
-    // Line breaks
-    .replace(/\n\n/g, "</p><p>")
-    .replace(/\n/g, "<br>");
+const markdownParser = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
-  // Wrap loose <li> in <ul>
-  html = html.replace(
-    /(<li>.*?<\/li>(?:<br>)?)+/g,
-    (match) => `<ul>${match.replace(/<br>/g, "")}</ul>`
-  );
-
-  // Wrap in paragraphs
-  html = `<p>${html}</p>`;
-
-  // Clean up empty paragraphs
-  html = html.replace(/<p><\/p>/g, "");
-  html = html.replace(/<p>(<h[1-4]>)/g, "$1");
-  html = html.replace(/(<\/h[1-4]>)<\/p>/g, "$1");
-  html = html.replace(/<p>(<blockquote>)/g, "$1");
-  html = html.replace(/(<\/blockquote>)<\/p>/g, "$1");
-  html = html.replace(/<p>(<ul>)/g, "$1");
-  html = html.replace(/(<\/ul>)<\/p>/g, "$1");
-  html = html.replace(/<p>(<hr>)<\/p>/g, "$1");
-
-  // Wrap adjacent <tr> in <table>
-  html = html.replace(
-    /(<tr>.*?<\/tr>(?:\s*<tr>.*?<\/tr>)*)/g,
-    '<table>$1</table>'
-  );
-
-  return html;
+function markdownToHtml(markdown: string): string {
+  return markdownParser.render(markdown);
 }
 
 // ─── Callout Box Icon SVGs ───────────────────────────────────────────────────
@@ -275,7 +228,7 @@ function renderLandingPageHtml(page: {
       margin: 1.5rem 0;
       font-size: 0.9rem;
     }
-    .content table tr:first-child td { font-weight: 600; background: var(--color-accent-light); }
+    .content th { font-weight: 600; background: var(--color-accent-light); padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); }
     .content td {
       padding: 0.6rem 0.8rem;
       border: 1px solid var(--color-border);
@@ -398,7 +351,7 @@ function renderPasswordPage(slug: string): string {
     <h2>This page is protected</h2>
     <p>Enter the password to view this story.</p>
     <div class="error" id="error">Incorrect password. Please try again.</div>
-    <form method="GET" action="/s/${escapeHtml(slug)}">
+    <form method="POST" action="/s/${escapeHtml(slug)}">
       <input type="password" name="p" placeholder="Password" required autofocus />
       <button type="submit">View Story</button>
     </form>
@@ -411,6 +364,7 @@ function renderPasswordPage(slug: string): string {
 
 export function createPublicPageRoutes(prisma: PrismaClient): Router {
   const router = Router();
+  router.use(express.urlencoded({ extended: false }));
   const editor = new LandingPageEditor(prisma);
 
   /**
@@ -420,9 +374,9 @@ export function createPublicPageRoutes(prisma: PrismaClient): Router {
    * No authentication required (it's public), but respects visibility
    * and password settings.
    */
-  router.get("/:slug", async (req: Request, res: Response) => {
+  const pageHandler = async (req: Request, res: Response) => {
     const { slug } = req.params;
-    const password = req.query.p as string | undefined;
+    const password = (req.method === "POST" ? req.body?.p : req.query?.p) as string | undefined;
 
     // Check if page exists and needs a password
     const rawPage = await prisma.landingPage.findUnique({
@@ -456,9 +410,12 @@ export function createPublicPageRoutes(prisma: PrismaClient): Router {
       return;
     }
 
-    if (rawPage.password && password !== rawPage.password) {
-      res.status(200).send(renderPasswordPage(slug));
-      return;
+    if (rawPage.password && password) {
+      const valid = await bcrypt.compare(password, rawPage.password);
+      if (!valid) {
+        res.status(200).send(renderPasswordPage(slug));
+        return;
+      }
     }
 
     // Fetch and render
@@ -472,7 +429,10 @@ export function createPublicPageRoutes(prisma: PrismaClient): Router {
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.setHeader("Cache-Control", "private, no-cache");
     res.send(renderLandingPageHtml(page));
-  });
+  };
+
+  router.get("/:slug", pageHandler);
+  router.post("/:slug", pageHandler);
 
   return router;
 }

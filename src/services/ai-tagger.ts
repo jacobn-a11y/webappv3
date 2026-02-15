@@ -161,35 +161,37 @@ ${chunkText}
       throw new Error(`No transcript found for call ${callId}`);
     }
 
-    const results: ChunkTaggingResult[] = [];
+    const results: ChunkTaggingResult[] = await Promise.all(
+      transcript.chunks.map(async (chunk) => {
+        const tags = await this.tagChunk(chunk.text);
 
-    for (const chunk of transcript.chunks) {
-      const tags = await this.tagChunk(chunk.text);
+        // Persist chunk-level tags in parallel
+        await Promise.all(
+          tags.map((tag) =>
+            this.prisma.chunkTag.upsert({
+              where: {
+                chunkId_funnelStage_topic: {
+                  chunkId: chunk.id,
+                  funnelStage: tag.funnelStage,
+                  topic: tag.topic,
+                },
+              },
+              create: {
+                chunkId: chunk.id,
+                funnelStage: tag.funnelStage,
+                topic: tag.topic,
+                confidence: tag.confidence,
+              },
+              update: {
+                confidence: tag.confidence,
+              },
+            })
+          )
+        );
 
-      // Persist chunk-level tags
-      for (const tag of tags) {
-        await this.prisma.chunkTag.upsert({
-          where: {
-            chunkId_funnelStage_topic: {
-              chunkId: chunk.id,
-              funnelStage: tag.funnelStage,
-              topic: tag.topic,
-            },
-          },
-          create: {
-            chunkId: chunk.id,
-            funnelStage: tag.funnelStage,
-            topic: tag.topic,
-            confidence: tag.confidence,
-          },
-          update: {
-            confidence: tag.confidence,
-          },
-        });
-      }
-
-      results.push({ chunkId: chunk.id, tags });
-    }
+        return { chunkId: chunk.id, tags };
+      })
+    );
 
     // Aggregate chunk tags to call-level tags (highest confidence per topic)
     await this.aggregateCallTags(callId, results);
@@ -263,19 +265,21 @@ ${chunkText}
       }
     }
 
-    // Upsert call-level tags
-    for (const { stage, topic, confidence } of tagMap.values()) {
-      await this.prisma.callTag.upsert({
-        where: {
-          callId_funnelStage_topic: {
-            callId,
-            funnelStage: stage,
-            topic,
+    // Upsert call-level tags in parallel
+    await Promise.all(
+      Array.from(tagMap.values()).map(({ stage, topic, confidence }) =>
+        this.prisma.callTag.upsert({
+          where: {
+            callId_funnelStage_topic: {
+              callId,
+              funnelStage: stage,
+              topic,
+            },
           },
-        },
-        create: { callId, funnelStage: stage, topic, confidence },
-        update: { confidence },
-      });
-    }
+          create: { callId, funnelStage: stage, topic, confidence },
+          update: { confidence },
+        })
+      )
+    );
   }
 }
