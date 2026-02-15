@@ -17,7 +17,7 @@ import type { PrismaClient } from "@prisma/client";
 
 // ─── Markdown to HTML (simple converter) ─────────────────────────────────────
 
-function markdownToHtml(md: string): string {
+export function markdownToHtml(md: string): string {
   let html = md
     // Headers
     .replace(/^#### (.+)$/gm, "<h4>$1</h4>")
@@ -91,7 +91,7 @@ const CALLOUT_ICONS: Record<string, string> = {
 
 // ─── HTML Template ───────────────────────────────────────────────────────────
 
-function renderLandingPageHtml(page: {
+export function renderLandingPageHtml(page: {
   title: string;
   subtitle: string | null;
   body: string;
@@ -489,7 +489,7 @@ function render410(): string {
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
 
-function escapeHtml(str: string): string {
+export function escapeHtml(str: string): string {
   return str
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

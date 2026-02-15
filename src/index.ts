@@ -16,6 +16,7 @@ import { createMergeWebhookHandler } from "./webhooks/merge-webhook.js";
 import { createRAGRoutes } from "./api/rag-routes.js";
 import { createStoryRoutes } from "./api/story-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
+import { createExportRoutes } from "./api/export-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
 import {
@@ -136,6 +137,9 @@ app.use("/api/stories", trialGate, createStoryRoutes(storyBuilder, prisma));
 
 // Landing Pages — CRUD, edit, publish, share (behind trial gate)
 app.use("/api/pages", trialGate, createLandingPageRoutes(prisma));
+
+// Landing Page Exports — PDF, Google Doc, Slack (behind trial gate)
+app.use("/api/pages", trialGate, createExportRoutes(prisma));
 
 // Dashboard — stats, page list, admin settings, permissions, account access
 app.use("/api/dashboard", trialGate, createDashboardRoutes(prisma));
