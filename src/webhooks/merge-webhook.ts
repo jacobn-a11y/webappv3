@@ -5,11 +5,18 @@
  *  - A new recording is created (from Gong, Chorus, Zoom, etc.)
  *  - A CRM record is updated (Salesforce/HubSpot contact, opportunity, etc.)
  *
+ * GATED: This handler checks for an active MERGE_DEV IntegrationConfig
+ * for the target organization. When Merge.dev is not enabled (no config
+ * or config.enabled=false), webhooks are acknowledged but not processed.
+ * This allows operators to use direct integrations (Grain, Gong, SFDC)
+ * for the pilot and re-enable Merge.dev later for multi-provider SaaS use.
+ *
  * Flow:
  *   1. Verify webhook signature
- *   2. Parse the event type and payload
- *   3. Dispatch to the appropriate handler
- *   4. Queue async processing (transcription, entity resolution, tagging)
+ *   2. Check if Merge.dev is enabled for this org (IntegrationConfig gate)
+ *   3. Parse the event type and payload
+ *   4. Dispatch to the appropriate handler
+ *   5. Queue async processing (transcription, entity resolution, tagging)
  */
 
 import type { Request, Response } from "express";
@@ -94,6 +101,7 @@ function verifyMergeSignature(
 function mapIntegrationToProvider(integration: string): CallProvider {
   const map: Record<string, CallProvider> = {
     gong: "GONG",
+    grain: "GRAIN",
     chorus: "CHORUS",
     zoom: "ZOOM",
     "google-meet": "GOOGLE_MEET",
@@ -146,6 +154,27 @@ export function createMergeWebhookHandler(deps: {
     if (!org) {
       // Acknowledge but skip — no matching org
       res.json({ received: true, processed: false });
+      return;
+    }
+
+    // ── Check if Merge.dev is enabled for this org ────────────────────
+    const mergeConfig = await prisma.integrationConfig.findUnique({
+      where: {
+        organizationId_provider: {
+          organizationId: org.id,
+          provider: "MERGE_DEV",
+        },
+      },
+    });
+
+    if (!mergeConfig || !mergeConfig.enabled) {
+      // Merge.dev is not enabled for this org — acknowledge but skip.
+      // The org is using direct integrations (Grain, Gong, SFDC) instead.
+      res.json({
+        received: true,
+        processed: false,
+        reason: "Merge.dev integration is not enabled for this organization",
+      });
       return;
     }
 

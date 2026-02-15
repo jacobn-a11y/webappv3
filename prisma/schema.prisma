@@ -19,12 +19,13 @@ model Organization {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  users        User[]
-  accounts     Account[]
-  calls        Call[]
-  stories      Story[]
-  landingPages LandingPage[]
-  orgSettings  OrgSettings?
+  users              User[]
+  accounts           Account[]
+  calls              Call[]
+  stories            Story[]
+  landingPages       LandingPage[]
+  orgSettings        OrgSettings?
+  integrationConfigs IntegrationConfig[]
 
   @@map("organizations")
 }
@@ -157,6 +158,7 @@ model Call {
 
 enum CallProvider {
   GONG
+  GRAIN
   CHORUS
   ZOOM
   GOOGLE_MEET
@@ -484,4 +486,44 @@ enum AccountScopeType {
 enum CRMProvider {
   SALESFORCE
   HUBSPOT
+}
+
+// ─── Integration Configurations ─────────────────────────────────────────────
+// Per-org, per-provider configuration. Stores credentials and sync state
+// for direct integrations (Grain, Gong, Salesforce) or the Merge.dev
+// unified API. Operators can enable/disable each provider independently.
+
+model IntegrationConfig {
+  id             String              @id @default(cuid())
+  organizationId String
+  provider       IntegrationProvider
+  enabled        Boolean             @default(true)
+  credentials    Json                // API keys, tokens, etc. (encrypted at rest by infra)
+  settings       Json?               // Provider-specific settings (e.g., filters, sync options)
+  lastSyncAt     DateTime?           // Last successful sync timestamp
+  syncCursor     String?             // Pagination/incremental-sync cursor
+  webhookSecret  String?             // Per-integration webhook verification secret
+  status         IntegrationStatus   @default(PENDING_SETUP)
+  lastError      String?             // Last sync error message (null when healthy)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, provider])
+  @@map("integration_configs")
+}
+
+enum IntegrationProvider {
+  GRAIN
+  GONG
+  SALESFORCE
+  MERGE_DEV
+}
+
+enum IntegrationStatus {
+  PENDING_SETUP   // Created but not yet validated
+  ACTIVE          // Credentials validated, syncing
+  ERROR           // Last sync failed
+  DISABLED        // Manually disabled by admin
 }
