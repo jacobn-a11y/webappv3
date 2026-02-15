@@ -12,6 +12,8 @@ import type { PrismaClient } from "@prisma/client";
 import { AITagger } from "./ai-tagger.js";
 import { RAGEngine } from "./rag-engine.js";
 import { maskPII } from "../middleware/pii-masker.js";
+import logger from "../lib/logger.js";
+import { metrics } from "../lib/metrics.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -86,7 +88,7 @@ export class TranscriptProcessor {
     });
 
     if (!transcript) {
-      console.warn(`No transcript for call ${callId}, skipping`);
+      logger.warn("No transcript for call, skipping", { callId });
       return;
     }
 
@@ -138,8 +140,11 @@ export class TranscriptProcessor {
       }
     }
 
-    console.log(
-      `Processed call ${callId}: ${rawChunks.length} chunks, ${taggingResults.length} tagged`
-    );
+    metrics.incrementTranscriptsProcessed();
+    logger.info("Processed call", {
+      callId,
+      chunksCount: rawChunks.length,
+      tagsCount: taggingResults.length,
+    });
   }
 }

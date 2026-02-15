@@ -15,6 +15,8 @@ import {
   TOPIC_LABELS,
   type TaxonomyTopic,
 } from "../types/taxonomy.js";
+import logger from "../lib/logger.js";
+import { metrics } from "../lib/metrics.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -186,6 +188,9 @@ ${chunkText}
             confidence: tag.confidence,
           },
         });
+
+        // Record tagging confidence for metrics
+        metrics.recordTaggingConfidence(tag.funnelStage, tag.confidence);
       }
 
       results.push({ chunkId: chunk.id, tags });
@@ -193,6 +198,12 @@ ${chunkText}
 
     // Aggregate chunk tags to call-level tags (highest confidence per topic)
     await this.aggregateCallTags(callId, results);
+
+    logger.info("Tagged call transcript", {
+      callId,
+      chunksTagged: results.length,
+      totalTags: results.reduce((sum, r) => sum + r.tags.length, 0),
+    });
 
     return results;
   }
