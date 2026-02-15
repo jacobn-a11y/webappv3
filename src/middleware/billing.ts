@@ -1,16 +1,22 @@
 /**
- * Stripe Billing Middleware — Free Trial & Usage Gate
+ * Billing Middleware — Commercialization Gate & Pricing Enforcement
  *
- * Implements PLG (Product-Led Growth) billing logic:
- *  - 14-day free trial with no credit card required
- *  - Usage-based billing on transcript minutes processed
- *  - Trial expiration gate on protected routes
- *  - Stripe webhook handling for subscription lifecycle
+ * All billing enforcement is gated behind Organization.billingEnabled.
+ * When billingEnabled is false (default for internal use), every gate
+ * is a no-op and the app functions without any commercial restrictions.
+ *
+ * When billingEnabled is true, enforces:
+ *   - Trial expiration (14-day free trial)
+ *   - Seat limits (PER_SEAT / METERED_PLUS_SEAT plans)
+ *   - Usage-based metering (METERED / METERED_PLUS_SEAT plans)
+ *   - Stripe webhook lifecycle for self-serve customers
+ *   - B2B/sales-led subscription management
  */
 
 import type { Request, Response, NextFunction } from "express";
-import Stripe from "stripe";
+import type Stripe from "stripe";
 import type { PrismaClient } from "@prisma/client";
+import { PricingService } from "../services/pricing.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -18,14 +24,14 @@ interface AuthenticatedRequest extends Request {
   organizationId?: string;
 }
 
-// ─── Free Trial Middleware ────────────────────────────────────────────────────
+// ─── Commercialization Gate Middleware ────────────────────────────────────────
 
 /**
  * Middleware that checks if the org has an active subscription or is within
- * their free trial period. Blocks access if the trial has expired and no
- * active subscription exists.
+ * their free trial period. When billing is disabled for the org, this is
+ * a passthrough — all requests are allowed.
  */
-export function createTrialGate(prisma: PrismaClient, stripe: Stripe) {
+export function createTrialGate(prisma: PrismaClient) {
   return async (
     req: AuthenticatedRequest,
     res: Response,
@@ -46,13 +52,19 @@ export function createTrialGate(prisma: PrismaClient, stripe: Stripe) {
       return;
     }
 
-    // Active paid plan — allow through
+    // ── Commercialization gate: if billing is off, always allow ────────
+    if (!org.billingEnabled) {
+      next();
+      return;
+    }
+
+    // ── Active paid plan — allow through ──────────────────────────────
     if (org.plan !== "FREE_TRIAL") {
       next();
       return;
     }
 
-    // Check trial expiration
+    // ── Check trial expiration ────────────────────────────────────────
     if (org.trialEndsAt && new Date() > org.trialEndsAt) {
       res.status(402).json({
         error: "trial_expired",
@@ -68,9 +80,67 @@ export function createTrialGate(prisma: PrismaClient, stripe: Stripe) {
 }
 
 /**
- * Creates a Stripe Checkout session for upgrading from free trial.
+ * Middleware that enforces seat limits. When billing is disabled or the
+ * plan is metered-only, this is a passthrough.
  */
-export function createCheckoutHandler(prisma: PrismaClient, stripe: Stripe) {
+export function createSeatGate(prisma: PrismaClient) {
+  return async (
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
+  ) => {
+    const orgId = req.organizationId;
+    if (!orgId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+
+    const org = await prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { billingEnabled: true, pricingModel: true, seatLimit: true },
+    });
+
+    if (!org) {
+      res.status(404).json({ error: "Organization not found" });
+      return;
+    }
+
+    // No enforcement if billing is off or plan is metered-only
+    if (!org.billingEnabled || org.pricingModel === "METERED") {
+      next();
+      return;
+    }
+
+    // Check seat count vs limit
+    if (org.seatLimit !== null) {
+      const currentSeats = await prisma.user.count({
+        where: { organizationId: orgId },
+      });
+      if (currentSeats >= org.seatLimit) {
+        res.status(403).json({
+          error: "seat_limit_reached",
+          message: `Your plan allows ${org.seatLimit} seats. Please upgrade to add more users.`,
+          currentSeats,
+          seatLimit: org.seatLimit,
+        });
+        return;
+      }
+    }
+
+    next();
+  };
+}
+
+// ─── Checkout Handler ────────────────────────────────────────────────────────
+
+/**
+ * Creates a Stripe Checkout session. Supports metered, per-seat, and
+ * hybrid pricing based on the org's configured pricing model.
+ */
+export function createCheckoutHandler(
+  prisma: PrismaClient,
+  pricingService: PricingService
+) {
   return async (req: AuthenticatedRequest, res: Response) => {
     const orgId = req.organizationId;
     if (!orgId) {
@@ -81,90 +151,62 @@ export function createCheckoutHandler(prisma: PrismaClient, stripe: Stripe) {
     const org = await prisma.organization.findUnique({
       where: { id: orgId },
     });
-
     if (!org) {
       res.status(404).json({ error: "Organization not found" });
       return;
     }
 
-    // Create or retrieve Stripe customer
-    let customerId = org.stripeCustomerId;
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        metadata: { organizationId: orgId, organizationName: org.name },
+    // If billing is not enabled, return informational response
+    if (!org.billingEnabled) {
+      res.status(400).json({
+        error: "billing_not_enabled",
+        message: "Billing is not enabled for this organization.",
       });
-      customerId = customer.id;
-      await prisma.organization.update({
-        where: { id: orgId },
-        data: { stripeCustomerId: customerId },
-      });
-    }
-
-    const priceId = process.env.STRIPE_FREE_TRIAL_PRICE_ID;
-    if (!priceId) {
-      res.status(500).json({ error: "Billing not configured" });
       return;
     }
 
-    // Create checkout session with usage-based pricing
-    const session = await stripe.checkout.sessions.create({
-      customer: customerId,
-      mode: "subscription",
-      line_items: [{ price: priceId }],
-      success_url: `${process.env.APP_URL}/settings/billing?success=true`,
-      cancel_url: `${process.env.APP_URL}/settings/billing?canceled=true`,
-      subscription_data: {
-        metadata: { organizationId: orgId },
-      },
-    });
+    // B2B orgs don't self-checkout
+    if (org.billingChannel === "SALES_LED") {
+      res.status(400).json({
+        error: "sales_led_billing",
+        message:
+          "Your organization uses invoice-based billing. Contact your account manager to modify your subscription.",
+      });
+      return;
+    }
 
-    res.json({ checkoutUrl: session.url });
+    try {
+      const seatCount = req.body?.seat_count
+        ? parseInt(req.body.seat_count, 10)
+        : undefined;
+
+      const checkoutUrl = await pricingService.createCheckoutSession(
+        orgId,
+        { seatCount }
+      );
+
+      if (!checkoutUrl) {
+        res.status(500).json({ error: "Billing not configured — no price IDs set." });
+        return;
+      }
+
+      res.json({ checkoutUrl });
+    } catch (err) {
+      console.error("Checkout error:", err);
+      res.status(500).json({ error: "Failed to create checkout session" });
+    }
   };
 }
 
-/**
- * Reports usage to Stripe for metered billing.
- * Called after each transcript is processed.
- */
-export async function reportTranscriptUsage(
-  stripe: Stripe,
-  prisma: PrismaClient,
-  organizationId: string,
-  transcriptMinutes: number
-): Promise<void> {
-  const org = await prisma.organization.findUnique({
-    where: { id: organizationId },
-  });
-
-  if (!org?.stripeCustomerId) return;
-
-  // Find the active subscription
-  const subscriptions = await stripe.subscriptions.list({
-    customer: org.stripeCustomerId,
-    status: "active",
-    limit: 1,
-  });
-
-  const subscription = subscriptions.data[0];
-  if (!subscription) return;
-
-  // Find the metered subscription item
-  const meteredItem = subscription.items.data[0];
-  if (!meteredItem) return;
-
-  // Report usage (in minutes)
-  await stripe.subscriptionItems.createUsageRecord(meteredItem.id, {
-    quantity: Math.ceil(transcriptMinutes),
-    action: "increment",
-  });
-}
+// ─── Stripe Webhook Handler ──────────────────────────────────────────────────
 
 /**
  * Stripe webhook handler for subscription lifecycle events.
+ * Delegates to PricingService for processing.
  */
 export function createStripeWebhookHandler(
-  prisma: PrismaClient,
-  stripe: Stripe
+  stripe: Stripe,
+  pricingService: PricingService
 ) {
   return async (req: Request, res: Response) => {
     const sig = req.headers["stripe-signature"] as string;
@@ -183,44 +225,33 @@ export function createStripeWebhookHandler(
       return;
     }
 
-    switch (event.type) {
-      case "checkout.session.completed": {
-        const session = event.data.object as Stripe.Checkout.Session;
-        const orgId = session.metadata?.organizationId;
-        if (orgId) {
-          await prisma.organization.update({
-            where: { id: orgId },
-            data: { plan: "STARTER", trialEndsAt: null },
-          });
-        }
-        break;
-      }
-
-      case "customer.subscription.updated": {
-        const subscription = event.data.object as Stripe.Subscription;
-        const orgId = subscription.metadata.organizationId;
-        if (orgId && subscription.status === "active") {
-          await prisma.organization.update({
-            where: { id: orgId },
-            data: { plan: "STARTER" },
-          });
-        }
-        break;
-      }
-
-      case "customer.subscription.deleted": {
-        const subscription = event.data.object as Stripe.Subscription;
-        const orgId = subscription.metadata.organizationId;
-        if (orgId) {
-          await prisma.organization.update({
-            where: { id: orgId },
-            data: { plan: "FREE_TRIAL" },
-          });
-        }
-        break;
-      }
+    try {
+      await pricingService.handleSubscriptionEvent(event);
+    } catch (err) {
+      console.error("Stripe webhook processing error:", err);
     }
 
     res.json({ received: true });
   };
+}
+
+// ─── Usage Reporting Helper ──────────────────────────────────────────────────
+
+/**
+ * Reports transcript usage through the pricing service.
+ * Records locally always; only reports to Stripe when billing is enabled
+ * and the plan is metered.
+ */
+export async function reportTranscriptUsage(
+  pricingService: PricingService,
+  organizationId: string,
+  transcriptMinutes: number,
+  callId?: string
+): Promise<void> {
+  await pricingService.recordUsage(
+    organizationId,
+    "TRANSCRIPT_MINUTES",
+    transcriptMinutes,
+    callId ? { callId } : undefined
+  );
 }

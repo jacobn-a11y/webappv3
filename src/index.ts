@@ -3,6 +3,9 @@
  *
  * Wires together all services, middleware, and routes into a single Express
  * application with BullMQ worker for async transcript processing.
+ *
+ * Billing/commercialization is fully optional and off by default.
+ * Set BILLING_ENABLED=true and configure Stripe env vars to activate.
  */
 
 import express from "express";
@@ -23,6 +26,7 @@ import {
   createCheckoutHandler,
   createStripeWebhookHandler,
 } from "./middleware/billing.js";
+import { PricingService } from "./services/pricing.js";
 import { AITagger } from "./services/ai-tagger.js";
 import { RAGEngine } from "./services/rag-engine.js";
 import { StoryBuilder } from "./services/story-builder.js";
@@ -56,6 +60,20 @@ const transcriptProcessor = new TranscriptProcessor(
   aiTagger,
   ragEngine
 );
+
+// ─── Pricing Service ────────────────────────────────────────────────────────
+
+const pricingService = new PricingService(prisma, stripe, {
+  meteredPriceId: process.env.STRIPE_METERED_PRICE_ID,
+  seatPriceId: process.env.STRIPE_SEAT_PRICE_ID,
+  defaultSeatLimit: process.env.DEFAULT_SEAT_LIMIT
+    ? parseInt(process.env.DEFAULT_SEAT_LIMIT, 10)
+    : undefined,
+  trialDays: parseInt(process.env.TRIAL_DAYS ?? "14", 10),
+  includedMinutes: process.env.INCLUDED_MINUTES
+    ? parseInt(process.env.INCLUDED_MINUTES, 10)
+    : undefined,
+});
 
 // ─── BullMQ Queue ────────────────────────────────────────────────────────────
 
@@ -97,7 +115,7 @@ app.use(cors());
 app.post(
   "/api/webhooks/stripe",
   express.raw({ type: "application/json" }),
-  createStripeWebhookHandler(prisma, stripe)
+  createStripeWebhookHandler(stripe, pricingService)
 );
 
 // All other routes use JSON parsing
@@ -123,10 +141,13 @@ app.use("/s", createPublicPageRoutes(prisma));
 // req.userId, and req.userRole.
 // Omitted for architectural clarity — see docs/ARCHITECTURE.md for flow.
 
-const trialGate = createTrialGate(prisma, stripe);
+const trialGate = createTrialGate(prisma);
 
 // Billing
-app.post("/api/billing/checkout", createCheckoutHandler(prisma, stripe));
+app.post(
+  "/api/billing/checkout",
+  createCheckoutHandler(prisma, pricingService)
+);
 
 // RAG Chatbot Connector (behind trial gate)
 app.use("/api/rag", trialGate, createRAGRoutes(ragEngine));
@@ -137,8 +158,12 @@ app.use("/api/stories", trialGate, createStoryRoutes(storyBuilder, prisma));
 // Landing Pages — CRUD, edit, publish, share (behind trial gate)
 app.use("/api/pages", trialGate, createLandingPageRoutes(prisma));
 
-// Dashboard — stats, page list, admin settings, permissions, account access
-app.use("/api/dashboard", trialGate, createDashboardRoutes(prisma));
+// Dashboard — stats, page list, admin settings, permissions, account access, billing
+app.use(
+  "/api/dashboard",
+  trialGate,
+  createDashboardRoutes(prisma, pricingService)
+);
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 
@@ -153,6 +178,9 @@ app.listen(PORT, () => {
   console.log(`  Dashboard:  http://localhost:${PORT}/api/dashboard`);
   console.log(`  Public:     http://localhost:${PORT}/s/:slug`);
   console.log(`  Webhook:    http://localhost:${PORT}/api/webhooks/merge`);
+  console.log(
+    `  Billing:    commercialization code present, enforced per-org via billingEnabled flag`
+  );
 });
 
 // Graceful shutdown

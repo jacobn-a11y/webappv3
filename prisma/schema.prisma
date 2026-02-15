@@ -10,21 +10,28 @@ datasource db {
 // ─── Auth & Tenancy ──────────────────────────────────────────────────────────
 
 model Organization {
-  id               String    @id @default(cuid())
+  id               String          @id @default(cuid())
   name             String
-  workosOrgId      String?   @unique
-  stripeCustomerId String?   @unique
-  plan             Plan      @default(FREE_TRIAL)
+  workosOrgId      String?         @unique
+  stripeCustomerId String?         @unique
+  plan             Plan            @default(FREE_TRIAL)
+  pricingModel     PricingModel    @default(METERED)
+  billingChannel   BillingChannel  @default(SELF_SERVE)
+  billingEnabled   Boolean         @default(false) // master gate: when false, all billing checks are bypassed
+  seatLimit        Int?            // max seats for PER_SEAT / METERED_PLUS_SEAT plans (null = unlimited)
   trialEndsAt      DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  contractEndsAt   DateTime?       // B2B: end of current contract period
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
-  users        User[]
-  accounts     Account[]
-  calls        Call[]
-  stories      Story[]
-  landingPages LandingPage[]
-  orgSettings  OrgSettings?
+  users         User[]
+  accounts      Account[]
+  calls         Call[]
+  stories       Story[]
+  landingPages  LandingPage[]
+  orgSettings   OrgSettings?
+  subscriptions Subscription[]
+  usageRecords  UsageRecord[]
 
   @@map("organizations")
 }
@@ -34,6 +41,17 @@ enum Plan {
   STARTER
   PROFESSIONAL
   ENTERPRISE
+}
+
+enum PricingModel {
+  METERED         // pay per transcript-minute processed
+  PER_SEAT        // flat rate per user seat
+  METERED_PLUS_SEAT // base per-seat fee + metered overages
+}
+
+enum BillingChannel {
+  SELF_SERVE   // PLG: customer signs up and pays via Stripe Checkout
+  SALES_LED    // B2B: sales team creates invoice / negotiated contract
 }
 
 model User {
@@ -400,6 +418,73 @@ model LandingPageEdit {
 
   @@index([landingPageId])
   @@map("landing_page_edits")
+}
+
+// ─── Subscriptions & Billing ─────────────────────────────────────────────────
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  organizationId       String
+  stripeSubscriptionId String?            @unique // null for SALES_LED (invoice-based)
+  pricingModel         PricingModel
+  billingChannel       BillingChannel
+  status               SubscriptionStatus @default(ACTIVE)
+  // Per-seat fields
+  seatCount            Int?               // current paid seats
+  seatUnitPrice        Int?               // price per seat in cents (monthly)
+  // Metered fields
+  meteredUnitPrice     Int?               // price per unit (transcript-minute) in cents
+  includedUnits        Int?               // units included in base price before overages
+  // B2B / contract fields
+  contractValue        Int?               // total contract value in cents (annual)
+  billingInterval      BillingInterval    @default(MONTHLY)
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  canceledAt           DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, status])
+  @@map("subscriptions")
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  TRIALING
+}
+
+enum BillingInterval {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+model UsageRecord {
+  id              String   @id @default(cuid())
+  organizationId  String
+  metric          UsageMetric
+  quantity        Float    // e.g. transcript minutes, or seat-hours
+  periodStart     DateTime
+  periodEnd       DateTime
+  reportedToStripe Boolean @default(false) // whether this was synced to Stripe metering
+  metadata        Json?    // extra context (callId, userId, etc.)
+  createdAt       DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, metric, periodStart])
+  @@map("usage_records")
+}
+
+enum UsageMetric {
+  TRANSCRIPT_MINUTES
+  STORY_GENERATED
+  PAGE_PUBLISHED
+  ACTIVE_SEAT
 }
 
 // ─── Permissions & Org Settings ──────────────────────────────────────────────
