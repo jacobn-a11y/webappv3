@@ -14,6 +14,9 @@ import {
   requirePermission,
   requirePageOwnerOrPermission,
 } from "../middleware/permissions.js";
+import logger from "../lib/logger.js";
+import { metrics } from "../lib/metrics.js";
+import { Sentry } from "../lib/sentry.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -138,7 +141,8 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           total_call_hours: page.totalCallHours,
         });
       } catch (err) {
-        console.error("Create landing page error:", err);
+        logger.error("Create landing page error", { error: err });
+        Sentry.captureException(err);
         res.status(500).json({ error: "Failed to create landing page" });
       }
     }
@@ -183,7 +187,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           })),
         });
       } catch (err) {
-        console.error("Get landing page error:", err);
+        logger.error("Get landing page error", { error: err });
         res.status(404).json({ error: "Landing page not found" });
       }
     }
@@ -214,7 +218,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
 
         res.json({ updated: true });
       } catch (err) {
-        console.error("Update landing page error:", err);
+        logger.error("Update landing page error", { error: err });
         res.status(500).json({ error: "Failed to update landing page" });
       }
     }
@@ -241,13 +245,16 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
             : undefined,
         });
 
+        metrics.incrementLandingPagesPublished();
+
         res.json({
           published: true,
           slug: result.slug,
           url: result.url,
         });
       } catch (err) {
-        console.error("Publish landing page error:", err);
+        logger.error("Publish landing page error", { error: err });
+        Sentry.captureException(err);
         res.status(500).json({ error: "Failed to publish landing page" });
       }
     }
@@ -263,7 +270,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
         await editor.unpublish(req.params.pageId);
         res.json({ unpublished: true });
       } catch (err) {
-        console.error("Unpublish error:", err);
+        logger.error("Unpublish error", { error: err });
         res.status(500).json({ error: "Failed to unpublish" });
       }
     }
@@ -279,7 +286,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
         await editor.archive(req.params.pageId);
         res.json({ archived: true });
       } catch (err) {
-        console.error("Archive error:", err);
+        logger.error("Archive error", { error: err });
         res.status(500).json({ error: "Failed to archive" });
       }
     }
@@ -295,7 +302,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
         await prisma.landingPage.delete({ where: { id: req.params.pageId } });
         res.json({ deleted: true });
       } catch (err) {
-        console.error("Delete landing page error:", err);
+        logger.error("Delete landing page error", { error: err });
         res.status(500).json({ error: "Failed to delete landing page" });
       }
     }

@@ -21,6 +21,9 @@ import {
   normalizeCompanyName,
   extractEmailDomain,
 } from "../services/entity-resolution.js";
+import logger from "../lib/logger.js";
+import { metrics } from "../lib/metrics.js";
+import { Sentry } from "../lib/sentry.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -180,7 +183,8 @@ export function createMergeWebhookHandler(deps: {
 
       res.json({ received: true, processed: true });
     } catch (err) {
-      console.error(`Webhook processing error for ${eventType}:`, err);
+      logger.error("Webhook processing error", { eventType, error: err });
+      Sentry.captureException(err, { tags: { eventType } });
       // Return 200 to prevent Merge.dev retries for processing errors
       // (only return 4xx/5xx for signature failures)
       res.json({ received: true, processed: false, error: "Processing failed" });
@@ -274,6 +278,15 @@ async function handleRecordingEvent(
       backoff: { type: "exponential", delay: 5000 },
     }
   );
+
+  metrics.incrementCallsIngested();
+  logger.info("Call ingested and queued for processing", {
+    callId: call.id,
+    provider,
+    hasTranscript: !!recording.transcript,
+    matchMethod: resolution.matchMethod,
+    accountId: resolution.accountId || null,
+  });
 }
 
 async function handleCRMContactEvent(

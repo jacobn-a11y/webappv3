@@ -13,6 +13,7 @@
  */
 
 import type { PrismaClient, AccountScopeType, CRMProvider, UserRole } from "@prisma/client";
+import logger from "../lib/logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -227,7 +228,7 @@ export class AccountAccessService {
       try {
         await this.syncCrmReportGrant(grant.id);
       } catch (err) {
-        console.error(`Failed to sync CRM report grant ${grant.id}:`, err);
+        logger.error("Failed to sync CRM report grant", { grantId: grant.id, error: err });
       }
     }
   }
@@ -260,9 +261,7 @@ export class AccountAccessService {
     // For now, this is a placeholder that would be implemented with the
     // actual Merge.dev API client.
 
-    console.log(
-      `[CRM Sync] Fetching ${provider} report ${reportId} — implement with Merge.dev passthrough`
-    );
+    logger.info("CRM Sync: fetching report (placeholder)", { provider, reportId });
 
     return [];
   }

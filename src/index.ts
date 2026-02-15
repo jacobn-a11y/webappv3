@@ -5,6 +5,12 @@
  * application with BullMQ worker for async transcript processing.
  */
 
+import { initOtel, shutdownOtel } from "./lib/otel.js";
+
+// Initialize OpenTelemetry before all other imports so instrumentation
+// can patch modules (http, express, prisma) before they are loaded.
+initOtel();
+
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -18,11 +24,14 @@ import { createStoryRoutes } from "./api/story-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
+import { createAdminMetricsRoutes } from "./api/admin-metrics-routes.js";
 import {
   createTrialGate,
   createCheckoutHandler,
   createStripeWebhookHandler,
 } from "./middleware/billing.js";
+import { requestIdMiddleware } from "./middleware/request-id.js";
+import { requestLoggingMiddleware } from "./middleware/request-logging.js";
 import { AITagger } from "./services/ai-tagger.js";
 import { RAGEngine } from "./services/rag-engine.js";
 import { StoryBuilder } from "./services/story-builder.js";
@@ -30,6 +39,13 @@ import {
   TranscriptProcessor,
   type ProcessCallJob,
 } from "./services/transcript-processor.js";
+import logger, { jobStore } from "./lib/logger.js";
+import { metrics } from "./lib/metrics.js";
+import { initSentry, Sentry } from "./lib/sentry.js";
+
+// ─── Sentry ─────────────────────────────────────────────────────────────────
+
+initSentry();
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -69,7 +85,21 @@ const processingQueue = new Queue("call-processing", {
 const worker = new Worker<ProcessCallJob>(
   "call-processing",
   async (job) => {
-    await transcriptProcessor.processCall(job.data);
+    const ctx = {
+      jobId: job.id ?? "unknown",
+      callId: job.data.callId,
+      organizationId: job.data.organizationId,
+      accountId: job.data.accountId,
+    };
+
+    // Run the processor within a job context so all logs include job metadata
+    await jobStore.run(ctx, async () => {
+      logger.info("Job started", {
+        hasTranscript: job.data.hasTranscript,
+        attempt: job.attemptsMade + 1,
+      });
+      await transcriptProcessor.processCall(job.data);
+    });
   },
   {
     connection: { url: REDIS_URL },
@@ -78,20 +108,37 @@ const worker = new Worker<ProcessCallJob>(
 );
 
 worker.on("completed", (job) => {
-  console.log(`Job ${job.id} completed for call ${job.data.callId}`);
+  logger.info("Job completed", {
+    jobId: job.id,
+    callId: job.data.callId,
+  });
 });
 
 worker.on("failed", (job, err) => {
-  console.error(`Job ${job?.id} failed:`, err.message);
+  logger.error("Job failed", {
+    jobId: job?.id,
+    callId: job?.data.callId,
+    error: err.message,
+    stack: err.stack,
+  });
+  Sentry.captureException(err, {
+    tags: { jobId: job?.id, callId: job?.data.callId },
+  });
 });
 
 // ─── Express App ─────────────────────────────────────────────────────────────
 
 const app = express();
 
+// Sentry request handler (must be first middleware)
+Sentry.setupExpressErrorHandler(app);
+
 // Global middleware
 app.use(helmet());
 app.use(cors());
+
+// Request ID tracing (before any route handlers)
+app.use(requestIdMiddleware);
 
 // Stripe webhooks need raw body
 app.post(
@@ -102,6 +149,9 @@ app.post(
 
 // All other routes use JSON parsing
 app.use(express.json({ limit: "10mb" }));
+
+// Request logging (after body parsing so we can log status codes)
+app.use(requestLoggingMiddleware);
 
 // ─── Public Routes ───────────────────────────────────────────────────────────
 
@@ -117,6 +167,11 @@ app.post(
 
 // Public landing pages — no auth, served at /s/:slug
 app.use("/s", createPublicPageRoutes(prisma));
+
+// ─── Admin Metrics ───────────────────────────────────────────────────────────
+// Mounted before trial gate — admin metrics should be accessible with
+// admin-level auth only (in production, add appropriate auth middleware).
+app.use("/api/admin/metrics", createAdminMetricsRoutes(prisma));
 
 // ─── Authenticated Routes ────────────────────────────────────────────────────
 // In production, WorkOS auth middleware would go here to set req.organizationId,
@@ -145,21 +200,26 @@ app.use("/api/dashboard", trialGate, createDashboardRoutes(prisma));
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 
 app.listen(PORT, () => {
-  console.log(`StoryEngine listening on port ${PORT}`);
-  console.log(`  Health:     http://localhost:${PORT}/api/health`);
-  console.log(`  RAG API:    http://localhost:${PORT}/api/rag/query`);
-  console.log(`  Stories:    http://localhost:${PORT}/api/stories/build`);
-  console.log(`  Pages:      http://localhost:${PORT}/api/pages`);
-  console.log(`  Dashboard:  http://localhost:${PORT}/api/dashboard`);
-  console.log(`  Public:     http://localhost:${PORT}/s/:slug`);
-  console.log(`  Webhook:    http://localhost:${PORT}/api/webhooks/merge`);
+  logger.info(`StoryEngine listening on port ${PORT}`, {
+    endpoints: {
+      health: `http://localhost:${PORT}/api/health`,
+      rag: `http://localhost:${PORT}/api/rag/query`,
+      stories: `http://localhost:${PORT}/api/stories/build`,
+      pages: `http://localhost:${PORT}/api/pages`,
+      dashboard: `http://localhost:${PORT}/api/dashboard`,
+      public: `http://localhost:${PORT}/s/:slug`,
+      webhook: `http://localhost:${PORT}/api/webhooks/merge`,
+      metrics: `http://localhost:${PORT}/api/admin/metrics`,
+    },
+  });
 });
 
 // Graceful shutdown
 process.on("SIGTERM", async () => {
-  console.log("SIGTERM received, shutting down...");
+  logger.info("SIGTERM received, shutting down...");
   await worker.close();
   await processingQueue.close();
+  await shutdownOtel();
   await prisma.$disconnect();
   process.exit(0);
 });

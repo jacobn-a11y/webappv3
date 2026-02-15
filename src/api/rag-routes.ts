@@ -8,6 +8,9 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { RAGEngine } from "../services/rag-engine.js";
+import logger from "../lib/logger.js";
+import { metrics } from "../lib/metrics.js";
+import { Sentry } from "../lib/sentry.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -80,6 +83,8 @@ export function createRAGRoutes(ragEngine: RAGEngine): Router {
         funnelStages: funnel_stages,
       });
 
+      metrics.incrementRAGQueriesServed();
+
       res.json({
         answer: result.answer,
         sources: result.sources.map((s) => ({
@@ -94,7 +99,8 @@ export function createRAGRoutes(ragEngine: RAGEngine): Router {
         tokens_used: result.tokensUsed,
       });
     } catch (err) {
-      console.error("RAG query error:", err);
+      logger.error("RAG query error", { error: err });
+      Sentry.captureException(err);
       res.status(500).json({ error: "Failed to process query" });
     }
   });

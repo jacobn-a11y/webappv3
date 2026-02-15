@@ -8,6 +8,9 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { StoryBuilder } from "../services/story-builder.js";
 import type { PrismaClient } from "@prisma/client";
+import logger from "../lib/logger.js";
+import { metrics } from "../lib/metrics.js";
+import { Sentry } from "../lib/sentry.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -59,6 +62,8 @@ export function createStoryRoutes(
         title,
       });
 
+      metrics.incrementStoriesGenerated();
+
       res.json({
         title: result.title,
         markdown: result.markdownBody,
@@ -72,7 +77,8 @@ export function createStoryRoutes(
         })),
       });
     } catch (err) {
-      console.error("Story build error:", err);
+      logger.error("Story build error", { error: err });
+      Sentry.captureException(err);
       res.status(500).json({ error: "Failed to build story" });
     }
   });
@@ -120,7 +126,8 @@ export function createStoryRoutes(
         })),
       });
     } catch (err) {
-      console.error("Story retrieval error:", err);
+      logger.error("Story retrieval error", { error: err });
+      Sentry.captureException(err);
       res.status(500).json({ error: "Failed to retrieve stories" });
     }
   });

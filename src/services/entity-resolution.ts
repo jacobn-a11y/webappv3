@@ -16,6 +16,8 @@
 
 import Fuse from "fuse.js";
 import type { PrismaClient } from "@prisma/client";
+import logger from "../lib/logger.js";
+import { metrics } from "../lib/metrics.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -118,7 +120,14 @@ export class EntityResolver {
         organizationId,
         domains
       );
-      if (domainMatch) return domainMatch;
+      if (domainMatch) {
+        metrics.recordEntityResolution(domainMatch.matchMethod, domainMatch.confidence);
+        logger.debug("Entity resolved via email domain", {
+          accountId: domainMatch.accountId,
+          confidence: domainMatch.confidence,
+        });
+        return domainMatch;
+      }
     }
 
     // ── Step 2: Try Fuzzy Name Match on participant names + call title ─
@@ -129,10 +138,22 @@ export class EntityResolver {
         organizationId,
         candidateNames
       );
-      if (fuzzyMatch) return fuzzyMatch;
+      if (fuzzyMatch) {
+        metrics.recordEntityResolution(fuzzyMatch.matchMethod, fuzzyMatch.confidence);
+        logger.debug("Entity resolved via fuzzy name", {
+          accountId: fuzzyMatch.accountId,
+          confidence: fuzzyMatch.confidence,
+        });
+        return fuzzyMatch;
+      }
     }
 
     // ── Step 3: No match — route to manual review ────────────────────
+    metrics.recordEntityResolution("none", 0);
+    logger.debug("Entity resolution failed, routing to manual review", {
+      organizationId,
+      participantCount: participants.length,
+    });
     return {
       accountId: "",
       accountName: "",
