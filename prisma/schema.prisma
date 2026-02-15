@@ -19,12 +19,13 @@ model Organization {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  users        User[]
-  accounts     Account[]
-  calls        Call[]
-  stories      Story[]
-  landingPages LandingPage[]
-  orgSettings  OrgSettings?
+  users          User[]
+  accounts       Account[]
+  calls          Call[]
+  stories        Story[]
+  landingPages   LandingPage[]
+  orgSettings    OrgSettings?
+  storyRegenLogs StoryRegenLog[]
 
   @@map("organizations")
 }
@@ -87,6 +88,7 @@ model Account {
   stories         Story[]
   domainAliases   AccountDomain[]
   userAccess      UserAccountAccess[]
+  storyRegenLogs  StoryRegenLog[]
 
   @@unique([organizationId, domain])
   @@unique([organizationId, salesforceId])
@@ -484,4 +486,23 @@ enum AccountScopeType {
 enum CRMProvider {
   SALESFORCE
   HUBSPOT
+}
+
+// ─── Weekly Story Regeneration Tracking ─────────────────────────────────────
+
+model StoryRegenLog {
+  id               String   @id @default(cuid())
+  organizationId   String
+  accountId        String
+  previousStoryId  String?  // the story that was replaced (null on first generation)
+  newStoryId       String   // the newly generated story
+  callsProcessed   Int      // number of new calls since last story
+  diffSummary      String?  // human-readable summary of what changed
+  createdAt        DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  account      Account      @relation(fields: [accountId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@map("story_regen_logs")
 }

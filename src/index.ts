@@ -30,6 +30,11 @@ import {
   TranscriptProcessor,
   type ProcessCallJob,
 } from "./services/transcript-processor.js";
+import {
+  WeeklyStoryRegeneration,
+  type WeeklyRegenJobData,
+} from "./services/weekly-story-regeneration.js";
+import { EmailService } from "./services/email.js";
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -55,6 +60,16 @@ const transcriptProcessor = new TranscriptProcessor(
   prisma,
   aiTagger,
   ragEngine
+);
+const emailService = new EmailService(
+  process.env.RESEND_API_KEY ?? "",
+  process.env.STORY_REGEN_FROM_EMAIL ?? "StoryEngine <noreply@storyengine.io>",
+  process.env.APP_URL ?? "http://localhost:3000"
+);
+const weeklyStoryRegen = new WeeklyStoryRegeneration(
+  prisma,
+  storyBuilder,
+  emailService
 );
 
 // ─── BullMQ Queue ────────────────────────────────────────────────────────────
@@ -83,6 +98,50 @@ worker.on("completed", (job) => {
 
 worker.on("failed", (job, err) => {
   console.error(`Job ${job?.id} failed:`, err.message);
+});
+
+// ─── Story Regeneration Queue (Weekly) ──────────────────────────────────────
+
+const storyRegenQueue = new Queue<WeeklyRegenJobData>("story-regeneration", {
+  connection: { url: REDIS_URL },
+});
+
+// Register the repeatable schedule — every Sunday at 02:00 UTC
+storyRegenQueue.upsertJobScheduler(
+  "weekly-story-regen",
+  { pattern: "0 2 * * 0" },
+  {
+    name: "weekly-story-regen",
+    data: {},
+    opts: {
+      attempts: 2,
+      backoff: { type: "exponential", delay: 60_000 },
+    },
+  }
+);
+
+const storyRegenWorker = new Worker<WeeklyRegenJobData>(
+  "story-regeneration",
+  async (job) => {
+    console.log(`[story-regen] Starting weekly regeneration job ${job.id}`);
+    const result = await weeklyStoryRegen.run(job.data);
+    console.log(
+      `[story-regen] Job ${job.id} done: ${result.accountsProcessed} accounts, ${result.orgsNotified} orgs, ${result.errors.length} errors`
+    );
+    return result;
+  },
+  {
+    connection: { url: REDIS_URL },
+    concurrency: 1, // only one regen run at a time
+  }
+);
+
+storyRegenWorker.on("completed", (job) => {
+  console.log(`[story-regen] Job ${job.id} completed`);
+});
+
+storyRegenWorker.on("failed", (job, err) => {
+  console.error(`[story-regen] Job ${job?.id} failed:`, err.message);
 });
 
 // ─── Express App ─────────────────────────────────────────────────────────────
@@ -159,7 +218,9 @@ app.listen(PORT, () => {
 process.on("SIGTERM", async () => {
   console.log("SIGTERM received, shutting down...");
   await worker.close();
+  await storyRegenWorker.close();
   await processingQueue.close();
+  await storyRegenQueue.close();
   await prisma.$disconnect();
   process.exit(0);
 });
