@@ -413,6 +413,11 @@ model OrgSettings {
   allowedPublishers         UserRole[] @default([OWNER, ADMIN]) // roles that can publish
   maxPagesPerUser           Int?     // null = unlimited
   companyNameReplacements   Json?    // custom scrub mappings: {"Acme Corp": "the client"}
+
+  // Transcript merging configuration
+  transcriptMergeMaxWords   Int      @default(600000) // max word count for merged transcript markdown
+  transcriptTruncationMode  TranscriptTruncationMode @default(OLDEST_FIRST) // which transcripts to drop when over limit
+
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
@@ -484,4 +489,9 @@ enum AccountScopeType {
 enum CRMProvider {
   SALESFORCE
   HUBSPOT
+}
+
+enum TranscriptTruncationMode {
+  OLDEST_FIRST  // drop earliest transcripts when over limit
+  NEWEST_FIRST  // drop latest transcripts when over limit
 }

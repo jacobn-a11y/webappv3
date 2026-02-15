@@ -15,6 +15,7 @@ import {
   PermissionManager,
   requirePermission,
 } from "../middleware/permissions.js";
+import { MODEL_CONTEXT_LIMITS } from "../types/model-context-limits.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -27,6 +28,8 @@ const UpdateOrgSettingsSchema = z.object({
     .optional(),
   max_pages_per_user: z.number().int().min(1).nullable().optional(),
   company_name_replacements: z.record(z.string(), z.string()).optional(),
+  transcript_merge_max_words: z.number().int().min(1000).max(2_000_000).optional(),
+  transcript_truncation_mode: z.enum(["OLDEST_FIRST", "NEWEST_FIRST"]).optional(),
 });
 
 const GrantPermissionSchema = z.object({
@@ -137,14 +140,33 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
         });
 
         res.json({
-          settings: settings ?? {
-            landing_pages_enabled: true,
-            default_page_visibility: "PRIVATE",
-            require_approval_to_publish: false,
-            allowed_publishers: ["OWNER", "ADMIN"],
-            max_pages_per_user: null,
-            company_name_replacements: {},
-          },
+          settings: settings
+            ? {
+                landing_pages_enabled: settings.landingPagesEnabled,
+                default_page_visibility: settings.defaultPageVisibility,
+                require_approval_to_publish: settings.requireApprovalToPublish,
+                allowed_publishers: settings.allowedPublishers,
+                max_pages_per_user: settings.maxPagesPerUser,
+                company_name_replacements: settings.companyNameReplacements,
+                transcript_merge_max_words: settings.transcriptMergeMaxWords,
+                transcript_truncation_mode: settings.transcriptTruncationMode,
+              }
+            : {
+                landing_pages_enabled: true,
+                default_page_visibility: "PRIVATE",
+                require_approval_to_publish: false,
+                allowed_publishers: ["OWNER", "ADMIN"],
+                max_pages_per_user: null,
+                company_name_replacements: {},
+                transcript_merge_max_words: 600_000,
+                transcript_truncation_mode: "OLDEST_FIRST",
+              },
+          model_context_recommendations: MODEL_CONTEXT_LIMITS.map((m) => ({
+            provider: m.provider,
+            model: m.model,
+            context_tokens: m.contextTokens,
+            recommended_max_words: m.recommendedWords,
+          })),
         });
       } catch (err) {
         console.error("Get settings error:", err);
@@ -176,6 +198,8 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           allowedPublishers: parse.data.allowed_publishers as UserRole[] | undefined,
           maxPagesPerUser: parse.data.max_pages_per_user,
           companyNameReplacements: parse.data.company_name_replacements,
+          transcriptMergeMaxWords: parse.data.transcript_merge_max_words,
+          transcriptTruncationMode: parse.data.transcript_truncation_mode,
         });
 
         res.json({ updated: true });
@@ -183,6 +207,33 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
         console.error("Update settings error:", err);
         res.status(500).json({ error: "Failed to update settings" });
       }
+    }
+  );
+
+  /**
+   * GET /api/dashboard/settings/model-context-limits
+   *
+   * Returns recommended transcript word count limits based on 80% of
+   * the token context window for the 10 most popular AI models from
+   * Anthropic, Google, and OpenAI. Used to render the recommendation
+   * info box in the admin dashboard transcript settings UI.
+   */
+  router.get(
+    "/settings/model-context-limits",
+    requirePermission(prisma, "manage_permissions"),
+    async (_req: AuthReq, res: Response) => {
+      res.json({
+        description:
+          "Recommended markdown word count limits based on 80% of the token context window for popular AI models (as of February 2026). " +
+          "These limits leave 20% headroom for system prompts, instructions, and model output.",
+        models: MODEL_CONTEXT_LIMITS.map((m) => ({
+          provider: m.provider,
+          model: m.model,
+          context_tokens: m.contextTokens,
+          recommended_tokens_80_pct: m.recommendedTokens,
+          recommended_max_words: m.recommendedWords,
+        })),
+      });
     }
   );
 
