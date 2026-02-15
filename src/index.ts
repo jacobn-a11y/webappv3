@@ -23,6 +23,10 @@ import {
   createCheckoutHandler,
   createStripeWebhookHandler,
 } from "./middleware/billing.js";
+import { createApiKeyAuth, requireScope } from "./middleware/api-key-auth.js";
+import { createRateLimiter } from "./middleware/rate-limiter.js";
+import { createApiUsageLogger } from "./middleware/api-usage-logger.js";
+import { createApiKeyRoutes } from "./api/api-key-routes.js";
 import { AITagger } from "./services/ai-tagger.js";
 import { RAGEngine } from "./services/rag-engine.js";
 import { StoryBuilder } from "./services/story-builder.js";
@@ -118,6 +122,26 @@ app.post(
 // Public landing pages — no auth, served at /s/:slug
 app.use("/s", createPublicPageRoutes(prisma));
 
+// ─── Public API (API-key authenticated, for third-party chatbot consumers) ──
+
+const apiKeyAuth = createApiKeyAuth(prisma);
+const rateLimiter = createRateLimiter({
+  redisUrl: REDIS_URL,
+  maxRequests: 100,
+  windowSeconds: 60,
+});
+const apiUsageLogger = createApiUsageLogger(prisma);
+
+// Public RAG endpoint: API key auth → rate limit → usage logging → handler
+app.use(
+  "/api/v1/rag",
+  apiKeyAuth,
+  requireScope("rag:query"),
+  rateLimiter,
+  apiUsageLogger,
+  createRAGRoutes(ragEngine)
+);
+
 // ─── Authenticated Routes ────────────────────────────────────────────────────
 // In production, WorkOS auth middleware would go here to set req.organizationId,
 // req.userId, and req.userRole.
@@ -128,7 +152,10 @@ const trialGate = createTrialGate(prisma, stripe);
 // Billing
 app.post("/api/billing/checkout", createCheckoutHandler(prisma, stripe));
 
-// RAG Chatbot Connector (behind trial gate)
+// API Key Management (behind auth + trial gate, for org admins)
+app.use("/api/keys", trialGate, createApiKeyRoutes(prisma));
+
+// RAG Chatbot Connector — internal use (behind trial gate)
 app.use("/api/rag", trialGate, createRAGRoutes(ragEngine));
 
 // Story Builder (behind trial gate)
@@ -148,6 +175,8 @@ app.listen(PORT, () => {
   console.log(`StoryEngine listening on port ${PORT}`);
   console.log(`  Health:     http://localhost:${PORT}/api/health`);
   console.log(`  RAG API:    http://localhost:${PORT}/api/rag/query`);
+  console.log(`  Public RAG: http://localhost:${PORT}/api/v1/rag/query (API key required)`);
+  console.log(`  API Keys:   http://localhost:${PORT}/api/keys`);
   console.log(`  Stories:    http://localhost:${PORT}/api/stories/build`);
   console.log(`  Pages:      http://localhost:${PORT}/api/pages`);
   console.log(`  Dashboard:  http://localhost:${PORT}/api/dashboard`);
