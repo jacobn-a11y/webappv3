@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Request, Response, NextFunction } from "express";
 import { createTrialGate } from "../src/middleware/billing.js";
 
@@ -22,6 +22,14 @@ function mockNext(): NextFunction {
 }
 
 describe("createTrialGate", () => {
+  beforeEach(() => {
+    process.env.BILLING_ENABLED = "true";
+  });
+
+  afterEach(() => {
+    delete process.env.BILLING_ENABLED;
+  });
+
   it("returns 401 if no organizationId", async () => {
     const prisma = {} as never;
     const stripe = {} as never;
