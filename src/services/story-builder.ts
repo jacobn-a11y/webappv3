@@ -181,9 +181,9 @@ export class StoryBuilder {
     });
 
     // Persist quotes
-    for (const q of quotes) {
-      await this.prisma.highValueQuote.create({
-        data: {
+    if (quotes.length > 0) {
+      await this.prisma.highValueQuote.createMany({
+        data: quotes.map((q) => ({
           storyId: story.id,
           speaker: q.speaker,
           quoteText: q.quoteText,
@@ -191,7 +191,7 @@ export class StoryBuilder {
           metricType: q.metricType,
           metricValue: q.metricValue,
           callId: q.callId,
-        },
+        })),
       });
     }
 

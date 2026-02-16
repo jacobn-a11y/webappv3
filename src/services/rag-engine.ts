@@ -332,23 +332,31 @@ ${contextBlock}`,
       metadata?: Record<string, unknown>;
     }>
   ): Promise<RAGSource[]> {
-    const sources: RAGSource[] = [];
+    const chunkIds = matches
+      .map((m) => m.metadata?.chunk_id as string | undefined)
+      .filter((id): id is string => !!id);
 
+    if (chunkIds.length === 0) return [];
+
+    const chunks = await this.prisma.transcriptChunk.findMany({
+      where: { id: { in: chunkIds } },
+      include: {
+        transcript: {
+          include: {
+            call: { select: { id: true, title: true, occurredAt: true } },
+          },
+        },
+      },
+    });
+
+    const chunkMap = new Map(chunks.map((c) => [c.id, c]));
+
+    const sources: RAGSource[] = [];
     for (const match of matches) {
       const chunkId = match.metadata?.chunk_id as string | undefined;
       if (!chunkId) continue;
 
-      const chunk = await this.prisma.transcriptChunk.findUnique({
-        where: { id: chunkId },
-        include: {
-          transcript: {
-            include: {
-              call: { select: { id: true, title: true, occurredAt: true } },
-            },
-          },
-        },
-      });
-
+      const chunk = chunkMap.get(chunkId);
       if (!chunk) continue;
 
       sources.push({
