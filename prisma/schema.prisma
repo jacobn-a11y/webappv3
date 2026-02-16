@@ -403,8 +403,11 @@ model LandingPage {
   subtitle           String?
   editableBody       String
   scrubbedBody       String
+  scrubbedTitle      String?
+  scrubbedSubtitle   String?
   heroImageUrl       String?
   calloutBoxes       Json?
+  scrubbedCalloutBoxes Json?
   totalCallHours     Float          @default(0)
   visibility         PageVisibility @default(PRIVATE)
   status             PageStatus     @default(DRAFT)
@@ -466,6 +469,7 @@ model OrgSettings {
   allowedPublishers         UserRole[]               @default([OWNER, ADMIN])
   maxPagesPerUser           Int?
   companyNameReplacements   Json?
+  anonymizationEnabled      Boolean                  @default(true)
   transcriptMergeMaxWords   Int                      @default(600000)
   transcriptTruncationMode  TranscriptTruncationMode @default(OLDEST_FIRST)
   createdAt                 DateTime                 @default(now())

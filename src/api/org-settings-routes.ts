@@ -83,6 +83,85 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     }
   );
 
+  // ── Anonymization Setting ────────────────────────────────────────────
+
+  /**
+   * GET /api/settings/org/anonymization
+   *
+   * Returns the current anonymization setting for the org.
+   */
+  router.get(
+    "/anonymization",
+    requirePermission(prisma, "manage_permissions"),
+    async (req: AuthReq, res: Response) => {
+      if (!req.organizationId) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+
+      try {
+        const settings = await prisma.orgSettings.findUnique({
+          where: { organizationId: req.organizationId },
+          select: { anonymizationEnabled: true },
+        });
+
+        res.json({
+          anonymization_enabled: settings?.anonymizationEnabled ?? true,
+        });
+      } catch (err) {
+        console.error("Get anonymization setting error:", err);
+        res.status(500).json({ error: "Failed to load anonymization setting" });
+      }
+    }
+  );
+
+  /**
+   * PATCH /api/settings/org/anonymization
+   *
+   * Toggles anonymization on or off for the entire org.
+   * When disabled, published pages serve original content with real
+   * company names. When re-enabled, pages revert to scrubbed content.
+   * Admin/Owner only.
+   */
+  router.patch(
+    "/anonymization",
+    requirePermission(prisma, "manage_permissions"),
+    async (req: AuthReq, res: Response) => {
+      if (!req.organizationId) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+
+      const schema = z.object({ enabled: z.boolean() });
+      const parse = schema.safeParse(req.body);
+      if (!parse.success) {
+        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        return;
+      }
+
+      try {
+        await prisma.orgSettings.upsert({
+          where: { organizationId: req.organizationId },
+          create: {
+            organizationId: req.organizationId,
+            anonymizationEnabled: parse.data.enabled,
+          },
+          update: {
+            anonymizationEnabled: parse.data.enabled,
+          },
+        });
+
+        res.json({
+          updated: true,
+          anonymization_enabled: parse.data.enabled,
+        });
+      } catch (err) {
+        console.error("Update anonymization setting error:", err);
+        res.status(500).json({ error: "Failed to update anonymization setting" });
+      }
+    }
+  );
+
   // ── Update Organization Name ─────────────────────────────────────────
 
   /**

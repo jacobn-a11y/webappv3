@@ -11,6 +11,7 @@ import { Router, type Request, type Response } from "express";
 import Stripe from "stripe";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import { requirePermission } from "../middleware/permissions.js";
+import { isBillingEnabled } from "../middleware/billing.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -57,6 +58,7 @@ export function createBillingRoutes(
         // Build base billing info
         const billing: Record<string, unknown> = {
           plan: org.plan,
+          billing_enabled: isBillingEnabled(),
           trial_ends_at: org.trialEndsAt,
           trial_active:
             org.plan === "FREE_TRIAL" &&

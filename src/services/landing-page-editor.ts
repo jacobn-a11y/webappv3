@@ -179,7 +179,10 @@ export class LandingPageEditor {
   }
 
   /**
-   * Publishes a landing page. Scrubs the company name and sets it live.
+   * Publishes a landing page. Always scrubs and stores anonymized versions
+   * in dedicated fields (scrubbedBody, scrubbedTitle, etc.) while preserving
+   * the originals (editableBody, title, calloutBoxes). This allows the admin
+   * to toggle anonymization on/off at the org level without re-publishing.
    */
   async publish(
     pageId: string,
@@ -190,61 +193,55 @@ export class LandingPageEditor {
       include: { story: { select: { accountId: true } } },
     });
 
-    // Named pages (admin-only) skip scrubbing entirely
-    const skipScrub = page.includeCompanyName;
-    const scrubOpts = { skipScrub };
-
-    // Scrub company name from the body (or pass-through for named pages)
+    // Always scrub so both versions are stored for reversible anonymization
     const scrubResult = await this.scrubber.scrubForAccount(
       page.story.accountId,
-      page.editableBody,
-      scrubOpts
+      page.editableBody
     );
 
-    // Also scrub the title and subtitle
     const titleScrub = await this.scrubber.scrubForAccount(
       page.story.accountId,
-      page.title,
-      scrubOpts
+      page.title
     );
     const subtitleScrub = page.subtitle
       ? await this.scrubber.scrubForAccount(
           page.story.accountId,
-          page.subtitle,
-          scrubOpts
+          page.subtitle
         )
       : null;
 
-    // Also scrub callout boxes
-    let scrubbedCallouts = page.calloutBoxes;
+    // Scrub callout boxes into a separate field (originals stay intact)
+    let scrubbedCallouts: CalloutBox[] | null = null;
     if (page.calloutBoxes && Array.isArray(page.calloutBoxes)) {
       const callouts = page.calloutBoxes as unknown as CalloutBox[];
-      const scrubbedArray: CalloutBox[] = [];
+      scrubbedCallouts = [];
       for (const box of callouts) {
         const bodyScrub = await this.scrubber.scrubForAccount(
           page.story.accountId,
-          box.body,
-          scrubOpts
+          box.body
         );
-        const titleScrub2 = await this.scrubber.scrubForAccount(
+        const boxTitleScrub = await this.scrubber.scrubForAccount(
           page.story.accountId,
-          box.title,
-          scrubOpts
+          box.title
         );
-        scrubbedArray.push({
+        scrubbedCallouts.push({
           ...box,
-          title: titleScrub2.scrubbedText,
+          title: boxTitleScrub.scrubbedText,
           body: bodyScrub.scrubbedText,
         });
       }
-      scrubbedCallouts = scrubbedArray as unknown as typeof page.calloutBoxes;
     }
 
     await this.prisma.landingPage.update({
       where: { id: pageId },
       data: {
         scrubbedBody: scrubResult.scrubbedText,
-        calloutBoxes: scrubbedCallouts ?? undefined,
+        scrubbedTitle: titleScrub.scrubbedText,
+        scrubbedSubtitle: subtitleScrub?.scrubbedText ?? null,
+        scrubbedCalloutBoxes: scrubbedCallouts
+          ? (scrubbedCallouts as unknown as object[])
+          : undefined,
+        // calloutBoxes is NOT overwritten — originals are preserved
         status: "PUBLISHED",
         visibility: options.visibility,
         password: options.password ?? null,
@@ -307,7 +304,9 @@ export class LandingPageEditor {
   }
 
   /**
-   * Fetches the public (scrubbed) landing page by slug.
+   * Fetches the public landing page by slug. Checks the org's
+   * anonymizationEnabled setting to decide whether to serve the
+   * original (identifiable) or scrubbed (anonymized) content.
    * Returns null if not published, expired, or private.
    */
   async getPublicBySlug(
@@ -344,11 +343,28 @@ export class LandingPageEditor {
       data: { viewCount: { increment: 1 } },
     });
 
+    // Check org-level anonymization setting
+    const shouldAnonymize = await this.isAnonymizationEnabled(page.organizationId);
+
+    // When anonymization is off, or the page was explicitly set to include
+    // company names, serve the original identifiable content.
+    const useOriginal = !shouldAnonymize || page.includeCompanyName;
+
     return {
-      title: page.scrubbedBody ? await this.getScrubbed(page, "title") : page.title,
-      subtitle: page.subtitle,
-      body: page.scrubbedBody || page.editableBody,
-      calloutBoxes: (page.calloutBoxes as unknown as CalloutBox[]) ?? [],
+      title: useOriginal
+        ? page.title
+        : (page.scrubbedTitle ?? page.title),
+      subtitle: useOriginal
+        ? page.subtitle
+        : (page.scrubbedSubtitle ?? page.subtitle),
+      body: useOriginal
+        ? page.editableBody
+        : (page.scrubbedBody || page.editableBody),
+      calloutBoxes: useOriginal
+        ? ((page.calloutBoxes as unknown as CalloutBox[]) ?? [])
+        : ((page.scrubbedCalloutBoxes as unknown as CalloutBox[])
+            ?? (page.calloutBoxes as unknown as CalloutBox[])
+            ?? []),
       totalCallHours: page.totalCallHours,
       heroImageUrl: page.heroImageUrl,
       customCss: page.customCss,
@@ -358,9 +374,8 @@ export class LandingPageEditor {
 
   /**
    * Generates a preview of the landing page as it would appear publicly.
-   * Runs the company scrubber on the current editable content (title,
-   * subtitle, body, callout boxes) and returns the result in the same
-   * shape consumed by `renderLandingPageHtml`.
+   * Respects the org's anonymizationEnabled setting and the per-page
+   * includeCompanyName flag to decide whether to scrub or show originals.
    */
   async getPreview(pageId: string): Promise<{
     title: string;
@@ -376,7 +391,8 @@ export class LandingPageEditor {
       include: { story: { select: { accountId: true } } },
     });
 
-    const skipScrub = page.includeCompanyName;
+    const shouldAnonymize = await this.isAnonymizationEnabled(page.organizationId);
+    const skipScrub = !shouldAnonymize || page.includeCompanyName;
     const scrubOpts = { skipScrub };
 
     // Scrub body
@@ -534,6 +550,19 @@ export class LandingPageEditor {
 
   // ─── Private ──────────────────────────────────────────────────────
 
+  /**
+   * Checks the org's anonymizationEnabled setting. Defaults to true
+   * (anonymized) when no OrgSettings record exists.
+   */
+  private async isAnonymizationEnabled(organizationId: string): Promise<boolean> {
+    const settings = await this.prisma.orgSettings.findUnique({
+      where: { organizationId },
+      select: { anonymizationEnabled: true },
+    });
+    // Default to true (anonymize) if no settings record exists
+    return settings?.anonymizationEnabled ?? true;
+  }
+
   private async generateUniqueSlug(title: string): Promise<string> {
     const base = title
       .toLowerCase()
@@ -553,24 +582,6 @@ export class LandingPageEditor {
     }
 
     return slug;
-  }
-
-  private async getScrubbed(
-    page: { title: string; storyId: string },
-    _field: string
-  ): Promise<string> {
-    // Title was already scrubbed during publish, but this is a fallback
-    const story = await this.prisma.story.findUnique({
-      where: { id: page.storyId },
-      select: { accountId: true },
-    });
-    if (!story) return page.title;
-
-    const result = await this.scrubber.scrubForAccount(
-      story.accountId,
-      page.title
-    );
-    return result.scrubbedText;
   }
 }
 

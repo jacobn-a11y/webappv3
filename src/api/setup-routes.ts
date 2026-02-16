@@ -22,6 +22,7 @@ import { z } from "zod";
 import type { PrismaClient, UserRole, CallProvider, CRMProvider, Plan } from "@prisma/client";
 import Stripe from "stripe";
 import { SetupWizardService } from "../services/setup-wizard.js";
+import { isBillingEnabled } from "../middleware/billing.js";
 
 // ─── Validation Schemas ──────────────────────────────────────────────────────
 
@@ -326,10 +327,15 @@ export function createSetupRoutes(
    * GET /api/setup/step/plan
    *
    * Returns available plans with pricing and feature details.
+   * When billing is disabled, indicates that the plan step is
+   * informational only and will be auto-completed.
    */
   router.get("/step/plan", async (_req: AuthReq, res: Response) => {
     const plans = wizardService.getAvailablePlans();
-    res.json({ plans });
+    res.json({
+      plans,
+      billing_enabled: isBillingEnabled(),
+    });
   });
 
   /**
@@ -338,10 +344,44 @@ export function createSetupRoutes(
    * Selects a plan. For paid plans, returns a Stripe checkout URL.
    * For FREE_TRIAL, activates the 14-day trial immediately.
    * For ENTERPRISE, the user is directed to contact sales.
+   *
+   * When BILLING_ENABLED is not "true", the step auto-completes as
+   * FREE_TRIAL with no trial expiration (internal use mode).
    */
   router.post("/step/plan", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
       res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+
+    // When billing is disabled, auto-complete with FREE_TRIAL and no expiration
+    if (!isBillingEnabled()) {
+      try {
+        const result = await wizardService.completePlanSelection(
+          req.organizationId,
+          "FREE_TRIAL" as Plan,
+          {
+            createCheckoutSession: async () => null,
+          }
+        );
+
+        // Remove trial expiration so internal users are never gated
+        await prisma.organization.update({
+          where: { id: req.organizationId },
+          data: { trialEndsAt: null },
+        });
+
+        const status = await wizardService.getStatus(req.organizationId);
+        res.json({
+          completed: true,
+          checkoutUrl: result.checkoutUrl,
+          billing_enabled: false,
+          status,
+        });
+      } catch (err) {
+        console.error("Plan selection error (billing disabled):", err);
+        res.status(500).json({ error: "Failed to complete plan selection" });
+      }
       return;
     }
 

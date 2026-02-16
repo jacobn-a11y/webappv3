@@ -26,12 +26,27 @@ interface AuthenticatedRequest extends Request {
   organizationId?: string;
 }
 
+// ─── Billing Feature Flag ────────────────────────────────────────────────────
+
+/**
+ * Returns true when billing enforcement is active. Controlled by the
+ * BILLING_ENABLED environment variable (must be explicitly "true").
+ * When disabled, the trial gate is a no-op, checkout/portal return
+ * "not available", and usage is not reported to Stripe.
+ */
+export function isBillingEnabled(): boolean {
+  return process.env.BILLING_ENABLED === "true";
+}
+
 // ─── Free Trial Middleware ────────────────────────────────────────────────────
 
 /**
  * Middleware that checks if the org has an active subscription or is within
  * their free trial period. Blocks access if the trial has expired and no
  * active subscription exists.
+ *
+ * When BILLING_ENABLED is not "true", this middleware is a no-op — all
+ * requests pass through without billing checks.
  */
 export function createTrialGate(prisma: PrismaClient, stripe: Stripe) {
   return async (
@@ -39,6 +54,12 @@ export function createTrialGate(prisma: PrismaClient, stripe: Stripe) {
     res: Response,
     next: NextFunction
   ) => {
+    // Billing kill switch: when disabled, skip all billing enforcement
+    if (!isBillingEnabled()) {
+      next();
+      return;
+    }
+
     const orgId = req.organizationId;
     if (!orgId) {
       res.status(401).json({ error: "Authentication required" });
@@ -88,6 +109,14 @@ const checkoutSchema = z.object({
  */
 export function createCheckoutHandler(prisma: PrismaClient, stripe: Stripe) {
   return async (req: AuthenticatedRequest, res: Response) => {
+    if (!isBillingEnabled()) {
+      res.status(404).json({
+        error: "billing_not_enabled",
+        message: "Billing is not enabled for this platform.",
+      });
+      return;
+    }
+
     const orgId = req.organizationId;
     if (!orgId) {
       res.status(401).json({ error: "Authentication required" });
@@ -168,6 +197,14 @@ export function createCheckoutHandler(prisma: PrismaClient, stripe: Stripe) {
  */
 export function createPortalHandler(prisma: PrismaClient, stripe: Stripe) {
   return async (req: AuthenticatedRequest, res: Response) => {
+    if (!isBillingEnabled()) {
+      res.status(404).json({
+        error: "billing_not_enabled",
+        message: "Billing is not enabled for this platform.",
+      });
+      return;
+    }
+
     const orgId = req.organizationId;
     if (!orgId) {
       res.status(401).json({ error: "Authentication required" });
@@ -213,6 +250,8 @@ export async function reportUsageToStripe(
   transcriptMinutes: number,
   timestamp: number
 ): Promise<string | null> {
+  if (!isBillingEnabled()) return null;
+
   const org = await prisma.organization.findUnique({
     where: { id: organizationId },
   });

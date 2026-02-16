@@ -14,7 +14,7 @@
 import cron from "node-cron";
 import Stripe from "stripe";
 import type { PrismaClient } from "@prisma/client";
-import { reportUsageToStripe } from "../middleware/billing.js";
+import { reportUsageToStripe, isBillingEnabled } from "../middleware/billing.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -96,6 +96,11 @@ export async function runDailyUsageReport(
   stripe: Stripe,
   targetDate?: Date
 ): Promise<{ processed: number; reported: number; errors: number }> {
+  if (!isBillingEnabled()) {
+    console.log("[usage-reporter] Billing disabled, skipping usage report");
+    return { processed: 0, reported: 0, errors: 0 };
+  }
+
   const date = targetDate ?? new Date(Date.now() - 24 * 60 * 60 * 1000); // yesterday
   const dateKey = new Date(
     Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
