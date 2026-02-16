@@ -59,6 +59,7 @@ interface MergeCRMContact {
   remote_id: string;
   first_name?: string;
   last_name?: string;
+  title?: string; // Salesforce Contact.Title / HubSpot contact.jobtitle
   email_addresses?: Array<{ email_address: string; email_address_type: string }>;
   company?: string;
   account?: { id: string; name: string };
@@ -327,6 +328,7 @@ async function handleCRMContactEvent(
           name:
             [contact.first_name, contact.last_name].filter(Boolean).join(" ") ||
             null,
+          title: contact.title ?? null,
           mergeContactId: contact.id,
         },
       });
@@ -345,10 +347,12 @@ async function handleCRMContactEvent(
       email: primaryEmail.toLowerCase(),
       emailDomain: domain,
       name: fullName,
+      title: contact.title ?? null,
       mergeContactId: contact.id,
     },
     update: {
       name: fullName ?? undefined,
+      title: contact.title ?? undefined,
       mergeContactId: contact.id,
     },
   });
