@@ -7,7 +7,7 @@
  *  - Successful queries returning sources with citations
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 import { createTestApp } from "../helpers/create-test-app.js";
 import {
@@ -192,6 +192,14 @@ describe("POST /api/rag/query — input validation", () => {
 // ─── Trial Gate ─────────────────────────────────────────────────────────────
 
 describe("POST /api/rag/query — trial gate", () => {
+  beforeEach(() => {
+    process.env.BILLING_ENABLED = "true";
+  });
+
+  afterEach(() => {
+    delete process.env.BILLING_ENABLED;
+  });
+
   it("returns 402 when the org trial has expired", async () => {
     const app = createTestApp({
       prisma: mockPrisma(EXPIRED_ORG),
