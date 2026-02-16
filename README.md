@@ -47,13 +47,70 @@ Merge.dev Webhooks
                                             └──────────────┘
 ```
 
+### AI Provider Architecture
+
+```
+  ┌─────────────────────────────────────────────────────────┐
+  │                    AIConfigService                      │
+  │                                                         │
+  │  Request (org, user, provider preference)                │
+  │         │                                               │
+  │         ├── User allowed? (user override > role default)│
+  │         │                                               │
+  │         ├── Org has own key for this provider?          │
+  │         │       YES → use org key (not platform-billed) │
+  │         │       NO  → use platform key (billed)         │
+  │         │                                               │
+  │         └── Return { AIClient, isPlatformBilled }       │
+  └────────────────────────┬────────────────────────────────┘
+                           │
+                           v
+  ┌─────────────────────────────────────────────────────────┐
+  │                  TrackedAIClient                        │
+  │  (decorator wrapping any AIClient)                      │
+  │                                                         │
+  │  Pre-call:  enforce limits + enforce balance            │
+  │  Call:      delegate to inner OpenAI/Anthropic/Google   │
+  │  Post-call: record usage + deduct balance + notify      │
+  └─────────────────────────────────────────────────────────┘
+```
+
 ## Key Features
+
+### Multi-Provider AI
+Choose between OpenAI, Anthropic (Claude), and Google (Gemini) for story generation, transcript tagging, and RAG queries. Each provider is implemented behind a unified `AIClient` interface. Embeddings remain tied to OpenAI for Pinecone vector consistency.
+
+### Per-Provider Hybrid Billing
+Org admins can bring their own API keys on a per-provider basis. If an org configures their own key for a provider, all their users are routed through that key for that provider — no platform billing. For providers where the org hasn't added a key, the platform's key is used at platform-set per-token pricing. This allows mixing own-key and platform-billed providers.
+
+### Prepaid Balance System
+Per-user prepaid balances for platform AI usage. Admins top up balances, and each AI call deducts cost based on configurable per-model input/output token pricing. Transaction ledger tracks every credit and debit.
+
+### Flexible Usage Limits
+- **Token-based**: daily and monthly token caps
+- **Request-based**: daily and monthly request caps
+- **Story-count-based**: monthly case study generation cap
+- **Seat-based pricing**: per-seat budgets multiplied by org user count
+- Hard blocks when limits are exceeded, with configurable warning notifications at threshold percentages (default 80%, 90%, 100%)
+
+### Granular AI Access Control
+- Admins configure which providers and models are available per role (MEMBER, VIEWER)
+- Per-user overrides with allow and deny lists for providers and models
+- OWNER/ADMIN always have full access
+- Only admins can add or modify AI provider configurations
+
+### Platform Owner Dashboard
+The application owner manages platform-level AI configuration via dedicated API routes:
+- Add/update platform API keys per provider
+- Set per-model pricing (input and output cost per 1k tokens)
+- Enable/disable providers and models
+- Validate API keys before saving
 
 ### Entity Resolution
 Matches calls to CRM accounts despite naming inconsistencies. Email domain matching (high confidence) with Fuse.js fuzzy name fallback. Unresolved calls go to a manual review queue.
 
 ### Taxonomy Tagging
-GPT-4o classifies every transcript chunk against a structured B2B taxonomy:
+AI classifies every transcript chunk against a structured B2B taxonomy:
 - **TOFU** — Industry trends, problem identification, digital transformation
 - **MOFU** — Product capabilities, competitive displacement, integration, security
 - **BOFU** — ROI, quantified metrics, executive impact, procurement
@@ -65,7 +122,7 @@ GPT-4o classifies every transcript chunk against a structured B2B taxonomy:
 Natural-language queries over transcript segments. Vector search via Pinecone, filtered by account and funnel stage, with LLM-generated answers grounded in source citations.
 
 ### Story Generation
-Three-step pipeline: gather tagged segments, generate a chronological journey narrative (800-1500 word Markdown), then extract high-value quotes with quantified metrics.
+Three-step pipeline: gather tagged segments, generate a chronological journey narrative (800-1500 word Markdown), then extract high-value quotes with quantified metrics. Each story records which AI provider and model was used.
 
 ### Company Name Scrubbing
 Removes all client-identifying information before publishing:
@@ -90,14 +147,49 @@ Regex-based detection and redaction of emails, phone numbers, SSNs, credit cards
 | Framework | Express |
 | Database | PostgreSQL via Prisma |
 | Vector DB | Pinecone |
-| LLM | OpenAI GPT-4o + text-embedding-3-small |
+| AI (Chat) | OpenAI GPT-4o, Anthropic Claude, Google Gemini |
+| AI (Embeddings) | OpenAI text-embedding-3-small |
 | Queue | BullMQ + Redis |
 | Auth | WorkOS (SSO, SAML) |
-| Billing | Stripe (usage-based metering) |
+| Billing | Stripe (usage-based) + prepaid AI balance system |
 | CRM Integration | Merge.dev (unified API) |
 | Markdown | markdown-it |
 
 ## API Endpoints
+
+### Platform Admin (authenticated via `x-platform-admin-key` header)
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/platform/providers` | List platform AI providers with pricing |
+| POST | `/api/platform/providers` | Add/update a platform AI provider |
+| POST | `/api/platform/providers/validate` | Validate an API key |
+| GET | `/api/platform/models` | List all model pricing |
+| POST | `/api/platform/models/pricing` | Set per-model pricing |
+| DELETE | `/api/platform/models/pricing/:provider/:modelId` | Remove model pricing |
+
+### AI Settings — User
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/ai/providers` | List available providers (respects user access) |
+| GET | `/api/ai/usage/me` | Current usage, limits, and balance |
+| GET | `/api/ai/balance/me` | Balance with recent transactions |
+| GET | `/api/ai/notifications` | Pending usage notifications |
+| POST | `/api/ai/notifications/:id/acknowledge` | Acknowledge a notification |
+
+### AI Settings — Admin (requires `MANAGE_AI_SETTINGS` permission)
+| Method | Path | Description |
+|---|---|---|
+| GET/PUT | `/api/ai/admin/settings` | Org AI settings (default provider, seat pricing) |
+| GET/POST/DELETE | `/api/ai/admin/providers` | Org AI provider key management |
+| POST | `/api/ai/admin/providers/validate` | Validate an API key |
+| GET/POST/DELETE | `/api/ai/admin/role-defaults` | Per-role AI access defaults |
+| GET/POST/DELETE | `/api/ai/admin/user-access` | Per-user AI access overrides |
+| GET | `/api/ai/admin/balances` | List all user balances |
+| POST | `/api/ai/admin/balances/top-up` | Add funds to a user's balance |
+| GET | `/api/ai/admin/balances/:userId` | User balance with transactions |
+| GET/POST/DELETE | `/api/ai/admin/limits` | Usage limit management |
+| GET | `/api/ai/admin/usage` | Usage history (filterable) |
+| GET | `/api/ai/admin/usage/summary` | Monthly usage summary by user |
 
 ### Webhooks (unauthenticated)
 | Method | Path | Description |
@@ -108,12 +200,12 @@ Regex-based detection and redaction of emails, phone numbers, SSNs, credit cards
 ### RAG
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/rag/query` | Natural-language query over transcripts |
+| POST | `/api/rag/query` | Natural-language query (supports provider/model selection) |
 
 ### Stories
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/stories/build` | Generate case study from account calls |
+| POST | `/api/stories/build` | Generate case study (supports provider/model selection) |
 | GET | `/api/stories/:accountId` | List stories for an account |
 
 ### Landing Pages
@@ -145,9 +237,13 @@ Regex-based detection and redaction of emails, phone numbers, SSNs, credit cards
 
 Core entities: **Organization** > **User**, **Account** > **Contact**, **Call** > **Transcript** > **TranscriptChunk**, **Story** > **HighValueQuote**, **LandingPage** > **LandingPageEdit**.
 
+AI configuration: **PlatformAIProvider** > **PlatformModelPricing**, **OrgAISettings**, **OrgAIRoleDefault**, **AIProviderConfig** (org keys), **UserAIAccess**.
+
+AI billing: **UserAIBalance** > **UserAITransaction**, **AIUsageRecord**, **AIUsageLimit**, **AIUsageNotification**.
+
 Calls are tagged at both chunk level (`ChunkTag`) and aggregated call level (`CallTag`) with funnel stage, topic, and confidence score.
 
-Access control is layered: role-based defaults (OWNER/ADMIN/MEMBER/VIEWER), granular user permissions, and account-scoped access tied to CRM reports.
+Access control is layered: role-based defaults (OWNER/ADMIN/MEMBER/VIEWER), granular user permissions, account-scoped access tied to CRM reports, and per-user AI provider/model restrictions.
 
 ## Environment Variables
 
@@ -159,7 +255,7 @@ REDIS_URL=               # BullMQ queue (default: redis://localhost:6379)
 MERGE_API_KEY=           # Merge.dev unified API
 MERGE_ACCOUNT_TOKEN=
 MERGE_WEBHOOK_SECRET=
-OPENAI_API_KEY=          # GPT-4o + embeddings
+OPENAI_API_KEY=          # Required for embeddings (Pinecone vectors)
 PINECONE_API_KEY=
 PINECONE_INDEX=
 WORKOS_API_KEY=          # Auth (SSO/SAML)
@@ -168,6 +264,8 @@ WORKOS_REDIRECT_URI=
 STRIPE_SECRET_KEY=       # Billing
 STRIPE_WEBHOOK_SECRET=
 STRIPE_FREE_TRIAL_PRICE_ID=
+AI_KEY_ENCRYPTION_SECRET=  # AES-256-GCM key for encrypting API keys at rest
+PLATFORM_ADMIN_API_KEY=    # Auth for platform admin dashboard routes
 APP_URL=                 # Base URL for generated links
 ```
 
@@ -195,15 +293,19 @@ npm run dev
 
 ## Billing Model
 
-PLG (product-led growth): 14-day free trial with no credit card. After trial, usage-based billing on transcript minutes via Stripe metered subscriptions. Plans: FREE_TRIAL, STARTER, PROFESSIONAL, ENTERPRISE.
+**Platform billing**: PLG (product-led growth) with 14-day free trial. After trial, Stripe-based subscription billing. Plans: FREE_TRIAL, STARTER, PROFESSIONAL, ENTERPRISE.
+
+**AI billing**: Prepaid per-user balance system. Platform owner sets per-model token pricing (input and output costs per 1k tokens). Org admins top up user balances. Each platform-billed AI call deducts the computed cost. Orgs that bring their own API keys bypass platform AI billing for those providers.
 
 ## Security
 
+- AI API keys encrypted at rest with AES-256-GCM
 - PII masked before any LLM call
 - Company names scrubbed from all public pages
 - All landing pages served with `noindex`, `nofollow`, `X-Robots-Tag`
 - Webhook signature verification (HMAC SHA256)
-- Role-based + granular permissions
+- Role-based + granular permissions (including AI access control)
 - Account-scoped data access
 - Helmet security headers
 - Password-protected pages with bcrypt hashing
+- Platform admin routes gated by separate API key

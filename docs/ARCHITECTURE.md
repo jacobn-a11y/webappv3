@@ -114,7 +114,7 @@ customer stories tagged against a B2B sales-funnel taxonomy.
 | Auth | WorkOS | Native Google SSO, email/password, org-level SAML for enterprise |
 | Vector DB | Pinecone | Managed, scales independently of PostgreSQL |
 | Queue | BullMQ + Redis | Async processing of transcripts prevents webhook timeouts |
-| LLM | OpenAI GPT-4o | Best cost/quality for structured extraction tasks |
+| LLM | OpenAI GPT-4o, Anthropic Claude, Google Gemini | Configurable per-org; unified AIClient interface for taxonomy tagging, story generation, and RAG |
 | Billing | Stripe | Usage-based metering on transcript minutes processed |
 | Entity Resolution | Email domain primary, Fuse.js fuzzy secondary | Email domain is the most reliable signal across inconsistent naming |
 
