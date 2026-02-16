@@ -190,6 +190,69 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
     }
   );
 
+  // ── EDIT DATA (JSON for React editor page) ──────────────────────────
+
+  router.get(
+    "/:pageId/edit-data",
+    requirePageOwnerOrPermission(prisma),
+    async (req: AuthReq, res: Response) => {
+      try {
+        const page = await editor.getForEditing(req.params.pageId as string);
+
+        // Check if user has PUBLISH_NAMED_LANDING_PAGE permission
+        const isAdmin = req.userRole && ["OWNER", "ADMIN"].includes(req.userRole);
+        let canPublishNamed = !!isAdmin;
+        if (!canPublishNamed) {
+          const namedPerm = await prisma.userPermission.findUnique({
+            where: {
+              userId_permission: {
+                userId: req.userId!,
+                permission: "PUBLISH_NAMED_LANDING_PAGE",
+              },
+            },
+          });
+          canPublishNamed = !!namedPerm;
+        }
+
+        res.json({
+          pageId: page.id,
+          title: page.title,
+          subtitle: page.subtitle ?? "",
+          editableBody: page.editableBody,
+          status: page.status,
+          visibility: page.visibility,
+          includeCompanyName: page.includeCompanyName,
+          canPublishNamed,
+        });
+      } catch (err) {
+        console.error("Get editor data error:", err);
+        res.status(404).json({ error: "Landing page not found" });
+      }
+    }
+  );
+
+  // ── PREVIEW SCRUB (compare original vs scrubbed) ───────────────────
+
+  router.post(
+    "/:pageId/preview-scrub",
+    requirePageOwnerOrPermission(prisma),
+    async (req: AuthReq, res: Response) => {
+      try {
+        const page = await editor.getForEditing(req.params.pageId as string);
+        const preview = await editor.getPreview(req.params.pageId as string);
+
+        res.json({
+          original: { body: page.editableBody },
+          scrubbed: { body: preview.body },
+          replacements_made: page.editableBody !== preview.body ? 1 : 0,
+        });
+      } catch (err) {
+        console.error("Preview scrub error:", err);
+        res.status(500).json({ error: "Failed to generate scrub preview" });
+      }
+    }
+  );
+
   // ── PREVIEW (render public page from current draft) ─────────────────
 
   router.get(

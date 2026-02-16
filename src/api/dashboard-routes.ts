@@ -124,6 +124,59 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
     }
   });
 
+  /**
+   * GET /api/dashboard/pages/data
+   *
+   * Combined endpoint returning stats + pages + creators + isAdmin
+   * for the React DashboardPagesPage component.
+   */
+  router.get("/pages/data", async (req: AuthReq, res: Response) => {
+    if (!req.organizationId || !req.userId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+
+    const isAdmin = req.userRole && ["OWNER", "ADMIN"].includes(req.userRole);
+    const effectiveCreatorFilter = isAdmin
+      ? (req.query.created_by as string | undefined)
+      : req.userId;
+
+    try {
+      const [dashboardStats, pages] = await Promise.all([
+        editor.getDashboardStats(req.organizationId),
+        editor.listForOrg(req.organizationId, {
+          status: req.query.status as "DRAFT" | "PUBLISHED" | "ARCHIVED" | undefined,
+          createdById: effectiveCreatorFilter,
+          search: (req.query.search as string) || undefined,
+        }),
+      ]);
+
+      const creators = isAdmin
+        ? dashboardStats.pagesByUser.map((u) => ({
+            userId: u.userId,
+            name: u.name,
+            email: u.name ?? u.userId,
+          }))
+        : [];
+
+      res.json({
+        stats: {
+          totalPages: dashboardStats.totalPages,
+          publishedPages: dashboardStats.publishedPages,
+          draftPages: dashboardStats.draftPages,
+          totalViews: dashboardStats.totalViews,
+        },
+        pages,
+        creators,
+        isAdmin: !!isAdmin,
+      });
+    } catch (err) {
+      logger.error("Dashboard pages data error", { error: err });
+      Sentry.captureException(err);
+      res.status(500).json({ error: "Failed to load dashboard data" });
+    }
+  });
+
   // ── Admin: Org Settings ─────────────────────────────────────────────
 
   /**
@@ -275,6 +328,58 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
   const accessService = new AccountAccessService(prisma);
 
   /**
+   * GET /api/dashboard/access
+   *
+   * Lists all org users with their account access grants.
+   */
+  router.get(
+    "/access",
+    requirePermission(prisma, "manage_permissions"),
+    async (req: AuthReq, res: Response) => {
+      try {
+        const orgUsers = await prisma.orgMembership.findMany({
+          where: { organizationId: req.organizationId! },
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+          },
+        });
+
+        const users = await Promise.all(
+          orgUsers.map(async (m) => {
+            const grants = await accessService.listUserAccess(
+              m.user.id,
+              req.organizationId!
+            );
+            return {
+              user_id: m.user.id,
+              user_name: m.user.name,
+              user_email: m.user.email,
+              role: m.role,
+              grants: grants.map((g) => ({
+                id: g.id,
+                scope_type: g.scopeType,
+                account: g.account
+                  ? { id: g.account.id, name: g.account.name, domain: g.account.domain }
+                  : null,
+                cached_account_count: g.cachedAccountIds.length,
+                crm_report_id: g.crmReportId,
+                crm_provider: g.crmProvider,
+                crm_report_name: g.crmReportName,
+                last_synced_at: g.lastSyncedAt,
+              })),
+            };
+          })
+        );
+
+        res.json({ users });
+      } catch (err) {
+        logger.error("Get all access error", { error: err });
+        res.status(500).json({ error: "Failed to load access grants" });
+      }
+    }
+  );
+
+  /**
    * GET /api/dashboard/access/:userId
    *
    * Lists all account access grants for a specific user.
@@ -395,6 +500,83 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
       } catch (err) {
         logger.error("Sync CRM report error", { error: err });
         res.status(500).json({ error: "Failed to sync CRM report" });
+      }
+    }
+  );
+
+  // ── Account Search ─────────────────────────────────────────────────
+
+  /**
+   * GET /api/dashboard/accounts/search?q=...
+   *
+   * Searches accounts by name or domain within the org.
+   */
+  router.get(
+    "/accounts/search",
+    requirePermission(prisma, "manage_permissions"),
+    async (req: AuthReq, res: Response) => {
+      const q = (req.query.q as string || "").trim();
+      try {
+        const accounts = await prisma.account.findMany({
+          where: {
+            organizationId: req.organizationId!,
+            ...(q
+              ? {
+                  OR: [
+                    { name: { contains: q, mode: "insensitive" as const } },
+                    { domain: { contains: q, mode: "insensitive" as const } },
+                  ],
+                }
+              : {}),
+          },
+          select: { id: true, name: true, domain: true, industry: true },
+          orderBy: { name: "asc" },
+          take: 50,
+        });
+        res.json({ accounts });
+      } catch (err) {
+        logger.error("Account search error", { error: err });
+        res.status(500).json({ error: "Failed to search accounts" });
+      }
+    }
+  );
+
+  // ── CRM Reports ──────────────────────────────────────────────────
+
+  /**
+   * GET /api/dashboard/crm-reports?provider=SALESFORCE|HUBSPOT
+   *
+   * Lists available CRM reports/lists for the given provider.
+   */
+  router.get(
+    "/crm-reports",
+    requirePermission(prisma, "manage_permissions"),
+    async (req: AuthReq, res: Response) => {
+      const provider = (req.query.provider as string || "").toUpperCase();
+      if (!["SALESFORCE", "HUBSPOT"].includes(provider)) {
+        res.status(400).json({ error: "Invalid provider. Use SALESFORCE or HUBSPOT." });
+        return;
+      }
+
+      try {
+        const reports = await prisma.crmReport.findMany({
+          where: {
+            organizationId: req.organizationId!,
+            provider: provider as CRMProvider,
+          },
+          select: { id: true, name: true, reportId: true, provider: true },
+          orderBy: { name: "asc" },
+        });
+        res.json({
+          reports: reports.map((r) => ({
+            id: r.reportId,
+            name: r.name,
+            provider: r.provider,
+          })),
+        });
+      } catch (err) {
+        logger.error("CRM reports error", { error: err });
+        res.status(500).json({ error: "Failed to load CRM reports" });
       }
     }
   );
