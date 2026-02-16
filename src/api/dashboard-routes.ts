@@ -15,7 +15,7 @@ import {
   PermissionManager,
   requirePermission,
 } from "../middleware/permissions.js";
-import type { PricingService } from "../services/pricing.js";
+import { MODEL_CONTEXT_LIMITS } from "../types/model-context-limits.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -28,6 +28,8 @@ const UpdateOrgSettingsSchema = z.object({
     .optional(),
   max_pages_per_user: z.number().int().min(1).nullable().optional(),
   company_name_replacements: z.record(z.string(), z.string()).optional(),
+  transcript_merge_max_words: z.number().int().min(1000).max(2_000_000).optional(),
+  transcript_truncation_mode: z.enum(["OLDEST_FIRST", "NEWEST_FIRST"]).optional(),
 });
 
 const GrantPermissionSchema = z.object({
@@ -41,25 +43,6 @@ const GrantPermissionSchema = z.object({
     "MANAGE_PERMISSIONS",
     "VIEW_ANALYTICS",
   ]),
-});
-
-const UpdateBillingConfigSchema = z.object({
-  billing_enabled: z.boolean().optional(),
-  pricing_model: z.enum(["METERED", "PER_SEAT", "METERED_PLUS_SEAT"]).optional(),
-  billing_channel: z.enum(["SELF_SERVE", "SALES_LED"]).optional(),
-  seat_limit: z.number().int().min(1).nullable().optional(),
-});
-
-const CreateSalesLedSubscriptionSchema = z.object({
-  plan: z.enum(["STARTER", "PROFESSIONAL", "ENTERPRISE"]),
-  pricing_model: z.enum(["METERED", "PER_SEAT", "METERED_PLUS_SEAT"]),
-  billing_interval: z.enum(["MONTHLY", "QUARTERLY", "ANNUAL"]),
-  seat_count: z.number().int().min(1).optional(),
-  seat_unit_price: z.number().int().min(0).optional(),
-  metered_unit_price: z.number().int().min(0).optional(),
-  included_units: z.number().int().min(0).optional(),
-  contract_value: z.number().int().min(0).optional(),
-  contract_end_date: z.string().datetime().optional(),
 });
 
 const GrantAccountAccessSchema = z.object({
@@ -83,10 +66,7 @@ interface AuthReq extends Request {
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
-export function createDashboardRoutes(
-  prisma: PrismaClient,
-  pricingService?: PricingService
-): Router {
+export function createDashboardRoutes(prisma: PrismaClient): Router {
   const router = Router();
   const editor = new LandingPageEditor(prisma);
   const permManager = new PermissionManager(prisma);
@@ -160,14 +140,33 @@ export function createDashboardRoutes(
         });
 
         res.json({
-          settings: settings ?? {
-            landing_pages_enabled: true,
-            default_page_visibility: "PRIVATE",
-            require_approval_to_publish: false,
-            allowed_publishers: ["OWNER", "ADMIN"],
-            max_pages_per_user: null,
-            company_name_replacements: {},
-          },
+          settings: settings
+            ? {
+                landing_pages_enabled: settings.landingPagesEnabled,
+                default_page_visibility: settings.defaultPageVisibility,
+                require_approval_to_publish: settings.requireApprovalToPublish,
+                allowed_publishers: settings.allowedPublishers,
+                max_pages_per_user: settings.maxPagesPerUser,
+                company_name_replacements: settings.companyNameReplacements,
+                transcript_merge_max_words: settings.transcriptMergeMaxWords,
+                transcript_truncation_mode: settings.transcriptTruncationMode,
+              }
+            : {
+                landing_pages_enabled: true,
+                default_page_visibility: "PRIVATE",
+                require_approval_to_publish: false,
+                allowed_publishers: ["OWNER", "ADMIN"],
+                max_pages_per_user: null,
+                company_name_replacements: {},
+                transcript_merge_max_words: 600_000,
+                transcript_truncation_mode: "OLDEST_FIRST",
+              },
+          model_context_recommendations: MODEL_CONTEXT_LIMITS.map((m) => ({
+            provider: m.provider,
+            model: m.model,
+            context_tokens: m.contextTokens,
+            recommended_max_words: m.recommendedWords,
+          })),
         });
       } catch (err) {
         console.error("Get settings error:", err);
@@ -199,6 +198,8 @@ export function createDashboardRoutes(
           allowedPublishers: parse.data.allowed_publishers as UserRole[] | undefined,
           maxPagesPerUser: parse.data.max_pages_per_user,
           companyNameReplacements: parse.data.company_name_replacements,
+          transcriptMergeMaxWords: parse.data.transcript_merge_max_words,
+          transcriptTruncationMode: parse.data.transcript_truncation_mode,
         });
 
         res.json({ updated: true });
@@ -206,6 +207,33 @@ export function createDashboardRoutes(
         console.error("Update settings error:", err);
         res.status(500).json({ error: "Failed to update settings" });
       }
+    }
+  );
+
+  /**
+   * GET /api/dashboard/settings/model-context-limits
+   *
+   * Returns recommended transcript word count limits based on 80% of
+   * the token context window for the 10 most popular AI models from
+   * Anthropic, Google, and OpenAI. Used to render the recommendation
+   * info box in the admin dashboard transcript settings UI.
+   */
+  router.get(
+    "/settings/model-context-limits",
+    requirePermission(prisma, "manage_permissions"),
+    async (_req: AuthReq, res: Response) => {
+      res.json({
+        description:
+          "Recommended markdown word count limits based on 80% of the token context window for popular AI models (as of February 2026). " +
+          "These limits leave 20% headroom for system prompts, instructions, and model output.",
+        models: MODEL_CONTEXT_LIMITS.map((m) => ({
+          provider: m.provider,
+          model: m.model,
+          context_tokens: m.contextTokens,
+          recommended_tokens_80_pct: m.recommendedTokens,
+          recommended_max_words: m.recommendedWords,
+        })),
+      });
     }
   );
 
@@ -414,155 +442,6 @@ export function createDashboardRoutes(
       } catch (err) {
         console.error("Sync CRM report error:", err);
         res.status(500).json({ error: "Failed to sync CRM report" });
-      }
-    }
-  );
-
-  // ── Admin: Billing & Pricing ────────────────────────────────────────
-
-  /**
-   * GET /api/dashboard/billing
-   *
-   * Returns billing overview for the org (plan, pricing model, usage, seats).
-   */
-  router.get(
-    "/billing",
-    requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      if (!pricingService) {
-        res.json({
-          billing: {
-            billingEnabled: false,
-            message: "Pricing service not configured.",
-          },
-        });
-        return;
-      }
-
-      try {
-        const overview = await pricingService.getBillingOverview(
-          req.organizationId!
-        );
-        res.json({ billing: overview });
-      } catch (err) {
-        console.error("Get billing error:", err);
-        res.status(500).json({ error: "Failed to load billing info" });
-      }
-    }
-  );
-
-  /**
-   * PATCH /api/dashboard/billing
-   *
-   * Updates billing configuration for the org (enable/disable billing,
-   * change pricing model or channel, set seat limits).
-   * Admin only.
-   */
-  router.patch(
-    "/billing",
-    requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      const parse = UpdateBillingConfigSchema.safeParse(req.body);
-      if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
-        return;
-      }
-
-      try {
-        const data: Record<string, unknown> = {};
-        if (parse.data.billing_enabled !== undefined) {
-          data.billingEnabled = parse.data.billing_enabled;
-        }
-        if (parse.data.pricing_model !== undefined) {
-          data.pricingModel = parse.data.pricing_model;
-        }
-        if (parse.data.billing_channel !== undefined) {
-          data.billingChannel = parse.data.billing_channel;
-        }
-        if (parse.data.seat_limit !== undefined) {
-          data.seatLimit = parse.data.seat_limit;
-        }
-
-        await prisma.organization.update({
-          where: { id: req.organizationId! },
-          data,
-        });
-
-        res.json({ updated: true });
-      } catch (err) {
-        console.error("Update billing error:", err);
-        res.status(500).json({ error: "Failed to update billing config" });
-      }
-    }
-  );
-
-  /**
-   * POST /api/dashboard/billing/sales-led
-   *
-   * Creates a sales-led (B2B) subscription for the org. Used by internal
-   * sales/ops teams to onboard enterprise customers without self-checkout.
-   */
-  router.post(
-    "/billing/sales-led",
-    requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      if (!pricingService) {
-        res.status(400).json({ error: "Pricing service not configured" });
-        return;
-      }
-
-      const parse = CreateSalesLedSubscriptionSchema.safeParse(req.body);
-      if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
-        return;
-      }
-
-      try {
-        const subscriptionId = await pricingService.createSalesLedSubscription(
-          req.organizationId!,
-          {
-            plan: parse.data.plan,
-            pricingModel: parse.data.pricing_model,
-            billingInterval: parse.data.billing_interval,
-            seatCount: parse.data.seat_count,
-            seatUnitPrice: parse.data.seat_unit_price,
-            meteredUnitPrice: parse.data.metered_unit_price,
-            includedUnits: parse.data.included_units,
-            contractValue: parse.data.contract_value,
-            contractEndDate: parse.data.contract_end_date
-              ? new Date(parse.data.contract_end_date)
-              : undefined,
-          }
-        );
-
-        res.json({ created: true, subscription_id: subscriptionId });
-      } catch (err) {
-        console.error("Create sales-led subscription error:", err);
-        res.status(500).json({ error: "Failed to create subscription" });
-      }
-    }
-  );
-
-  /**
-   * GET /api/dashboard/billing/seats
-   *
-   * Returns current seat usage for the org.
-   */
-  router.get(
-    "/billing/seats",
-    requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      if (!pricingService) {
-        res.json({ seats: { current: 0, limit: null, available: null } });
-        return;
-      }
-
-      try {
-        const seats = await pricingService.getSeatStatus(req.organizationId!);
-        res.json({ seats });
-      } catch (err) {
-        console.error("Get seats error:", err);
-        res.status(500).json({ error: "Failed to load seat info" });
       }
     }
   );

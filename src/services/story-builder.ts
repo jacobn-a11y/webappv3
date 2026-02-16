@@ -6,22 +6,18 @@
  *  2. Filters by specific taxonomy tags (e.g., "Onboarding," "ROI")
  *  3. Summarizes the journey into a structured Markdown document
  *  4. Extracts "High-Value Quotes" (specifically looking for quantified value)
- *
- * Uses the AIClient abstraction so the caller can choose which AI provider
- * and model to use. The TrackedAIClient wrapper handles usage tracking
- * and billing automatically.
  */
 
+import OpenAI from "openai";
 import type { PrismaClient, FunnelStage } from "@prisma/client";
-import type { AIClient } from "./ai-client.js";
 import { TOPIC_LABELS, type TaxonomyTopic } from "../types/taxonomy.js";
+import { TranscriptMerger } from "./transcript-merger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface StoryBuilderOptions {
   accountId: string;
   organizationId: string;
-  userId: string;
   /** Filter to specific funnel stages. If empty, includes all. */
   funnelStages?: FunnelStage[];
   /** Filter to specific taxonomy topics. If empty, includes all. */
@@ -114,10 +110,16 @@ RULES:
 // ─── Story Builder ───────────────────────────────────────────────────────────
 
 export class StoryBuilder {
+  private openai: OpenAI;
   private prisma: PrismaClient;
+  private model: string;
+  private merger: TranscriptMerger;
 
-  constructor(prisma: PrismaClient) {
+  constructor(prisma: PrismaClient, openaiApiKey: string, model = "gpt-4o") {
+    this.openai = new OpenAI({ apiKey: openaiApiKey });
     this.prisma = prisma;
+    this.model = model;
+    this.merger = new TranscriptMerger(prisma);
   }
 
   /**
@@ -126,39 +128,41 @@ export class StoryBuilder {
    *   1. Gather & filter transcript segments
    *   2. Generate the journey narrative (Markdown)
    *   3. Extract high-value quotes
-   *
-   * @param options - Story configuration (account, filters, etc.)
-   * @param aiClient - The AI client to use (may be a TrackedAIClient)
    */
-  async buildStory(
-    options: StoryBuilderOptions,
-    aiClient: AIClient
-  ): Promise<StoryResult> {
-    // ── Step 1: Gather transcript segments ───────────────────────────
-    const segments = await this.gatherSegments(options);
-
-    if (segments.length === 0) {
-      return {
-        title: options.title ?? "No Data Available",
-        markdownBody:
-          "No transcript segments matched the specified filters for this account.",
-        quotes: [],
-      };
-    }
-
+  async buildStory(options: StoryBuilderOptions): Promise<StoryResult> {
     const account = await this.prisma.account.findUniqueOrThrow({
       where: { id: options.accountId },
     });
 
-    // ── Step 2: Generate journey narrative ───────────────────────────
-    const markdown = await this.generateNarrative(
+    // ── Step 1: Merge all transcripts into a single markdown ─────────
+    const mergeResult = await this.merger.mergeTranscripts({
+      accountId: options.accountId,
+      organizationId: options.organizationId,
+    });
+
+    if (mergeResult.includedCalls === 0) {
+      return {
+        title: options.title ?? "No Data Available",
+        markdownBody:
+          "No transcripts found for this account.",
+        quotes: [],
+      };
+    }
+
+    // ── Step 2: Also gather tagged segments for filtering & quotes ───
+    const segments = await this.gatherSegments(options);
+
+    // ── Step 3: Generate journey narrative from merged transcript ─────
+    const markdown = await this.generateNarrativeFromMerged(
       account.name,
-      segments,
-      aiClient
+      mergeResult.markdown,
+      mergeResult.includedCalls,
+      mergeResult.truncated,
+      segments
     );
 
-    // ── Step 3: Extract high-value quotes ────────────────────────────
-    const quotes = await this.extractQuotes(segments, aiClient);
+    // ── Step 4: Extract high-value quotes ────────────────────────────
+    const quotes = await this.extractQuotes(segments);
 
     // ── Persist the story ────────────────────────────────────────────
     const title =
@@ -173,9 +177,6 @@ export class StoryBuilder {
         storyType: this.inferStoryType(options.filterTopics),
         funnelStages: options.funnelStages ?? [],
         filterTags: options.filterTopics ?? [],
-        aiProvider: aiClient.providerName,
-        aiModel: aiClient.modelName,
-        generatedById: options.userId,
       },
     });
 
@@ -260,14 +261,56 @@ export class StoryBuilder {
     return segments;
   }
 
-  // ─── Step 2: Generate Narrative ───────────────────────────────────
+  // ─── Step 2: Generate Narrative (from merged transcript) ──────────
 
+  /**
+   * Generates the journey narrative using the full merged transcript markdown.
+   * This provides the LLM with complete, chronologically-ordered context
+   * instead of fragmented chunk segments.
+   */
+  private async generateNarrativeFromMerged(
+    accountName: string,
+    mergedMarkdown: string,
+    callCount: number,
+    wasTruncated: boolean,
+    segments: TranscriptSegment[]
+  ): Promise<string> {
+    // Build topic summary from tagged segments for additional context
+    const topicSummary = this.buildTopicSummary(segments);
+
+    const truncationNote = wasTruncated
+      ? "\n\nNOTE: Some calls were excluded to fit within context limits. The included calls represent the most relevant portion of the account journey."
+      : "";
+
+    const response = await this.openai.chat.completions.create({
+      model: this.model,
+      temperature: 0.3,
+      max_tokens: 4000,
+      messages: [
+        { role: "system", content: JOURNEY_SUMMARY_PROMPT },
+        {
+          role: "user",
+          content: `Account Name: ${accountName}
+Number of calls: ${callCount}
+${topicSummary ? `\nKey Topics Identified: ${topicSummary}\n` : ""}${truncationNote}
+
+FULL MERGED TRANSCRIPT:
+${mergedMarkdown}`,
+        },
+      ],
+    });
+
+    return response.choices[0]?.message?.content ?? "# Story generation failed";
+  }
+
+  /**
+   * Legacy method: generates narrative from chunked segments.
+   * Kept for backward compatibility with direct segment-based workflows.
+   */
   private async generateNarrative(
     accountName: string,
-    segments: TranscriptSegment[],
-    aiClient: AIClient
+    segments: TranscriptSegment[]
   ): Promise<string> {
-    // Prepare the transcript context
     const transcriptContext = segments
       .map((s) => {
         const date = s.occurredAt.toISOString().split("T")[0];
@@ -277,7 +320,10 @@ export class StoryBuilder {
       })
       .join("\n\n");
 
-    const result = await aiClient.chatCompletion({
+    const response = await this.openai.chat.completions.create({
+      model: this.model,
+      temperature: 0.3,
+      max_tokens: 4000,
       messages: [
         { role: "system", content: JOURNEY_SUMMARY_PROMPT },
         {
@@ -290,18 +336,34 @@ TRANSCRIPT SEGMENTS:
 ${transcriptContext}`,
         },
       ],
-      temperature: 0.3,
-      maxTokens: 4000,
     });
 
-    return result.content || "# Story generation failed";
+    return response.choices[0]?.message?.content ?? "# Story generation failed";
+  }
+
+  /**
+   * Builds a comma-separated summary of the most common topics found
+   * across all tagged segments.
+   */
+  private buildTopicSummary(segments: TranscriptSegment[]): string {
+    const topicCounts = new Map<string, number>();
+    for (const s of segments) {
+      for (const t of s.tags) {
+        const label = TOPIC_LABELS[t.topic as TaxonomyTopic] ?? t.topic;
+        topicCounts.set(label, (topicCounts.get(label) ?? 0) + 1);
+      }
+    }
+    return [...topicCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([label]) => label)
+      .join(", ");
   }
 
   // ─── Step 3: Extract Quotes ───────────────────────────────────────
 
   private async extractQuotes(
-    segments: TranscriptSegment[],
-    aiClient: AIClient
+    segments: TranscriptSegment[]
   ): Promise<ExtractedQuote[]> {
     // Only send segments likely to contain quantified value (BoFu + Post-Sale)
     const valuableSegments = segments.filter((s) =>
@@ -325,7 +387,10 @@ ${transcriptContext}`,
       })
       .join("\n\n");
 
-    const result = await aiClient.chatCompletion({
+    const response = await this.openai.chat.completions.create({
+      model: this.model,
+      temperature: 0.1,
+      response_format: { type: "json_object" },
       messages: [
         { role: "system", content: QUOTE_EXTRACTION_PROMPT },
         {
@@ -333,14 +398,13 @@ ${transcriptContext}`,
           content: `Extract high-value quotes with quantified metrics from these transcript segments:\n\n${transcriptText}`,
         },
       ],
-      temperature: 0.1,
-      jsonMode: true,
     });
 
-    if (!result.content) return [];
+    const content = response.choices[0]?.message?.content;
+    if (!content) return [];
 
     try {
-      const parsed = JSON.parse(result.content);
+      const parsed = JSON.parse(content);
       const rawQuotes: Array<{
         speaker?: string;
         quote_text: string;

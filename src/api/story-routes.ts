@@ -2,22 +2,13 @@
  * Story Builder API Routes
  *
  * Endpoints for generating and retrieving Markdown case studies.
- * Story generation now supports provider/model selection and is
- * tracked via the AI usage system.
  */
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import type { PrismaClient, UserRole } from "@prisma/client";
 import type { StoryBuilder } from "../services/story-builder.js";
-import { AIConfigService, AIAccessDeniedError } from "../services/ai-config.js";
-import {
-  AIUsageTracker,
-  TrackedAIClient,
-  UsageLimitExceededError,
-  InsufficientBalanceError,
-} from "../services/ai-usage-tracker.js";
-import type { AIProviderName } from "../services/ai-client.js";
+import type { PrismaClient, TranscriptTruncationMode } from "@prisma/client";
+import { TranscriptMerger } from "../services/transcript-merger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -26,23 +17,21 @@ const BuildStorySchema = z.object({
   funnel_stages: z.array(z.string()).optional(),
   filter_topics: z.array(z.string()).optional(),
   title: z.string().optional(),
-  provider: z.enum(["openai", "anthropic", "google"]).optional(),
-  model: z.string().optional(),
 });
 
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
+const MergeTranscriptsSchema = z.object({
+  account_id: z.string().min(1),
+  max_words: z.number().int().min(1000).optional(),
+  truncation_mode: z.enum(["OLDEST_FIRST", "NEWEST_FIRST"]).optional(),
+  after_date: z.string().datetime().optional(),
+  before_date: z.string().datetime().optional(),
+});
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
 export function createStoryRoutes(
-  prisma: PrismaClient,
   storyBuilder: StoryBuilder,
-  configService: AIConfigService,
-  usageTracker: AIUsageTracker
+  prisma: PrismaClient
 ): Router {
   const router = Router();
 
@@ -50,9 +39,8 @@ export function createStoryRoutes(
    * POST /api/stories/build
    *
    * Generates a new Markdown story for an account.
-   * Accepts optional provider/model selection.
    */
-  router.post("/build", async (req: AuthReq, res: Response) => {
+  router.post("/build", async (req: Request, res: Response) => {
     const parseResult = BuildStorySchema.safeParse(req.body);
     if (!parseResult.success) {
       res.status(400).json({
@@ -62,49 +50,27 @@ export function createStoryRoutes(
       return;
     }
 
-    const { organizationId, userId, userRole } = req;
-    if (!organizationId || !userId || !userRole) {
+    const organizationId = (req as Record<string, unknown>).organizationId as string;
+    if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
     }
 
-    const { account_id, funnel_stages, filter_topics, title, provider, model } =
+    const { account_id, funnel_stages, filter_topics, title } =
       parseResult.data;
 
     try {
-      // Resolve AI client for this user (respects per-provider hybrid routing)
-      const { client, isPlatformBilled } = await configService.resolveClient(
+      const result = await storyBuilder.buildStory({
+        accountId: account_id,
         organizationId,
-        userId,
-        userRole,
-        { provider: provider as AIProviderName | undefined, model }
-      );
-
-      // Wrap with usage tracking and billing
-      const trackedClient = new TrackedAIClient(
-        client,
-        usageTracker,
-        { organizationId, userId, operation: "STORY_GENERATION" },
-        isPlatformBilled
-      );
-
-      const result = await storyBuilder.buildStory(
-        {
-          accountId: account_id,
-          organizationId,
-          userId,
-          funnelStages: funnel_stages as never[],
-          filterTopics: filter_topics as never[],
-          title,
-        },
-        trackedClient
-      );
+        funnelStages: funnel_stages as never[],
+        filterTopics: filter_topics as never[],
+        title,
+      });
 
       res.json({
         title: result.title,
         markdown: result.markdownBody,
-        ai_provider: client.providerName,
-        ai_model: client.modelName,
         quotes: result.quotes.map((q) => ({
           speaker: q.speaker,
           quote_text: q.quoteText,
@@ -115,18 +81,6 @@ export function createStoryRoutes(
         })),
       });
     } catch (err) {
-      if (err instanceof AIAccessDeniedError) {
-        res.status(403).json({ error: "ai_access_denied", message: err.message });
-        return;
-      }
-      if (err instanceof UsageLimitExceededError) {
-        res.status(429).json({ error: "usage_limit_exceeded", message: err.message });
-        return;
-      }
-      if (err instanceof InsufficientBalanceError) {
-        res.status(402).json({ error: "insufficient_balance", message: err.message });
-        return;
-      }
       console.error("Story build error:", err);
       res.status(500).json({ error: "Failed to build story" });
     }
@@ -137,8 +91,8 @@ export function createStoryRoutes(
    *
    * Retrieves all previously generated stories for an account.
    */
-  router.get("/:accountId", async (req: AuthReq, res: Response) => {
-    const organizationId = req.organizationId;
+  router.get("/:accountId", async (req: Request, res: Response) => {
+    const organizationId = (req as Record<string, unknown>).organizationId as string;
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
@@ -163,9 +117,6 @@ export function createStoryRoutes(
           story_type: s.storyType,
           funnel_stages: s.funnelStages,
           filter_tags: s.filterTags,
-          ai_provider: s.aiProvider,
-          ai_model: s.aiModel,
-          generated_by: s.generatedById,
           generated_at: s.generatedAt.toISOString(),
           markdown: s.markdownBody,
           quotes: s.quotes.map((q) => ({
@@ -180,6 +131,61 @@ export function createStoryRoutes(
     } catch (err) {
       console.error("Story retrieval error:", err);
       res.status(500).json({ error: "Failed to retrieve stories" });
+    }
+  });
+
+  // ── Transcript Merging ───────────────────────────────────────────────
+
+  const merger = new TranscriptMerger(prisma);
+
+  /**
+   * POST /api/stories/merge-transcripts
+   *
+   * Merges all transcripts for an account into a single Markdown document.
+   * Respects org-level word count limits and truncation settings.
+   * Returns the merged markdown plus metadata about truncation.
+   */
+  router.post("/merge-transcripts", async (req: Request, res: Response) => {
+    const parseResult = MergeTranscriptsSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      res.status(400).json({
+        error: "validation_error",
+        details: parseResult.error.issues,
+      });
+      return;
+    }
+
+    const organizationId = (req as Record<string, unknown>).organizationId as string;
+    if (!organizationId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+
+    const { account_id, max_words, truncation_mode, after_date, before_date } =
+      parseResult.data;
+
+    try {
+      const result = await merger.mergeTranscripts({
+        accountId: account_id,
+        organizationId,
+        maxWords: max_words,
+        truncationMode: truncation_mode as TranscriptTruncationMode | undefined,
+        afterDate: after_date ? new Date(after_date) : undefined,
+        beforeDate: before_date ? new Date(before_date) : undefined,
+      });
+
+      res.json({
+        markdown: result.markdown,
+        word_count: result.wordCount,
+        total_calls: result.totalCalls,
+        included_calls: result.includedCalls,
+        truncated: result.truncated,
+        truncation_boundary: result.truncationBoundary?.toISOString() ?? null,
+        truncation_mode: result.truncationMode,
+      });
+    } catch (err) {
+      console.error("Transcript merge error:", err);
+      res.status(500).json({ error: "Failed to merge transcripts" });
     }
   });
 
