@@ -40,6 +40,9 @@ import { createRateLimiter } from "./middleware/rate-limiter.js";
 import { createApiUsageLogger } from "./middleware/api-usage-logger.js";
 import { createApiKeyRoutes } from "./api/api-key-routes.js";
 import { AITagger } from "./services/ai-tagger.js";
+import { RateLimiter } from "./services/rate-limiter.js";
+import { TagCache } from "./services/tag-cache.js";
+import { ConfidenceCalibrator } from "./services/confidence-calibrator.js";
 import { RAGEngine } from "./services/rag-engine.js";
 import { StoryBuilder } from "./services/story-builder.js";
 import {
@@ -68,8 +71,26 @@ const openaiApiKey = process.env.OPENAI_API_KEY ?? "";
 const pineconeApiKey = process.env.PINECONE_API_KEY ?? "";
 const pineconeIndex = process.env.PINECONE_INDEX ?? "storyengine-transcripts";
 
+// Rate limiter & cache for AI Tagger
+const rateLimiter = new RateLimiter({
+  maxRPM: parseInt(process.env.OPENAI_MAX_RPM ?? "500", 10),
+  maxTPM: parseInt(process.env.OPENAI_MAX_TPM ?? "30000", 10),
+});
+
+const tagCache = new TagCache({
+  maxSize: parseInt(process.env.TAG_CACHE_MAX_SIZE ?? "10000", 10),
+  ttlMs: parseInt(process.env.TAG_CACHE_TTL_MS ?? "3600000", 10), // 1 hour
+});
+
+const confidenceCalibrator = new ConfidenceCalibrator(prisma);
+
 // Services
-const aiTagger = new AITagger(prisma, openaiApiKey);
+const aiTagger = new AITagger(prisma, openaiApiKey, {
+  concurrency: parseInt(process.env.TAGGER_CONCURRENCY ?? "5", 10),
+  rateLimiter,
+  cache: tagCache,
+  calibrator: confidenceCalibrator,
+});
 const ragEngine = new RAGEngine(prisma, {
   openaiApiKey,
   pineconeApiKey,
