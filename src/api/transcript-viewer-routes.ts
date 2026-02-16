@@ -1270,6 +1270,14 @@ export function createTranscriptViewerRoutes(prisma: PrismaClient): Router {
       confidence: t.confidence,
     }));
 
+    // If the client prefers JSON (e.g. React frontend with Accept: application/json),
+    // return structured data instead of the HTML page.
+    const acceptHeader = req.get("Accept") || "";
+    if (acceptHeader.includes("application/json")) {
+      res.json({ meta, segments, participants, entity, callTags });
+      return;
+    }
+
     res.setHeader("Cache-Control", "private, no-cache");
     res.send(renderTranscriptPage(meta, segments, participants, entity, callTags));
   });
