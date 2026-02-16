@@ -15,7 +15,9 @@
  */
 
 import Fuse from "fuse.js";
-import type { PrismaClient, MatchMethod } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
+import logger from "../lib/logger.js";
+import { metrics } from "../lib/metrics.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -29,15 +31,6 @@ export interface ResolvedEntity {
   accountName: string;
   confidence: number; // 0.0–1.0
   matchMethod: "email_domain" | "fuzzy_name" | "none";
-}
-
-/** Maps string matchMethod values to Prisma MatchMethod enum */
-export function toMatchMethodEnum(method: ResolvedEntity["matchMethod"]): MatchMethod {
-  switch (method) {
-    case "email_domain": return "EMAIL_DOMAIN";
-    case "fuzzy_name": return "FUZZY_NAME";
-    case "none": return "NONE";
-  }
 }
 
 interface AccountRecord {
@@ -127,7 +120,14 @@ export class EntityResolver {
         organizationId,
         domains
       );
-      if (domainMatch) return domainMatch;
+      if (domainMatch) {
+        metrics.recordEntityResolution(domainMatch.matchMethod, domainMatch.confidence);
+        logger.debug("Entity resolved via email domain", {
+          accountId: domainMatch.accountId,
+          confidence: domainMatch.confidence,
+        });
+        return domainMatch;
+      }
     }
 
     // ── Step 2: Try Fuzzy Name Match on participant names + call title ─
@@ -138,10 +138,22 @@ export class EntityResolver {
         organizationId,
         candidateNames
       );
-      if (fuzzyMatch) return fuzzyMatch;
+      if (fuzzyMatch) {
+        metrics.recordEntityResolution(fuzzyMatch.matchMethod, fuzzyMatch.confidence);
+        logger.debug("Entity resolved via fuzzy name", {
+          accountId: fuzzyMatch.accountId,
+          confidence: fuzzyMatch.confidence,
+        });
+        return fuzzyMatch;
+      }
     }
 
     // ── Step 3: No match — route to manual review ────────────────────
+    metrics.recordEntityResolution("none", 0);
+    logger.debug("Entity resolution failed, routing to manual review", {
+      organizationId,
+      participantCount: participants.length,
+    });
     return {
       accountId: "",
       accountName: "",
@@ -152,7 +164,6 @@ export class EntityResolver {
 
   /**
    * Also creates or links Contact records for resolved participants.
-   * Persists matchMethod and confidence on the Call record.
    */
   async resolveAndLinkContacts(
     organizationId: string,
@@ -160,16 +171,6 @@ export class EntityResolver {
     participants: CallParticipantInput[]
   ): Promise<ResolvedEntity> {
     const resolution = await this.resolve(organizationId, participants);
-
-    // Always persist the match metadata on the call
-    await this.prisma.call.update({
-      where: { id: callId },
-      data: {
-        matchMethod: toMatchMethodEnum(resolution.matchMethod),
-        matchConfidence: resolution.confidence,
-        accountId: resolution.matchMethod !== "none" ? resolution.accountId : undefined,
-      },
-    });
 
     if (resolution.matchMethod === "none") return resolution;
 
@@ -197,6 +198,12 @@ export class EntityResolver {
         },
       });
     }
+
+    // Link the call to the resolved account
+    await this.prisma.call.update({
+      where: { id: callId },
+      data: { accountId: resolution.accountId },
+    });
 
     return resolution;
   }

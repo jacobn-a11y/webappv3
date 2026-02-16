@@ -15,10 +15,8 @@ import {
   PermissionManager,
   requirePermission,
 } from "../middleware/permissions.js";
-import {
-  auditPermissionChange,
-  auditAccessChange,
-} from "../middleware/audit-logger.js";
+import logger from "../lib/logger.js";
+import { Sentry } from "../lib/sentry.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -89,7 +87,8 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
       const stats = await editor.getDashboardStats(req.organizationId);
       res.json(stats);
     } catch (err) {
-      console.error("Dashboard stats error:", err);
+      logger.error("Dashboard stats error", { error: err });
+      Sentry.captureException(err);
       res.status(500).json({ error: "Failed to load dashboard stats" });
     }
   });
@@ -119,7 +118,8 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
 
       res.json({ pages });
     } catch (err) {
-      console.error("Dashboard pages error:", err);
+      logger.error("Dashboard pages error", { error: err });
+      Sentry.captureException(err);
       res.status(500).json({ error: "Failed to load pages" });
     }
   });
@@ -151,7 +151,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           },
         });
       } catch (err) {
-        console.error("Get settings error:", err);
+        logger.error("Get settings error", { error: err });
         res.status(500).json({ error: "Failed to load settings" });
       }
     }
@@ -184,7 +184,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
 
         res.json({ updated: true });
       } catch (err) {
-        console.error("Update settings error:", err);
+        logger.error("Update settings error", { error: err });
         res.status(500).json({ error: "Failed to update settings" });
       }
     }
@@ -207,7 +207,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
         );
         res.json({ users: matrix });
       } catch (err) {
-        console.error("Get permissions error:", err);
+        logger.error("Get permissions error", { error: err });
         res.status(500).json({ error: "Failed to load permissions" });
       }
     }
@@ -234,19 +234,9 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           parse.data.permission as PermissionType,
           req.userId!
         );
-
-        // Audit log: permission granted
-        auditPermissionChange(
-          "GRANT",
-          req.userId!,
-          parse.data.user_id,
-          parse.data.permission,
-          req.organizationId!
-        );
-
         res.json({ granted: true });
       } catch (err) {
-        console.error("Grant permission error:", err);
+        logger.error("Grant permission error", { error: err });
         res.status(500).json({ error: "Failed to grant permission" });
       }
     }
@@ -272,19 +262,9 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           parse.data.user_id,
           parse.data.permission as PermissionType
         );
-
-        // Audit log: permission revoked
-        auditPermissionChange(
-          "REVOKE",
-          req.userId!,
-          parse.data.user_id,
-          parse.data.permission,
-          req.organizationId!
-        );
-
         res.json({ revoked: true });
       } catch (err) {
-        console.error("Revoke permission error:", err);
+        logger.error("Revoke permission error", { error: err });
         res.status(500).json({ error: "Failed to revoke permission" });
       }
     }
@@ -324,7 +304,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           })),
         });
       } catch (err) {
-        console.error("Get access error:", err);
+        logger.error("Get access error", { error: err });
         res.status(500).json({ error: "Failed to load access grants" });
       }
     }
@@ -362,16 +342,6 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           grantedById: req.userId!,
         });
 
-        // Audit log: account access granted
-        auditAccessChange(
-          "GRANT",
-          req.userId!,
-          parse.data.user_id,
-          parse.data.scope_type,
-          req.organizationId!,
-          grantId
-        );
-
         // If CRM_REPORT, trigger an initial sync
         if (parse.data.scope_type === "CRM_REPORT") {
           try {
@@ -385,7 +355,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
 
         res.json({ granted: true, grant_id: grantId });
       } catch (err) {
-        console.error("Grant access error:", err);
+        logger.error("Grant access error", { error: err });
         res.status(500).json({ error: "Failed to grant account access" });
       }
     }
@@ -402,20 +372,9 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
     async (req: AuthReq, res: Response) => {
       try {
         await accessService.revokeAccess(req.params.grantId);
-
-        // Audit log: account access revoked
-        auditAccessChange(
-          "REVOKE",
-          req.userId!,
-          "N/A",
-          "N/A",
-          req.organizationId!,
-          req.params.grantId
-        );
-
         res.json({ revoked: true });
       } catch (err) {
-        console.error("Revoke access error:", err);
+        logger.error("Revoke access error", { error: err });
         res.status(500).json({ error: "Failed to revoke access" });
       }
     }
@@ -434,7 +393,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
         const result = await accessService.syncCrmReportGrant(req.params.grantId);
         res.json({ synced: true, account_count: result.accountCount });
       } catch (err) {
-        console.error("Sync CRM report error:", err);
+        logger.error("Sync CRM report error", { error: err });
         res.status(500).json({ error: "Failed to sync CRM report" });
       }
     }

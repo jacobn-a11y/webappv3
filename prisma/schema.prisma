@@ -10,22 +10,41 @@ datasource db {
 // ─── Auth & Tenancy ──────────────────────────────────────────────────────────
 
 model Organization {
-  id               String    @id @default(cuid())
+  id               String          @id @default(cuid())
   name             String
-  workosOrgId      String?   @unique
-  stripeCustomerId String?   @unique
-  plan             Plan      @default(FREE_TRIAL)
+  workosOrgId      String?         @unique
+  stripeCustomerId String?         @unique
+  plan             Plan            @default(FREE_TRIAL)
+  pricingModel     PricingModel    @default(METERED)
+  billingChannel   BillingChannel  @default(SELF_SERVE)
+  billingEnabled   Boolean         @default(false)
+  seatLimit        Int?
   trialEndsAt      DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  contractEndsAt   DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
-  users        User[]
-  accounts     Account[]
-  calls        Call[]
-  stories      Story[]
-  landingPages LandingPage[]
-  orgSettings  OrgSettings?
-  apiKeys      ApiKey[]
+  users                User[]
+  accounts             Account[]
+  calls                Call[]
+  stories              Story[]
+  landingPages         LandingPage[]
+  orgSettings          OrgSettings?
+  orgAISettings        OrgAISettings?
+  orgAIRoleDefaults    OrgAIRoleDefault[]
+  aiProviderConfigs    AIProviderConfig[]
+  aiUsageRecords       AIUsageRecord[]
+  aiUsageLimits        AIUsageLimit[]
+  aiUsageNotifications AIUsageNotification[]
+  userAIBalances       UserAIBalance[]
+  subscriptions        Subscription[]
+  usageRecords         UsageRecord[]
+  apiKeys              ApiKey[]
+  linkedAccounts       LinkedAccount[]
+  integrationConfigs   IntegrationConfig[]
+  invites              OrgInvite[]
+  setupWizard          SetupWizard?
+  storyRegenLogs       StoryRegenLog[]
 
   @@map("organizations")
 }
@@ -35,6 +54,17 @@ enum Plan {
   STARTER
   PROFESSIONAL
   ENTERPRISE
+}
+
+enum PricingModel {
+  METERED
+  PER_SEAT
+  METERED_PLUS_SEAT
+}
+
+enum BillingChannel {
+  SELF_SERVE
+  SALES_LED
 }
 
 model User {
@@ -47,11 +77,16 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization      Organization       @relation(fields: [organizationId], references: [id])
-  landingPages      LandingPage[]      @relation("CreatedBy")
-  landingPageEdits  LandingPageEdit[]
-  permissions       UserPermission[]
-  accountAccess     UserAccountAccess[]
+  organization         Organization          @relation(fields: [organizationId], references: [id])
+  landingPages         LandingPage[]         @relation("CreatedBy")
+  landingPageEdits     LandingPageEdit[]
+  permissions          UserPermission[]
+  accountAccess        UserAccountAccess[]
+  aiUsageRecords       AIUsageRecord[]
+  aiUsageLimits        AIUsageLimit[]
+  aiUsageNotifications AIUsageNotification[]
+  aiAccess             UserAIAccess?
+  aiBalance            UserAIBalance?
 
   @@index([organizationId])
   @@map("users")
@@ -70,8 +105,8 @@ model Account {
   id              String   @id @default(cuid())
   organizationId  String
   name            String
-  normalizedName  String   // lowercase, stripped of Inc/Corp/LLC suffixes
-  domain          String?  // primary email domain (e.g., "bigtech.com")
+  normalizedName  String
+  domain          String?
   salesforceId    String?
   hubspotId       String?
   mergeAccountId  String?
@@ -81,13 +116,14 @@ model Account {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  organization    Organization     @relation(fields: [organizationId], references: [id])
-  contacts        Contact[]
-  calls           Call[]
+  organization     Organization      @relation(fields: [organizationId], references: [id])
+  contacts         Contact[]
+  calls            Call[]
   salesforceEvents SalesforceEvent[]
-  stories         Story[]
-  domainAliases   AccountDomain[]
-  userAccess      UserAccountAccess[]
+  stories          Story[]
+  domainAliases    AccountDomain[]
+  userAccess       UserAccountAccess[]
+  storyRegenLogs   StoryRegenLog[]
 
   @@unique([organizationId, domain])
   @@unique([organizationId, salesforceId])
@@ -98,7 +134,7 @@ model Account {
 model AccountDomain {
   id        String @id @default(cuid())
   accountId String
-  domain    String // additional email domains for the same account
+  domain    String
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
@@ -111,7 +147,7 @@ model Contact {
   id             String   @id @default(cuid())
   accountId      String
   email          String
-  emailDomain    String   // extracted domain portion
+  emailDomain    String
   name           String?
   title          String?
   phone          String?
@@ -121,7 +157,7 @@ model Contact {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  account        Account           @relation(fields: [accountId], references: [id])
+  account          Account           @relation(fields: [accountId], references: [id])
   callParticipants CallParticipant[]
 
   @@unique([accountId, email])
@@ -134,17 +170,17 @@ model Contact {
 model Call {
   id               String       @id @default(cuid())
   organizationId   String
-  accountId        String?      // resolved via Entity Resolution; null until matched
+  accountId        String?
   title            String?
   provider         CallProvider
   mergeRecordingId String?      @unique
-  externalId       String?      // provider-native ID
+  externalId       String?
   recordingUrl     String?
-  duration         Int?         // seconds
+  duration         Int?
   occurredAt       DateTime
   matchMethod      MatchMethod  @default(NONE)
-  matchConfidence  Float        @default(0) // 0.0–1.0; entity resolution confidence
-  dismissedAt      DateTime?    // set when manually dismissed from review queue
+  matchConfidence  Float        @default(0)
+  dismissedAt      DateTime?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
@@ -169,6 +205,7 @@ enum MatchMethod {
 
 enum CallProvider {
   GONG
+  GRAIN
   CHORUS
   ZOOM
   GOOGLE_MEET
@@ -201,7 +238,7 @@ model CallParticipant {
 model Transcript {
   id         String   @id @default(cuid())
   callId     String   @unique
-  fullText   String   // complete transcript text
+  fullText   String
   language   String   @default("en")
   wordCount  Int
   createdAt  DateTime @default(now())
@@ -218,9 +255,9 @@ model TranscriptChunk {
   chunkIndex   Int
   text         String
   speaker      String?
-  startMs      Int?     // timestamp offset in milliseconds
+  startMs      Int?
   endMs        Int?
-  embeddingId  String?  // Pinecone vector ID
+  embeddingId  String?
   createdAt    DateTime @default(now())
 
   transcript Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
@@ -233,12 +270,12 @@ model TranscriptChunk {
 // ─── Taxonomy Tags ───────────────────────────────────────────────────────────
 
 model CallTag {
-  id         String        @id @default(cuid())
-  callId     String
+  id          String      @id @default(cuid())
+  callId      String
   funnelStage FunnelStage
-  topic      String        // specific topic from taxonomy
-  confidence Float         // LLM confidence 0.0-1.0
-  createdAt  DateTime      @default(now())
+  topic       String
+  confidence  Float
+  createdAt   DateTime    @default(now())
 
   call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
 
@@ -248,12 +285,12 @@ model CallTag {
 }
 
 model ChunkTag {
-  id         String      @id @default(cuid())
-  chunkId    String
+  id          String      @id @default(cuid())
+  chunkId     String
   funnelStage FunnelStage
-  topic      String
-  confidence Float
-  createdAt  DateTime    @default(now())
+  topic       String
+  confidence  Float
+  createdAt   DateTime    @default(now())
 
   chunk TranscriptChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
 
@@ -262,27 +299,27 @@ model ChunkTag {
 }
 
 enum FunnelStage {
-  TOFU       // Top of Funnel
-  MOFU       // Mid-Funnel
-  BOFU       // Bottom of Funnel
+  TOFU
+  MOFU
+  BOFU
   POST_SALE
   INTERNAL
-  VERTICAL   // Vertical/Segment cuts
+  VERTICAL
 }
 
 // ─── CRM Events ──────────────────────────────────────────────────────────────
 
 model SalesforceEvent {
-  id            String          @id @default(cuid())
+  id            String              @id @default(cuid())
   accountId     String
   eventType     SalesforceEventType
-  stageName     String?         // e.g., "Closed Won", "Closed Lost"
+  stageName     String?
   opportunityId String?
   amount        Float?
   closeDate     DateTime?
   description   String?
   rawPayload    Json?
-  createdAt     DateTime        @default(now())
+  createdAt     DateTime            @default(now())
 
   account Account @relation(fields: [accountId], references: [id])
 
@@ -304,23 +341,27 @@ enum SalesforceEventType {
 // ─── Generated Stories ───────────────────────────────────────────────────────
 
 model Story {
-  id             String      @id @default(cuid())
+  id             String        @id @default(cuid())
   organizationId String
   accountId      String
   title          String
-  markdownBody   String      // the generated Markdown story
+  markdownBody   String
   storyType      StoryType
-  funnelStages   FunnelStage[] // which stages this story covers
-  filterTags     String[]    // which taxonomy topics were used to filter
-  generatedAt    DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  funnelStages   FunnelStage[]
+  filterTags     String[]
+  aiProvider     String?
+  aiModel        String?
+  generatedById  String?
+  generatedAt    DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  account      Account      @relation(fields: [accountId], references: [id])
+  organization Organization   @relation(fields: [organizationId], references: [id])
+  account      Account        @relation(fields: [accountId], references: [id])
   quotes       HighValueQuote[]
   landingPages LandingPage[]
 
   @@index([organizationId, accountId])
+  @@index([organizationId, generatedById])
   @@map("stories")
 }
 
@@ -338,10 +379,10 @@ model HighValueQuote {
   storyId     String
   speaker     String?
   quoteText   String
-  context     String?  // surrounding context
-  metricType  String?  // e.g., "cost_savings", "time_saved", "revenue"
-  metricValue String?  // e.g., "40%", "$2M", "3x"
-  callId      String?  // source call
+  context     String?
+  metricType  String?
+  metricValue String?
+  callId      String?
   createdAt   DateTime @default(now())
 
   story Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
@@ -353,33 +394,33 @@ model HighValueQuote {
 // ─── Landing Pages (Publishable Story Pages) ────────────────────────────────
 
 model LandingPage {
-  id              String            @id @default(cuid())
-  organizationId  String
-  storyId         String
-  createdById     String
-  slug            String            @unique   // URL slug: /s/{slug}
-  title           String
-  subtitle        String?
-  editableBody    String            // rich Markdown edited by the rep
-  scrubbedBody    String            // company-name-scrubbed version for public
-  heroImageUrl    String?
-  calloutBoxes    Json?             // array of {title, body, icon} callout blocks
-  totalCallHours  Float             @default(0) // for the "Compiled from X hours" badge
-  visibility      PageVisibility    @default(PRIVATE)
-  status          PageStatus        @default(DRAFT)
-  password        String?           // optional password for SHARED_WITH_LINK pages
-  includeCompanyName Boolean        @default(false) // admin-only: named landing page
-  noIndex         Boolean           @default(true)
-  customCss       String?
-  viewCount       Int               @default(0)
-  publishedAt     DateTime?
-  expiresAt       DateTime?         // optional expiration for shared links
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  id                 String         @id @default(cuid())
+  organizationId     String
+  storyId            String
+  createdById        String
+  slug               String         @unique
+  title              String
+  subtitle           String?
+  editableBody       String
+  scrubbedBody       String
+  heroImageUrl       String?
+  calloutBoxes       Json?
+  totalCallHours     Float          @default(0)
+  visibility         PageVisibility @default(PRIVATE)
+  status             PageStatus     @default(DRAFT)
+  password           String?
+  includeCompanyName Boolean        @default(false)
+  noIndex            Boolean        @default(true)
+  customCss          String?
+  viewCount          Int            @default(0)
+  publishedAt        DateTime?
+  expiresAt          DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 
-  organization Organization       @relation(fields: [organizationId], references: [id])
-  story        Story               @relation(fields: [storyId], references: [id])
-  createdBy    User                @relation("CreatedBy", fields: [createdById], references: [id])
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  story        Story              @relation(fields: [storyId], references: [id])
+  createdBy    User               @relation("CreatedBy", fields: [createdById], references: [id])
   edits        LandingPageEdit[]
 
   @@index([organizationId, status])
@@ -388,8 +429,8 @@ model LandingPage {
 }
 
 enum PageVisibility {
-  PRIVATE           // only visible to org members
-  SHARED_WITH_LINK  // anyone with the link (optionally password-protected)
+  PRIVATE
+  SHARED_WITH_LINK
 }
 
 enum PageStatus {
@@ -402,8 +443,8 @@ model LandingPageEdit {
   id            String   @id @default(cuid())
   landingPageId String
   editedById    String
-  previousBody  String   // snapshot before this edit
-  newBody       String   // snapshot after this edit
+  previousBody  String
+  newBody       String
   editSummary   String?
   createdAt     DateTime @default(now())
 
@@ -417,28 +458,35 @@ model LandingPageEdit {
 // ─── Permissions & Org Settings ──────────────────────────────────────────────
 
 model OrgSettings {
-  id                        String   @id @default(cuid())
-  organizationId            String   @unique
-  landingPagesEnabled       Boolean  @default(true)
-  defaultPageVisibility     PageVisibility @default(PRIVATE)
-  requireApprovalToPublish  Boolean  @default(false)
-  allowedPublishers         UserRole[] @default([OWNER, ADMIN]) // roles that can publish
-  maxPagesPerUser           Int?     // null = unlimited
-  companyNameReplacements   Json?    // custom scrub mappings: {"Acme Corp": "the client"}
-  createdAt                 DateTime @default(now())
-  updatedAt                 DateTime @updatedAt
+  id                        String                   @id @default(cuid())
+  organizationId            String                   @unique
+  landingPagesEnabled       Boolean                  @default(true)
+  defaultPageVisibility     PageVisibility           @default(PRIVATE)
+  requireApprovalToPublish  Boolean                  @default(false)
+  allowedPublishers         UserRole[]               @default([OWNER, ADMIN])
+  maxPagesPerUser           Int?
+  companyNameReplacements   Json?
+  transcriptMergeMaxWords   Int                      @default(600000)
+  transcriptTruncationMode  TranscriptTruncationMode @default(OLDEST_FIRST)
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
 
   @@map("org_settings")
 }
 
+enum TranscriptTruncationMode {
+  OLDEST_FIRST
+  NEWEST_FIRST
+}
+
 model UserPermission {
-  id             String           @id @default(cuid())
-  userId         String
-  permission     PermissionType
-  grantedById    String?
-  createdAt      DateTime         @default(now())
+  id          String         @id @default(cuid())
+  userId      String
+  permission  PermissionType
+  grantedById String?
+  createdAt   DateTime       @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -449,35 +497,31 @@ model UserPermission {
 enum PermissionType {
   CREATE_LANDING_PAGE
   PUBLISH_LANDING_PAGE
-  PUBLISH_NAMED_LANDING_PAGE  // publish with real company name visible
+  PUBLISH_NAMED_LANDING_PAGE
   EDIT_ANY_LANDING_PAGE
   DELETE_ANY_LANDING_PAGE
   MANAGE_PERMISSIONS
   VIEW_ANALYTICS
-  MANAGE_ENTITY_RESOLUTION    // resolve unmatched calls, merge accounts
+  MANAGE_ENTITY_RESOLUTION
+  MANAGE_AI_SETTINGS
 }
 
 // ─── Account-Scoped Access Control ───────────────────────────────────────────
-// Admins can restrict which accounts a user can generate landing pages for.
-// Access can be granted to individual accounts or via a CRM report/list.
 
 model UserAccountAccess {
-  id             String           @id @default(cuid())
-  userId         String
-  organizationId String
-  scopeType      AccountScopeType
-  // For SINGLE_ACCOUNT: the specific account
-  accountId      String?
-  // For CRM_REPORT: the Salesforce report ID or HubSpot list ID
-  crmReportId    String?
-  crmProvider    CRMProvider?
-  crmReportName  String?          // human-readable name for display
-  // Cached account IDs from the last CRM report sync
-  cachedAccountIds String[]       @default([])
-  lastSyncedAt   DateTime?
-  grantedById    String?
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  id               String           @id @default(cuid())
+  userId           String
+  organizationId   String
+  scopeType        AccountScopeType
+  accountId        String?
+  crmReportId      String?
+  crmProvider      CRMProvider?
+  crmReportName    String?
+  cachedAccountIds String[]         @default([])
+  lastSyncedAt     DateTime?
+  grantedById      String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   account Account? @relation(fields: [accountId], references: [id])
@@ -488,10 +532,10 @@ model UserAccountAccess {
 }
 
 enum AccountScopeType {
-  ALL_ACCOUNTS       // no restriction (default for admins)
-  SINGLE_ACCOUNT     // access to one specific account
-  ACCOUNT_LIST       // access to a manually curated list (stored in cachedAccountIds)
-  CRM_REPORT         // access defined by a Salesforce report or HubSpot list
+  ALL_ACCOUNTS
+  SINGLE_ACCOUNT
+  ACCOUNT_LIST
+  CRM_REPORT
 }
 
 enum CRMProvider {
@@ -499,25 +543,89 @@ enum CRMProvider {
   HUBSPOT
 }
 
+// ─── Subscriptions & Billing ─────────────────────────────────────────────────
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  organizationId       String
+  stripeSubscriptionId String?            @unique
+  pricingModel         PricingModel
+  billingChannel       BillingChannel
+  status               SubscriptionStatus @default(ACTIVE)
+  seatCount            Int?
+  seatUnitPrice        Int?
+  meteredUnitPrice     Int?
+  includedUnits        Int?
+  contractValue        Int?
+  billingInterval      BillingInterval    @default(MONTHLY)
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  canceledAt           DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, status])
+  @@map("subscriptions")
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  TRIALING
+}
+
+enum BillingInterval {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+model UsageRecord {
+  id                String      @id @default(cuid())
+  organizationId    String
+  metric            UsageMetric
+  quantity          Float
+  periodStart       DateTime
+  periodEnd         DateTime
+  reportedToStripe  Boolean     @default(false)
+  stripeRecordId    String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, periodStart])
+  @@index([reportedToStripe])
+  @@map("usage_records")
+}
+
+enum UsageMetric {
+  TRANSCRIPT_MINUTES
+  CALLS_PROCESSED
+  STORIES_GENERATED
+  PAGES_PUBLISHED
+  AI_TOKENS_USED
+}
+
 // ─── API Keys (External RAG Consumers) ──────────────────────────────────────
 
 model ApiKey {
   id               String    @id @default(cuid())
   organizationId   String
-  keyHash          String    @unique  // SHA-256 hash of the full key
-  keyPrefix        String             // first 8 chars for display (e.g., "se_live_ab...")
-  label            String             // human-readable label, e.g. "Intercom chatbot"
-  scopes           String[] @default(["rag:query"])
+  keyHash          String    @unique
+  keyPrefix        String
+  label            String
+  scopes           String[]  @default(["rag:query"])
   expiresAt        DateTime?
   revokedAt        DateTime?
   lastUsedAt       DateTime?
-
-  // Key rotation: points to the new key that replaced this one
-  replacedByKeyId   String?   @unique
-  gracePeriodEndsAt DateTime? // old key still works until this time
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  replacedByKeyId  String?   @unique
+  gracePeriodEndsAt DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   organization  Organization @relation(fields: [organizationId], references: [id])
   replacedByKey ApiKey?      @relation("KeyRotation", fields: [replacedByKeyId], references: [id])
@@ -544,4 +652,414 @@ model ApiUsageLog {
   @@index([apiKeyId, createdAt])
   @@index([organizationId, createdAt])
   @@map("api_usage_logs")
+}
+
+// ─── Merge.dev Linked Accounts ──────────────────────────────────────────────
+
+model LinkedAccount {
+  id                   String              @id @default(cuid())
+  organizationId       String
+  mergeLinkedAccountId String              @unique
+  accountToken         String
+  integrationSlug      String
+  category             MergeCategory
+  status               LinkedAccountStatus @default(ACTIVE)
+  lastSyncedAt         DateTime?
+  initialSyncDone      Boolean             @default(false)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, category])
+  @@index([status])
+  @@map("linked_accounts")
+}
+
+enum MergeCategory {
+  CRM
+  RECORDING
+}
+
+enum LinkedAccountStatus {
+  ACTIVE
+  PAUSED
+  ERROR
+  REVOKED
+}
+
+// ─── Integration Configurations ─────────────────────────────────────────────
+
+model IntegrationConfig {
+  id             String              @id @default(cuid())
+  organizationId String
+  provider       IntegrationProvider
+  enabled        Boolean             @default(true)
+  credentials    Json
+  settings       Json?
+  lastSyncAt     DateTime?
+  syncCursor     String?
+  webhookSecret  String?
+  status         IntegrationStatus   @default(PENDING_SETUP)
+  lastError      String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, provider])
+  @@map("integration_configs")
+}
+
+enum IntegrationProvider {
+  GRAIN
+  GONG
+  SALESFORCE
+  MERGE_DEV
+}
+
+enum IntegrationStatus {
+  PENDING_SETUP
+  ACTIVE
+  ERROR
+  DISABLED
+}
+
+// ─── Organization Invites ─────────────────────────────────────────────────────
+
+model OrgInvite {
+  id             String    @id @default(cuid())
+  organizationId String
+  email          String
+  role           UserRole  @default(MEMBER)
+  invitedById    String
+  token          String    @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, email])
+  @@map("org_invites")
+}
+
+// ─── Connections Setup Wizard ─────────────────────────────────────────────────
+
+model SetupWizard {
+  id                      String          @id @default(cuid())
+  organizationId          String          @unique
+  currentStep             SetupWizardStep @default(RECORDING_PROVIDER)
+  completedAt             DateTime?
+  recordingProvider       CallProvider?
+  mergeLinkedAccountId    String?
+  crmProvider             CRMProvider?
+  crmMergeLinkedAccountId String?
+  syncedAccountCount      Int             @default(0)
+  unresolvedCount         Int             @default(0)
+  syncReviewedAt          DateTime?
+  selectedPlan            Plan?
+  permissionsConfiguredAt DateTime?
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@map("setup_wizards")
+}
+
+enum SetupWizardStep {
+  RECORDING_PROVIDER
+  CRM
+  ACCOUNT_SYNC
+  PLAN
+  PERMISSIONS
+  COMPLETED
+}
+
+// ─── Weekly Story Regeneration ───────────────────────────────────────────────
+
+model StoryRegenLog {
+  id              String   @id @default(cuid())
+  organizationId  String
+  accountId       String
+  previousStoryId String?
+  newStoryId      String
+  callsProcessed  Int
+  diffSummary     String?
+  createdAt       DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  account      Account      @relation(fields: [accountId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@map("story_regen_logs")
+}
+
+// ─── Notifications ──────────────────────────────────────────────────────────
+
+model Notification {
+  id             String           @id @default(cuid())
+  organizationId String
+  userId         String?
+  type           NotificationType
+  title          String
+  body           String
+  metadata       Json?
+  read           Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+
+  @@index([organizationId, userId, read])
+  @@index([organizationId, createdAt])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  STORY_COMPLETED
+  CALL_PROCESSED
+  CALL_PROCESSING_FAILED
+  TRIAL_EXPIRING
+  TRIAL_EXPIRED
+  PAGE_PUBLISHED
+  PAGE_NEEDS_APPROVAL
+  EXPORT_READY
+}
+
+// ─── Confidence Calibration ─────────────────────────────────────────────────
+
+model ValidationSample {
+  id                  String   @id @default(cuid())
+  chunkText           String
+  expectedFunnelStage String
+  expectedTopic       String
+  organizationId      String?
+  createdAt           DateTime @default(now())
+
+  @@index([expectedFunnelStage, expectedTopic])
+  @@map("validation_samples")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// AI PROVIDER CONFIGURATION, BILLING & USAGE
+// ═════════════════════════════════════════════════════════════════════════════
+
+enum AIProviderType {
+  OPENAI
+  ANTHROPIC
+  GOOGLE
+}
+
+model PlatformAIProvider {
+  id              String         @id @default(cuid())
+  provider        AIProviderType
+  encryptedApiKey String
+  keyIv           String
+  keyAuthTag      String
+  isActive        Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  models PlatformModelPricing[]
+
+  @@unique([provider])
+  @@map("platform_ai_providers")
+}
+
+model PlatformModelPricing {
+  id                    String         @id @default(cuid())
+  platformProviderId    String
+  provider              AIProviderType
+  modelId               String
+  displayName           String
+  inputCostPer1kTokens  Float
+  outputCostPer1kTokens Float
+  isAvailable           Boolean        @default(true)
+  sortOrder             Int            @default(0)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  platformProvider PlatformAIProvider @relation(fields: [platformProviderId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, modelId])
+  @@map("platform_model_pricing")
+}
+
+model OrgAISettings {
+  id                         String   @id @default(cuid())
+  organizationId             String   @unique
+  defaultProvider            String?
+  defaultModel               String?
+  perSeatTokenBudgetPerMonth Int?
+  perSeatStoriesPerMonth     Int?
+  maxStoriesPerMonth         Int?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@map("org_ai_settings")
+}
+
+model OrgAIRoleDefault {
+  id                String           @id @default(cuid())
+  organizationId    String
+  role              UserRole
+  allowedProviders  AIProviderType[]
+  allowedModels     String[]
+  maxTokensPerDay   Int?
+  maxTokensPerMonth Int?
+  maxStoriesPerMonth Int?
+  maxRequestsPerDay Int?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, role])
+  @@map("org_ai_role_defaults")
+}
+
+model UserAIAccess {
+  id               String           @id @default(cuid())
+  organizationId   String
+  userId           String
+  allowedProviders AIProviderType[]
+  allowedModels    String[]
+  deniedProviders  AIProviderType[]
+  deniedModels     String[]
+  grantedById      String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@map("user_ai_access")
+}
+
+model AIProviderConfig {
+  id              String         @id @default(cuid())
+  organizationId  String
+  provider        AIProviderType
+  encryptedApiKey String
+  keyIv           String
+  keyAuthTag      String
+  displayName     String?
+  defaultModel    String?
+  embeddingModel  String?
+  isDefault       Boolean        @default(false)
+  isActive        Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, provider])
+  @@map("ai_provider_configs")
+}
+
+model UserAIBalance {
+  id                 String   @id @default(cuid())
+  organizationId     String
+  userId             String
+  balanceCents       Int      @default(0)
+  lifetimeSpentCents Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id])
+  organization Organization        @relation(fields: [organizationId], references: [id])
+  transactions UserAITransaction[]
+
+  @@unique([organizationId, userId])
+  @@map("user_ai_balances")
+}
+
+model UserAITransaction {
+  id            String            @id @default(cuid())
+  balanceId     String
+  type          AITransactionType
+  amountCents   Int
+  description   String
+  usageRecordId String?
+  createdAt     DateTime          @default(now())
+
+  balance UserAIBalance @relation(fields: [balanceId], references: [id])
+
+  @@index([balanceId, createdAt])
+  @@map("user_ai_transactions")
+}
+
+enum AITransactionType {
+  CREDIT
+  DEBIT
+  REFUND
+}
+
+enum AIOperation {
+  STORY_GENERATION
+  QUOTE_EXTRACTION
+  TRANSCRIPT_TAGGING
+  RAG_QUERY
+  EMBEDDING
+}
+
+model AIUsageRecord {
+  id             String      @id @default(cuid())
+  organizationId String
+  userId         String
+  provider       String
+  model          String
+  operation      AIOperation
+  inputTokens    Int
+  outputTokens   Int
+  totalTokens    Int
+  costCents      Float       @default(0)
+  createdAt      DateTime    @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, userId, createdAt])
+  @@index([organizationId, createdAt])
+  @@map("ai_usage_records")
+}
+
+model AIUsageLimit {
+  id                  String   @id @default(cuid())
+  organizationId      String
+  userId              String?
+  maxTokensPerDay     Int?
+  maxTokensPerMonth   Int?
+  maxRequestsPerDay   Int?
+  maxRequestsPerMonth Int?
+  maxStoriesPerMonth  Int?
+  warningThresholdPct Int      @default(80)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@unique([organizationId, userId])
+  @@map("ai_usage_limits")
+}
+
+model AIUsageNotification {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  limitType      String
+  thresholdPct   Int
+  currentUsage   Int
+  limitValue     Int
+  message        String
+  acknowledged   Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([userId, acknowledged, createdAt])
+  @@map("ai_usage_notifications")
 }

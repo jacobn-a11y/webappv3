@@ -21,7 +21,9 @@ import {
   normalizeCompanyName,
   extractEmailDomain,
 } from "../services/entity-resolution.js";
-import { auditWebhookFailure } from "../middleware/audit-logger.js";
+import logger from "../lib/logger.js";
+import { metrics } from "../lib/metrics.js";
+import { Sentry } from "../lib/sentry.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -84,15 +86,10 @@ function verifyMergeSignature(
     .createHmac("sha256", secret)
     .update(payload)
     .digest("hex");
-
-  // Ensure buffers are the same length before timing-safe comparison
-  // (timingSafeEqual throws if lengths differ, which would leak length info)
-  const sigBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expected);
-  if (sigBuffer.length !== expectedBuffer.length) {
-    return false;
-  }
-  return crypto.timingSafeEqual(sigBuffer, expectedBuffer);
+  return crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from(expected)
+  );
 }
 
 // ─── Provider Mapping ────────────────────────────────────────────────────────
@@ -126,28 +123,17 @@ export function createMergeWebhookHandler(deps: {
   const resolver = new EntityResolver(prisma);
 
   return async (req: Request, res: Response) => {
-    // ── Verify signature (ALWAYS required — fail closed) ──────────────
+    // ── Verify signature ──────────────────────────────────────────────
     const signature = req.headers["x-merge-webhook-signature"] as string;
     const webhookSecret = process.env.MERGE_WEBHOOK_SECRET;
 
-    if (!webhookSecret) {
-      console.error("MERGE_WEBHOOK_SECRET is not configured — rejecting webhook");
-      res.status(500).json({ error: "Webhook verification not configured" });
-      return;
-    }
-
-    if (!signature) {
-      auditWebhookFailure("merge", "Missing signature header", req.ip ?? "unknown");
-      res.status(401).json({ error: "Missing webhook signature" });
-      return;
-    }
-
-    const rawBody =
-      typeof req.body === "string" ? req.body : JSON.stringify(req.body);
-    if (!verifyMergeSignature(rawBody, signature, webhookSecret)) {
-      auditWebhookFailure("merge", "Invalid signature", req.ip ?? "unknown");
-      res.status(401).json({ error: "Invalid webhook signature" });
-      return;
+    if (webhookSecret && signature) {
+      const rawBody =
+        typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+      if (!verifyMergeSignature(rawBody, signature, webhookSecret)) {
+        res.status(401).json({ error: "Invalid webhook signature" });
+        return;
+      }
     }
 
     const payload = req.body as MergeWebhookPayload;
@@ -197,7 +183,8 @@ export function createMergeWebhookHandler(deps: {
 
       res.json({ received: true, processed: true });
     } catch (err) {
-      console.error(`Webhook processing error for ${eventType}:`, err);
+      logger.error("Webhook processing error", { eventType, error: err });
+      Sentry.captureException(err, { tags: { eventType } });
       // Return 200 to prevent Merge.dev retries for processing errors
       // (only return 4xx/5xx for signature failures)
       res.json({ received: true, processed: false, error: "Processing failed" });
@@ -291,6 +278,15 @@ async function handleRecordingEvent(
       backoff: { type: "exponential", delay: 5000 },
     }
   );
+
+  metrics.incrementCallsIngested();
+  logger.info("Call ingested and queued for processing", {
+    callId: call.id,
+    provider,
+    hasTranscript: !!recording.transcript,
+    matchMethod: resolution.matchMethod,
+    accountId: resolution.accountId || null,
+  });
 }
 
 async function handleCRMContactEvent(

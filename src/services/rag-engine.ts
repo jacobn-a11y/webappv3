@@ -7,21 +7,16 @@
  *
  * Flow:
  *   1. Receive query + account context
- *   2. Generate embedding for the query (always OpenAI text-embedding-3-small)
+ *   2. Generate embedding for the query
  *   3. Search Pinecone for relevant transcript chunks (filtered by account)
  *   4. Build a context window from top-K results
- *   5. Send query + context to the caller's chosen AI model
+ *   5. Send query + context to LLM for grounded answer
  *   6. Return answer with source citations
- *
- * Embeddings remain OpenAI-only because existing Pinecone vectors are
- * OpenAI-based. Switching embedding models would require re-indexing.
- * Chat completions use the AIClient abstraction for provider flexibility.
  */
 
 import OpenAI from "openai";
 import { Pinecone } from "@pinecone-database/pinecone";
 import type { PrismaClient } from "@prisma/client";
-import type { AIClient } from "./ai-client.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -79,6 +74,7 @@ export class RAGEngine {
   private pinecone: Pinecone;
   private prisma: PrismaClient;
   private indexName: string;
+  private model: string;
 
   constructor(
     prisma: PrismaClient,
@@ -86,22 +82,21 @@ export class RAGEngine {
       openaiApiKey: string;
       pineconeApiKey: string;
       pineconeIndex: string;
+      model?: string;
     }
   ) {
     this.openai = new OpenAI({ apiKey: config.openaiApiKey });
     this.pinecone = new Pinecone({ apiKey: config.pineconeApiKey });
     this.prisma = prisma;
     this.indexName = config.pineconeIndex;
+    this.model = config.model ?? "gpt-4o";
   }
 
   /**
    * Main query method: takes a natural language question, retrieves relevant
    * transcript chunks, and returns a grounded answer.
-   *
-   * @param input - The query parameters
-   * @param aiClient - The AI client to use for chat completion (may be TrackedAIClient)
    */
-  async query(input: RAGQuery, aiClient: AIClient): Promise<RAGResponse> {
+  async query(input: RAGQuery): Promise<RAGResponse> {
     const topK = input.topK ?? 8;
 
     // ── Step 1: Generate query embedding ─────────────────────────────
@@ -145,7 +140,10 @@ export class RAGEngine {
       )
       .join("\n\n---\n\n");
 
-    const result = await aiClient.chatCompletion({
+    const response = await this.openai.chat.completions.create({
+      model: this.model,
+      temperature: 0.2,
+      max_tokens: 1500,
       messages: [
         {
           role: "system",
@@ -166,15 +164,13 @@ TRANSCRIPT SOURCES:
 ${contextBlock}`,
         },
       ],
-      temperature: 0.2,
-      maxTokens: 1500,
     });
 
-    return {
-      answer: result.content || "Unable to generate an answer.",
-      sources,
-      tokensUsed: result.totalTokens,
-    };
+    const answer =
+      response.choices[0]?.message?.content ?? "Unable to generate an answer.";
+    const tokensUsed = response.usage?.total_tokens ?? 0;
+
+    return { answer, sources, tokensUsed };
   }
 
   /**
@@ -274,7 +270,6 @@ ${contextBlock}`,
   /**
    * Generates an embedding for a transcript chunk and upserts it to Pinecone.
    * Called during the ingestion pipeline after chunking + tagging.
-   * Always uses OpenAI embeddings for vector consistency.
    */
   async indexChunk(chunk: {
     chunkId: string;
@@ -332,31 +327,23 @@ ${contextBlock}`,
       metadata?: Record<string, unknown>;
     }>
   ): Promise<RAGSource[]> {
-    const chunkIds = matches
-      .map((m) => m.metadata?.chunk_id as string | undefined)
-      .filter((id): id is string => !!id);
-
-    if (chunkIds.length === 0) return [];
-
-    const chunks = await this.prisma.transcriptChunk.findMany({
-      where: { id: { in: chunkIds } },
-      include: {
-        transcript: {
-          include: {
-            call: { select: { id: true, title: true, occurredAt: true } },
-          },
-        },
-      },
-    });
-
-    const chunkMap = new Map(chunks.map((c) => [c.id, c]));
-
     const sources: RAGSource[] = [];
+
     for (const match of matches) {
       const chunkId = match.metadata?.chunk_id as string | undefined;
       if (!chunkId) continue;
 
-      const chunk = chunkMap.get(chunkId);
+      const chunk = await this.prisma.transcriptChunk.findUnique({
+        where: { id: chunkId },
+        include: {
+          transcript: {
+            include: {
+              call: { select: { id: true, title: true, occurredAt: true } },
+            },
+          },
+        },
+      });
+
       if (!chunk) continue;
 
       sources.push({
