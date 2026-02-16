@@ -5,18 +5,11 @@
  *  - A new recording is created (from Gong, Chorus, Zoom, etc.)
  *  - A CRM record is updated (Salesforce/HubSpot contact, opportunity, etc.)
  *
- * GATED: This handler checks for an active MERGE_DEV IntegrationConfig
- * for the target organization. When Merge.dev is not enabled (no config
- * or config.enabled=false), webhooks are acknowledged but not processed.
- * This allows operators to use direct integrations (Grain, Gong, SFDC)
- * for the pilot and re-enable Merge.dev later for multi-provider SaaS use.
- *
  * Flow:
  *   1. Verify webhook signature
- *   2. Check if Merge.dev is enabled for this org (IntegrationConfig gate)
- *   3. Parse the event type and payload
- *   4. Dispatch to the appropriate handler
- *   5. Queue async processing (transcription, entity resolution, tagging)
+ *   2. Parse the event type and payload
+ *   3. Dispatch to the appropriate handler
+ *   4. Queue async processing (transcription, entity resolution, tagging)
  */
 
 import type { Request, Response } from "express";
@@ -28,9 +21,10 @@ import {
   normalizeCompanyName,
   extractEmailDomain,
 } from "../services/entity-resolution.js";
-import logger from "../lib/logger.js";
-import { metrics } from "../lib/metrics.js";
-import { Sentry } from "../lib/sentry.js";
+import {
+  type TranscriptFetchJob,
+  getProviderPollingConfig,
+} from "../services/transcript-fetcher.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -66,7 +60,6 @@ interface MergeCRMContact {
   remote_id: string;
   first_name?: string;
   last_name?: string;
-  title?: string; // Salesforce Contact.Title / HubSpot contact.jobtitle
   email_addresses?: Array<{ email_address: string; email_address_type: string }>;
   company?: string;
   account?: { id: string; name: string };
@@ -105,7 +98,6 @@ function verifyMergeSignature(
 function mapIntegrationToProvider(integration: string): CallProvider {
   const map: Record<string, CallProvider> = {
     gong: "GONG",
-    grain: "GRAIN",
     chorus: "CHORUS",
     zoom: "ZOOM",
     "google-meet": "GOOGLE_MEET",
@@ -127,8 +119,9 @@ function mapIntegrationToProvider(integration: string): CallProvider {
 export function createMergeWebhookHandler(deps: {
   prisma: PrismaClient;
   processingQueue: Queue;
+  transcriptFetchQueue: Queue;
 }) {
-  const { prisma, processingQueue } = deps;
+  const { prisma, processingQueue, transcriptFetchQueue } = deps;
   const resolver = new EntityResolver(prisma);
 
   return async (req: Request, res: Response) => {
@@ -161,27 +154,6 @@ export function createMergeWebhookHandler(deps: {
       return;
     }
 
-    // ── Check if Merge.dev is enabled for this org ────────────────────
-    const mergeConfig = await prisma.integrationConfig.findUnique({
-      where: {
-        organizationId_provider: {
-          organizationId: org.id,
-          provider: "MERGE_DEV",
-        },
-      },
-    });
-
-    if (!mergeConfig || !mergeConfig.enabled) {
-      // Merge.dev is not enabled for this org — acknowledge but skip.
-      // The org is using direct integrations (Grain, Gong, SFDC) instead.
-      res.json({
-        received: true,
-        processed: false,
-        reason: "Merge.dev integration is not enabled for this organization",
-      });
-      return;
-    }
-
     // ── Route by event type ───────────────────────────────────────────
     try {
       switch (eventType) {
@@ -191,6 +163,7 @@ export function createMergeWebhookHandler(deps: {
             prisma,
             resolver,
             processingQueue,
+            transcriptFetchQueue,
             org.id,
             payload
           );
@@ -213,8 +186,7 @@ export function createMergeWebhookHandler(deps: {
 
       res.json({ received: true, processed: true });
     } catch (err) {
-      logger.error("Webhook processing error", { eventType, error: err });
-      Sentry.captureException(err, { tags: { eventType } });
+      console.error(`Webhook processing error for ${eventType}:`, err);
       // Return 200 to prevent Merge.dev retries for processing errors
       // (only return 4xx/5xx for signature failures)
       res.json({ received: true, processed: false, error: "Processing failed" });
@@ -228,6 +200,7 @@ async function handleRecordingEvent(
   prisma: PrismaClient,
   resolver: EntityResolver,
   processingQueue: Queue,
+  transcriptFetchQueue: Queue,
   organizationId: string,
   payload: MergeWebhookPayload
 ): Promise<void> {
@@ -292,31 +265,47 @@ async function handleRecordingEvent(
         wordCount: recording.transcript.split(/\s+/).length,
       },
     });
-  }
 
-  // ── Queue async processing (chunking → tagging → embedding) ────────
-  await processingQueue.add(
-    "process-call",
-    {
+    // Transcript available inline — queue for immediate processing
+    await processingQueue.add(
+      "process-call",
+      {
+        callId: call.id,
+        organizationId,
+        accountId: resolution.accountId || null,
+        hasTranscript: true,
+      },
+      {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 5000 },
+      }
+    );
+  } else {
+    // No inline transcript — queue a fetch job to poll Merge.dev.
+    // Providers like Gong process recordings asynchronously and the
+    // transcript may not be ready for several minutes.
+    const pollingConfig = getProviderPollingConfig(provider);
+
+    const fetchJob: TranscriptFetchJob = {
       callId: call.id,
       organizationId,
       accountId: resolution.accountId || null,
-      hasTranscript: !!recording.transcript,
-    },
-    {
-      attempts: 3,
-      backoff: { type: "exponential", delay: 5000 },
-    }
-  );
+      mergeRecordingId: recording.id,
+      linkedAccountId: payload.linked_account.id,
+      provider,
+    };
 
-  metrics.incrementCallsIngested();
-  logger.info("Call ingested and queued for processing", {
-    callId: call.id,
-    provider,
-    hasTranscript: !!recording.transcript,
-    matchMethod: resolution.matchMethod,
-    accountId: resolution.accountId || null,
-  });
+    await transcriptFetchQueue.add("fetch-transcript", fetchJob, {
+      delay: pollingConfig.initialDelayMs,
+      attempts: pollingConfig.maxAttempts,
+      backoff: { type: "custom" },
+    });
+
+    console.log(
+      `No inline transcript for call ${call.id} (${provider}), ` +
+        `queued fetch with ${pollingConfig.initialDelayMs}ms initial delay`
+    );
+  }
 }
 
 async function handleCRMContactEvent(
@@ -357,7 +346,6 @@ async function handleCRMContactEvent(
           name:
             [contact.first_name, contact.last_name].filter(Boolean).join(" ") ||
             null,
-          title: contact.title ?? null,
           mergeContactId: contact.id,
         },
       });
@@ -376,12 +364,10 @@ async function handleCRMContactEvent(
       email: primaryEmail.toLowerCase(),
       emailDomain: domain,
       name: fullName,
-      title: contact.title ?? null,
       mergeContactId: contact.id,
     },
     update: {
       name: fullName ?? undefined,
-      title: contact.title ?? undefined,
       mergeContactId: contact.id,
     },
   });
