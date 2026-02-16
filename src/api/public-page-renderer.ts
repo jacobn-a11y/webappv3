@@ -11,18 +11,66 @@
  *   - Optionally password-protected
  */
 
-import express, { Router, type Request, type Response } from "express";
-import bcrypt from "bcryptjs";
-import MarkdownIt from "markdown-it";
+import { Router, type Request, type Response } from "express";
+import bcryptjs from "bcryptjs";
 import { LandingPageEditor, type CalloutBox } from "../services/landing-page-editor.js";
 import type { PrismaClient } from "@prisma/client";
 
-// ─── Markdown to HTML ────────────────────────────────────────────────────────
+// ─── Markdown to HTML (simple converter) ─────────────────────────────────────
 
-const markdownParser = new MarkdownIt({ html: false, linkify: true, typographer: true });
+function markdownToHtml(md: string): string {
+  let html = md
+    // Headers
+    .replace(/^#### (.+)$/gm, "<h4>$1</h4>")
+    .replace(/^### (.+)$/gm, "<h3>$1</h3>")
+    .replace(/^## (.+)$/gm, "<h2>$1</h2>")
+    .replace(/^# (.+)$/gm, "<h1>$1</h1>")
+    // Bold
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    // Italic
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    // Blockquotes
+    .replace(/^> (.+)$/gm, '<blockquote><p>$1</p></blockquote>')
+    // Unordered lists
+    .replace(/^- (.+)$/gm, "<li>$1</li>")
+    // Horizontal rules
+    .replace(/^---$/gm, "<hr>")
+    // Tables (basic)
+    .replace(/^\|(.+)\|$/gm, (_, content: string) => {
+      const cells = content.split("|").map((c: string) => c.trim());
+      const tds = cells.map((c: string) => `<td>${c}</td>`).join("");
+      return `<tr>${tds}</tr>`;
+    })
+    // Line breaks
+    .replace(/\n\n/g, "</p><p>")
+    .replace(/\n/g, "<br>");
 
-function markdownToHtml(markdown: string): string {
-  return markdownParser.render(markdown);
+  // Wrap loose <li> in <ul>
+  html = html.replace(
+    /(<li>.*?<\/li>(?:<br>)?)+/g,
+    (match) => `<ul>${match.replace(/<br>/g, "")}</ul>`
+  );
+
+  // Wrap in paragraphs
+  html = `<p>${html}</p>`;
+
+  // Clean up empty paragraphs
+  html = html.replace(/<p><\/p>/g, "");
+  html = html.replace(/<p>(<h[1-4]>)/g, "$1");
+  html = html.replace(/(<\/h[1-4]>)<\/p>/g, "$1");
+  html = html.replace(/<p>(<blockquote>)/g, "$1");
+  html = html.replace(/(<\/blockquote>)<\/p>/g, "$1");
+  html = html.replace(/<p>(<ul>)/g, "$1");
+  html = html.replace(/(<\/ul>)<\/p>/g, "$1");
+  html = html.replace(/<p>(<hr>)<\/p>/g, "$1");
+
+  // Wrap adjacent <tr> in <table>
+  html = html.replace(
+    /(<tr>.*?<\/tr>(?:\s*<tr>.*?<\/tr>)*)/g,
+    '<table>$1</table>'
+  );
+
+  return html;
 }
 
 // ─── Callout Box Icon SVGs ───────────────────────────────────────────────────
@@ -41,6 +89,40 @@ const CALLOUT_ICONS: Record<string, string> = {
   success:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22,4 12,14.01 9,11.01"/></svg>',
 };
+
+// ─── CSS Sanitizer ──────────────────────────────────────────────────────────
+
+/**
+ * Sanitizes user-provided custom CSS to prevent XSS attacks.
+ * Removes dangerous patterns that could:
+ *   - Close the <style> tag and inject HTML/JS
+ *   - Use CSS features for data exfiltration (@import, url())
+ *   - Execute JavaScript via expression() or -moz-binding
+ */
+export function sanitizeCustomCss(css: string | null): string | null {
+  if (!css) return null;
+
+  let sanitized = css;
+
+  // Remove any attempts to close the style tag (most critical XSS vector)
+  sanitized = sanitized.replace(/<\s*\/?\s*style\b[^>]*>/gi, "/* [removed] */");
+  // Remove any HTML tags that might be injected
+  sanitized = sanitized.replace(/<\s*\/?[a-z][^>]*>/gi, "/* [removed] */");
+  // Remove @import rules (data exfiltration via external CSS)
+  sanitized = sanitized.replace(/@import\b[^;]*/gi, "/* [removed] */");
+  // Remove javascript: URLs
+  sanitized = sanitized.replace(/javascript\s*:/gi, "/* [removed] */");
+  // Remove expression() (IE CSS expressions)
+  sanitized = sanitized.replace(/expression\s*\(/gi, "/* [removed] */");
+  // Remove -moz-binding (Firefox XBL injection)
+  sanitized = sanitized.replace(/-moz-binding\s*:/gi, "/* [removed] */");
+  // Remove behavior: (IE HTC injection)
+  sanitized = sanitized.replace(/behavior\s*:/gi, "/* [removed] */");
+  // Remove url() with data: URIs (data exfiltration)
+  sanitized = sanitized.replace(/url\s*\(\s*["']?\s*data:/gi, 'url("/* [removed] */');
+
+  return sanitized;
+}
 
 // ─── HTML Template ───────────────────────────────────────────────────────────
 
@@ -228,7 +310,7 @@ function renderLandingPageHtml(page: {
       margin: 1.5rem 0;
       font-size: 0.9rem;
     }
-    .content th { font-weight: 600; background: var(--color-accent-light); padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); }
+    .content table tr:first-child td { font-weight: 600; background: var(--color-accent-light); }
     .content td {
       padding: 0.6rem 0.8rem;
       border: 1px solid var(--color-border);
@@ -281,7 +363,7 @@ function renderLandingPageHtml(page: {
       .callouts { grid-template-columns: 1fr; }
     }
 
-    ${page.customCss ?? ""}
+    ${sanitizeCustomCss(page.customCss) ?? ""}
   </style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -364,19 +446,19 @@ function renderPasswordPage(slug: string): string {
 
 export function createPublicPageRoutes(prisma: PrismaClient): Router {
   const router = Router();
-  router.use(express.urlencoded({ extended: false }));
   const editor = new LandingPageEditor(prisma);
 
+  // Parse URL-encoded POST body for password form submission
+  router.use(require("express").urlencoded({ extended: false }));
+
   /**
-   * GET /s/:slug
-   *
-   * Serves the published, scrubbed landing page as a full HTML page.
-   * No authentication required (it's public), but respects visibility
-   * and password settings.
+   * Shared handler for serving published landing pages.
+   * Supports both GET (initial view) and POST (password submission).
    */
-  const pageHandler = async (req: Request, res: Response) => {
+  async function handleSlugRequest(req: Request, res: Response): Promise<void> {
     const { slug } = req.params;
-    const password = (req.method === "POST" ? req.body?.p : req.query?.p) as string | undefined;
+    // Accept password from POST body (preferred) or query param (legacy)
+    const password = (req.body?.p as string | undefined) ?? (req.query.p as string | undefined);
 
     // Check if page exists and needs a password
     const rawPage = await prisma.landingPage.findUnique({
@@ -404,15 +486,15 @@ export function createPublicPageRoutes(prisma: PrismaClient): Router {
       return;
     }
 
-    // Password check
+    // Password check — passwords are bcrypt-hashed, use timing-safe comparison
     if (rawPage.password && !password) {
       res.status(200).send(renderPasswordPage(slug));
       return;
     }
 
     if (rawPage.password && password) {
-      const valid = await bcrypt.compare(password, rawPage.password);
-      if (!valid) {
+      const passwordValid = await bcryptjs.compare(password, rawPage.password);
+      if (!passwordValid) {
         res.status(200).send(renderPasswordPage(slug));
         return;
       }
@@ -429,10 +511,17 @@ export function createPublicPageRoutes(prisma: PrismaClient): Router {
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.setHeader("Cache-Control", "private, no-cache");
     res.send(renderLandingPageHtml(page));
-  };
+  }
 
-  router.get("/:slug", pageHandler);
-  router.post("/:slug", pageHandler);
+  /**
+   * GET /s/:slug — Initial page view (shows password form if protected)
+   */
+  router.get("/:slug", handleSlugRequest);
+
+  /**
+   * POST /s/:slug — Password submission (password in POST body, not URL)
+   */
+  router.post("/:slug", handleSlugRequest);
 
   return router;
 }

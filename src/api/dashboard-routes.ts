@@ -15,7 +15,10 @@ import {
   PermissionManager,
   requirePermission,
 } from "../middleware/permissions.js";
-import { MODEL_CONTEXT_LIMITS } from "../types/model-context-limits.js";
+import {
+  auditPermissionChange,
+  auditAccessChange,
+} from "../middleware/audit-logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -28,8 +31,6 @@ const UpdateOrgSettingsSchema = z.object({
     .optional(),
   max_pages_per_user: z.number().int().min(1).nullable().optional(),
   company_name_replacements: z.record(z.string(), z.string()).optional(),
-  transcript_merge_max_words: z.number().int().min(1000).max(2_000_000).optional(),
-  transcript_truncation_mode: z.enum(["OLDEST_FIRST", "NEWEST_FIRST"]).optional(),
 });
 
 const GrantPermissionSchema = z.object({
@@ -77,27 +78,16 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
    * GET /api/dashboard/stats
    *
    * Returns aggregate stats for the landing pages dashboard.
-   * Non-admin users get stats scoped to their own pages only.
    */
   router.get("/stats", async (req: AuthReq, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
     }
 
-    const isAdmin = req.userRole && ["OWNER", "ADMIN"].includes(req.userRole);
-
     try {
-      if (isAdmin) {
-        const stats = await editor.getDashboardStats(req.organizationId);
-        res.json(stats);
-      } else {
-        const stats = await editor.getDashboardStatsForUser(
-          req.organizationId,
-          req.userId
-        );
-        res.json(stats);
-      }
+      const stats = await editor.getDashboardStats(req.organizationId);
+      res.json(stats);
     } catch (err) {
       console.error("Dashboard stats error:", err);
       res.status(500).json({ error: "Failed to load dashboard stats" });
@@ -108,66 +98,29 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
    * GET /api/dashboard/pages
    *
    * Lists all landing pages for the org with optional filters.
-   * Query params: status, visibility, created_by, search, sort_by, sort_dir
-   *
-   * Non-admin users only see their own pages (created_by is forced to their userId).
-   * Admin/Owner users see all pages unless they explicitly filter by created_by.
+   * Query params: status, created_by, search
    */
   router.get("/pages", async (req: AuthReq, res: Response) => {
-    if (!req.organizationId || !req.userId) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
-
-    const isAdmin = req.userRole && ["OWNER", "ADMIN"].includes(req.userRole);
-
-    // Non-admin users can only see their own pages
-    let createdByFilter = req.query.created_by as string | undefined;
-    if (!isAdmin) {
-      createdByFilter = req.userId;
-    }
-
-    try {
-      const pages = await editor.listForOrg(req.organizationId, {
-        status: req.query.status as
-          | "DRAFT"
-          | "PUBLISHED"
-          | "ARCHIVED"
-          | undefined,
-        visibility: req.query.visibility as
-          | "PRIVATE"
-          | "SHARED_WITH_LINK"
-          | undefined,
-        createdById: createdByFilter,
-        search: req.query.search as string | undefined,
-        sortBy: req.query.sort_by as string | undefined,
-        sortDir: req.query.sort_dir as "asc" | "desc" | undefined,
-      });
-
-      res.json({ pages });
-    } catch (err) {
-      console.error("Dashboard pages error:", err);
-      res.status(500).json({ error: "Failed to load pages" });
-    }
-  });
-
-  /**
-   * GET /api/dashboard/creators
-   *
-   * Returns the list of distinct page creators for the org (for filter dropdowns).
-   */
-  router.get("/creators", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
     }
 
     try {
-      const creators = await editor.getCreatorsForOrg(req.organizationId);
-      res.json({ creators });
+      const pages = await editor.listForOrg(req.organizationId, {
+        status: req.query.status as string | undefined as
+          | "DRAFT"
+          | "PUBLISHED"
+          | "ARCHIVED"
+          | undefined,
+        createdById: req.query.created_by as string | undefined,
+        search: req.query.search as string | undefined,
+      });
+
+      res.json({ pages });
     } catch (err) {
-      console.error("Dashboard creators error:", err);
-      res.status(500).json({ error: "Failed to load creators" });
+      console.error("Dashboard pages error:", err);
+      res.status(500).json({ error: "Failed to load pages" });
     }
   });
 
@@ -188,33 +141,14 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
         });
 
         res.json({
-          settings: settings
-            ? {
-                landing_pages_enabled: settings.landingPagesEnabled,
-                default_page_visibility: settings.defaultPageVisibility,
-                require_approval_to_publish: settings.requireApprovalToPublish,
-                allowed_publishers: settings.allowedPublishers,
-                max_pages_per_user: settings.maxPagesPerUser,
-                company_name_replacements: settings.companyNameReplacements,
-                transcript_merge_max_words: settings.transcriptMergeMaxWords,
-                transcript_truncation_mode: settings.transcriptTruncationMode,
-              }
-            : {
-                landing_pages_enabled: true,
-                default_page_visibility: "PRIVATE",
-                require_approval_to_publish: false,
-                allowed_publishers: ["OWNER", "ADMIN"],
-                max_pages_per_user: null,
-                company_name_replacements: {},
-                transcript_merge_max_words: 600_000,
-                transcript_truncation_mode: "OLDEST_FIRST",
-              },
-          model_context_recommendations: MODEL_CONTEXT_LIMITS.map((m) => ({
-            provider: m.provider,
-            model: m.model,
-            context_tokens: m.contextTokens,
-            recommended_max_words: m.recommendedWords,
-          })),
+          settings: settings ?? {
+            landing_pages_enabled: true,
+            default_page_visibility: "PRIVATE",
+            require_approval_to_publish: false,
+            allowed_publishers: ["OWNER", "ADMIN"],
+            max_pages_per_user: null,
+            company_name_replacements: {},
+          },
         });
       } catch (err) {
         console.error("Get settings error:", err);
@@ -246,8 +180,6 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           allowedPublishers: parse.data.allowed_publishers as UserRole[] | undefined,
           maxPagesPerUser: parse.data.max_pages_per_user,
           companyNameReplacements: parse.data.company_name_replacements,
-          transcriptMergeMaxWords: parse.data.transcript_merge_max_words,
-          transcriptTruncationMode: parse.data.transcript_truncation_mode,
         });
 
         res.json({ updated: true });
@@ -255,33 +187,6 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
         console.error("Update settings error:", err);
         res.status(500).json({ error: "Failed to update settings" });
       }
-    }
-  );
-
-  /**
-   * GET /api/dashboard/settings/model-context-limits
-   *
-   * Returns recommended transcript word count limits based on 80% of
-   * the token context window for the 10 most popular AI models from
-   * Anthropic, Google, and OpenAI. Used to render the recommendation
-   * info box in the admin dashboard transcript settings UI.
-   */
-  router.get(
-    "/settings/model-context-limits",
-    requirePermission(prisma, "manage_permissions"),
-    async (_req: AuthReq, res: Response) => {
-      res.json({
-        description:
-          "Recommended markdown word count limits based on 80% of the token context window for popular AI models (as of February 2026). " +
-          "These limits leave 20% headroom for system prompts, instructions, and model output.",
-        models: MODEL_CONTEXT_LIMITS.map((m) => ({
-          provider: m.provider,
-          model: m.model,
-          context_tokens: m.contextTokens,
-          recommended_tokens_80_pct: m.recommendedTokens,
-          recommended_max_words: m.recommendedWords,
-        })),
-      });
     }
   );
 
@@ -329,6 +234,16 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           parse.data.permission as PermissionType,
           req.userId!
         );
+
+        // Audit log: permission granted
+        auditPermissionChange(
+          "GRANT",
+          req.userId!,
+          parse.data.user_id,
+          parse.data.permission,
+          req.organizationId!
+        );
+
         res.json({ granted: true });
       } catch (err) {
         console.error("Grant permission error:", err);
@@ -357,6 +272,16 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           parse.data.user_id,
           parse.data.permission as PermissionType
         );
+
+        // Audit log: permission revoked
+        auditPermissionChange(
+          "REVOKE",
+          req.userId!,
+          parse.data.user_id,
+          parse.data.permission,
+          req.organizationId!
+        );
+
         res.json({ revoked: true });
       } catch (err) {
         console.error("Revoke permission error:", err);
@@ -368,48 +293,6 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
   // ── Admin: Account Access Control ──────────────────────────────────
 
   const accessService = new AccountAccessService(prisma);
-
-  /**
-   * GET /api/dashboard/access
-   *
-   * Returns all users in the org with their account access grants.
-   * Used by the Admin Account Access page.
-   */
-  router.get(
-    "/access",
-    requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const users = await accessService.listAllUserAccess(req.organizationId!);
-
-        const result = users.map((u: typeof users[number]) => ({
-          user_id: u.id,
-          user_name: u.name,
-          user_email: u.email,
-          role: u.role,
-          grants: u.accountAccess.map((g: typeof u.accountAccess[number]) => ({
-            id: g.id,
-            scope_type: g.scopeType,
-            account: g.account
-              ? { id: g.account.id, name: g.account.name, domain: g.account.domain }
-              : null,
-            cached_account_ids: g.cachedAccountIds,
-            cached_account_count: g.cachedAccountIds.length,
-            crm_report_id: g.crmReportId,
-            crm_provider: g.crmProvider,
-            crm_report_name: g.crmReportName,
-            last_synced_at: g.lastSyncedAt,
-            created_at: g.createdAt,
-          })),
-        }));
-
-        res.json({ users: result });
-      } catch (err) {
-        console.error("Get all access error:", err);
-        res.status(500).json({ error: "Failed to load account access overview" });
-      }
-    }
-  );
 
   /**
    * GET /api/dashboard/access/:userId
@@ -426,7 +309,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           req.organizationId!
         );
         res.json({
-          grants: grants.map((g: typeof grants[number]) => ({
+          grants: grants.map((g) => ({
             id: g.id,
             scope_type: g.scopeType,
             account: g.account
@@ -479,6 +362,16 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           grantedById: req.userId!,
         });
 
+        // Audit log: account access granted
+        auditAccessChange(
+          "GRANT",
+          req.userId!,
+          parse.data.user_id,
+          parse.data.scope_type,
+          req.organizationId!,
+          grantId
+        );
+
         // If CRM_REPORT, trigger an initial sync
         if (parse.data.scope_type === "CRM_REPORT") {
           try {
@@ -509,6 +402,17 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
     async (req: AuthReq, res: Response) => {
       try {
         await accessService.revokeAccess(req.params.grantId);
+
+        // Audit log: account access revoked
+        auditAccessChange(
+          "REVOKE",
+          req.userId!,
+          "N/A",
+          "N/A",
+          req.organizationId!,
+          req.params.grantId
+        );
+
         res.json({ revoked: true });
       } catch (err) {
         console.error("Revoke access error:", err);
@@ -532,64 +436,6 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
       } catch (err) {
         console.error("Sync CRM report error:", err);
         res.status(500).json({ error: "Failed to sync CRM report" });
-      }
-    }
-  );
-
-  // ── Admin: Account Search & CRM Reports ────────────────────────────
-
-  /**
-   * GET /api/dashboard/accounts/search?q=term
-   *
-   * Searches accounts by name or domain for the account picker.
-   */
-  router.get(
-    "/accounts/search",
-    requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      const query = (req.query.q as string) ?? "";
-      if (query.length < 1) {
-        res.json({ accounts: [] });
-        return;
-      }
-
-      try {
-        const accounts = await accessService.searchAccounts(
-          req.organizationId!,
-          query
-        );
-        res.json({ accounts });
-      } catch (err) {
-        console.error("Account search error:", err);
-        res.status(500).json({ error: "Failed to search accounts" });
-      }
-    }
-  );
-
-  /**
-   * GET /api/dashboard/crm-reports?provider=SALESFORCE
-   *
-   * Fetches available Salesforce reports or HubSpot lists via Merge.dev passthrough.
-   */
-  router.get(
-    "/crm-reports",
-    requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      const provider = req.query.provider as string;
-      if (provider !== "SALESFORCE" && provider !== "HUBSPOT") {
-        res.status(400).json({ error: "provider must be SALESFORCE or HUBSPOT" });
-        return;
-      }
-
-      try {
-        const reports = await accessService.fetchAvailableCrmReports(
-          req.organizationId!,
-          provider as CRMProvider
-        );
-        res.json({ reports });
-      } catch (err) {
-        console.error("CRM reports error:", err);
-        res.status(500).json({ error: "Failed to fetch CRM reports" });
       }
     }
   );

@@ -21,10 +21,7 @@ import {
   normalizeCompanyName,
   extractEmailDomain,
 } from "../services/entity-resolution.js";
-import {
-  type TranscriptFetchJob,
-  getProviderPollingConfig,
-} from "../services/transcript-fetcher.js";
+import { auditWebhookFailure } from "../middleware/audit-logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -87,10 +84,15 @@ function verifyMergeSignature(
     .createHmac("sha256", secret)
     .update(payload)
     .digest("hex");
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expected)
-  );
+
+  // Ensure buffers are the same length before timing-safe comparison
+  // (timingSafeEqual throws if lengths differ, which would leak length info)
+  const sigBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (sigBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(sigBuffer, expectedBuffer);
 }
 
 // ─── Provider Mapping ────────────────────────────────────────────────────────
@@ -119,23 +121,33 @@ function mapIntegrationToProvider(integration: string): CallProvider {
 export function createMergeWebhookHandler(deps: {
   prisma: PrismaClient;
   processingQueue: Queue;
-  transcriptFetchQueue: Queue;
 }) {
-  const { prisma, processingQueue, transcriptFetchQueue } = deps;
+  const { prisma, processingQueue } = deps;
   const resolver = new EntityResolver(prisma);
 
   return async (req: Request, res: Response) => {
-    // ── Verify signature ──────────────────────────────────────────────
+    // ── Verify signature (ALWAYS required — fail closed) ──────────────
     const signature = req.headers["x-merge-webhook-signature"] as string;
     const webhookSecret = process.env.MERGE_WEBHOOK_SECRET;
 
-    if (webhookSecret && signature) {
-      const rawBody =
-        typeof req.body === "string" ? req.body : JSON.stringify(req.body);
-      if (!verifyMergeSignature(rawBody, signature, webhookSecret)) {
-        res.status(401).json({ error: "Invalid webhook signature" });
-        return;
-      }
+    if (!webhookSecret) {
+      console.error("MERGE_WEBHOOK_SECRET is not configured — rejecting webhook");
+      res.status(500).json({ error: "Webhook verification not configured" });
+      return;
+    }
+
+    if (!signature) {
+      auditWebhookFailure("merge", "Missing signature header", req.ip ?? "unknown");
+      res.status(401).json({ error: "Missing webhook signature" });
+      return;
+    }
+
+    const rawBody =
+      typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+    if (!verifyMergeSignature(rawBody, signature, webhookSecret)) {
+      auditWebhookFailure("merge", "Invalid signature", req.ip ?? "unknown");
+      res.status(401).json({ error: "Invalid webhook signature" });
+      return;
     }
 
     const payload = req.body as MergeWebhookPayload;
@@ -163,7 +175,6 @@ export function createMergeWebhookHandler(deps: {
             prisma,
             resolver,
             processingQueue,
-            transcriptFetchQueue,
             org.id,
             payload
           );
@@ -200,7 +211,6 @@ async function handleRecordingEvent(
   prisma: PrismaClient,
   resolver: EntityResolver,
   processingQueue: Queue,
-  transcriptFetchQueue: Queue,
   organizationId: string,
   payload: MergeWebhookPayload
 ): Promise<void> {
@@ -265,47 +275,22 @@ async function handleRecordingEvent(
         wordCount: recording.transcript.split(/\s+/).length,
       },
     });
+  }
 
-    // Transcript available inline — queue for immediate processing
-    await processingQueue.add(
-      "process-call",
-      {
-        callId: call.id,
-        organizationId,
-        accountId: resolution.accountId || null,
-        hasTranscript: true,
-      },
-      {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 5000 },
-      }
-    );
-  } else {
-    // No inline transcript — queue a fetch job to poll Merge.dev.
-    // Providers like Gong process recordings asynchronously and the
-    // transcript may not be ready for several minutes.
-    const pollingConfig = getProviderPollingConfig(provider);
-
-    const fetchJob: TranscriptFetchJob = {
+  // ── Queue async processing (chunking → tagging → embedding) ────────
+  await processingQueue.add(
+    "process-call",
+    {
       callId: call.id,
       organizationId,
       accountId: resolution.accountId || null,
-      mergeRecordingId: recording.id,
-      linkedAccountId: payload.linked_account.id,
-      provider,
-    };
-
-    await transcriptFetchQueue.add("fetch-transcript", fetchJob, {
-      delay: pollingConfig.initialDelayMs,
-      attempts: pollingConfig.maxAttempts,
-      backoff: { type: "custom" },
-    });
-
-    console.log(
-      `No inline transcript for call ${call.id} (${provider}), ` +
-        `queued fetch with ${pollingConfig.initialDelayMs}ms initial delay`
-    );
-  }
+      hasTranscript: !!recording.transcript,
+    },
+    {
+      attempts: 3,
+      backoff: { type: "exponential", delay: 5000 },
+    }
+  );
 }
 
 async function handleCRMContactEvent(

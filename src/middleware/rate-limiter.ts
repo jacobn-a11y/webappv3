@@ -1,139 +1,107 @@
 /**
- * Rate Limiting Middleware
+ * Simple In-Memory Rate Limiter
  *
- * Protects API endpoints from abuse and runaway costs.
+ * Provides request rate limiting without external dependencies.
+ * Uses a sliding window counter per IP address.
  *
- * Three tiers:
- *   1. **Global** — baseline limit on all authenticated routes (200 req/min)
- *   2. **Expensive** — stricter limit on OpenAI-calling endpoints:
- *      /api/rag/query and /api/stories/build (20 req/min)
- *   3. **Webhook** — separate limit for inbound webhooks from Merge.dev
- *      to prevent replay attacks (60 req/min)
- *
- * Rate limits are keyed by organizationId when available, falling back
- * to IP address. This prevents one user from affecting other orgs.
- *
- * In production, use RedisStore for distributed rate limiting across
- * multiple server instances. In development, the default MemoryStore
- * is used.
+ * For production at scale, replace with Redis-backed rate limiting.
  */
 
-import rateLimit from "express-rate-limit";
-import type { Request } from "express";
+import type { Request, Response, NextFunction } from "express";
 
-// ─── Key Generator ──────────────────────────────────────────────────────────
+interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+}
 
-interface AuthenticatedRequest extends Request {
-  organizationId?: string;
-  userId?: string;
+interface RateLimiterOptions {
+  /** Maximum requests allowed within the window. */
+  maxRequests: number;
+  /** Time window in milliseconds. */
+  windowMs: number;
+  /** Custom message for 429 responses. */
+  message?: string;
 }
 
 /**
- * Generates a rate limit key from org ID + user ID, or falls back to IP.
- * This ensures limits are per-user-per-org, not per-IP (which would
- * penalize shared office networks).
+ * Creates a rate limiting middleware.
+ *
+ * @param options - Configuration for the rate limiter
+ * @returns Express middleware function
  */
-function keyGenerator(req: AuthenticatedRequest): string {
-  if (req.organizationId && req.userId) {
-    return `${req.organizationId}:${req.userId}`;
+export function createRateLimiter(options: RateLimiterOptions) {
+  const { maxRequests, windowMs, message } = options;
+  const store = new Map<string, RateLimitEntry>();
+
+  // Periodic cleanup of expired entries to prevent memory leaks
+  const cleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of store) {
+      if (now > entry.resetAt) {
+        store.delete(key);
+      }
+    }
+  }, windowMs * 2);
+
+  // Allow cleanup interval to be garbage collected on process exit
+  if (cleanupInterval.unref) {
+    cleanupInterval.unref();
   }
-  if (req.organizationId) {
-    return req.organizationId;
-  }
-  return req.ip ?? "unknown";
+
+  return (req: Request, res: Response, next: NextFunction) => {
+    const key = req.ip ?? req.socket.remoteAddress ?? "unknown";
+    const now = Date.now();
+
+    const entry = store.get(key);
+
+    if (!entry || now > entry.resetAt) {
+      // New window
+      store.set(key, { count: 1, resetAt: now + windowMs });
+      next();
+      return;
+    }
+
+    entry.count++;
+
+    if (entry.count > maxRequests) {
+      const retryAfterMs = entry.resetAt - now;
+      res.setHeader("Retry-After", Math.ceil(retryAfterMs / 1000).toString());
+      res.status(429).json({
+        error: "rate_limit_exceeded",
+        message: message ?? "Too many requests. Please try again later.",
+        retry_after_seconds: Math.ceil(retryAfterMs / 1000),
+      });
+      return;
+    }
+
+    next();
+  };
 }
 
 /**
- * For webhooks, key by IP since there's no user/org in the auth sense.
+ * Stricter rate limiter for password-protected endpoints.
+ * Limits to 5 attempts per minute per IP to prevent brute-force.
  */
-function webhookKeyGenerator(req: Request): string {
-  return `webhook:${req.ip ?? "unknown"}`;
-}
-
-// ─── Rate Limit Tiers ───────────────────────────────────────────────────────
-
-const STANDARD_HEADERS = true;
-const LEGACY_HEADERS = false;
-
-/**
- * Shared validation config — disable the IPv6 key generator validation
- * since our primary key generators use org/user IDs, not raw IPs.
- * IP is only a fallback for unauthenticated requests.
- */
-const SHARED_VALIDATE = { keyGeneratorIpFallback: false } as const;
-
-/**
- * Global rate limiter for all authenticated API routes.
- * 200 requests per minute per user.
- */
-export const globalRateLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  limit: 200,
-  standardHeaders: STANDARD_HEADERS,
-  legacyHeaders: LEGACY_HEADERS,
-  keyGenerator,
-  validate: SHARED_VALIDATE,
-  message: {
-    error: "rate_limit_exceeded",
-    message: "Too many requests. Please try again shortly.",
-    retry_after_seconds: 60,
-  },
+export const passwordRateLimiter = createRateLimiter({
+  maxRequests: 5,
+  windowMs: 60_000, // 1 minute
+  message: "Too many password attempts. Please wait before trying again.",
 });
 
 /**
- * Strict rate limiter for expensive endpoints that call OpenAI.
- * /api/rag/query and /api/stories/build — 20 requests per minute per user.
- *
- * These endpoints incur significant API costs ($0.01–$0.10+ per call),
- * so a lower limit protects against both abuse and accidental loops.
+ * General API rate limiter.
+ * Limits to 100 requests per minute per IP.
  */
-export const expensiveRateLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  limit: 20,
-  standardHeaders: STANDARD_HEADERS,
-  legacyHeaders: LEGACY_HEADERS,
-  keyGenerator,
-  validate: SHARED_VALIDATE,
-  message: {
-    error: "rate_limit_exceeded",
-    message:
-      "Too many AI requests. These endpoints call external AI services — please slow down.",
-    retry_after_seconds: 60,
-  },
+export const apiRateLimiter = createRateLimiter({
+  maxRequests: 100,
+  windowMs: 60_000, // 1 minute
 });
 
 /**
- * Webhook rate limiter for Merge.dev inbound webhooks.
- * 60 requests per minute per source IP.
+ * Webhook rate limiter.
+ * Higher limit for webhooks since they come from trusted sources.
  */
-export const webhookRateLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  limit: 60,
-  standardHeaders: STANDARD_HEADERS,
-  legacyHeaders: LEGACY_HEADERS,
-  keyGenerator: webhookKeyGenerator,
-  validate: SHARED_VALIDATE,
-  message: {
-    error: "rate_limit_exceeded",
-    message: "Too many webhook requests.",
-    retry_after_seconds: 60,
-  },
-});
-
-/**
- * Auth/billing endpoint limiter — tighter to prevent brute force.
- * 10 requests per minute per IP.
- */
-export const authRateLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 10,
-  standardHeaders: STANDARD_HEADERS,
-  legacyHeaders: LEGACY_HEADERS,
-  keyGenerator: (req: Request) => req.ip ?? "unknown",
-  validate: SHARED_VALIDATE,
-  message: {
-    error: "rate_limit_exceeded",
-    message: "Too many authentication attempts. Please wait.",
-    retry_after_seconds: 60,
-  },
+export const webhookRateLimiter = createRateLimiter({
+  maxRequests: 200,
+  windowMs: 60_000, // 1 minute
 });

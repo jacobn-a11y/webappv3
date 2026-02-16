@@ -313,7 +313,17 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
     requirePermission(prisma, "delete_any"),
     async (req: AuthReq, res: Response) => {
       try {
-        await prisma.landingPage.delete({ where: { id: req.params.pageId } });
+        // SECURITY: Ensure the page belongs to the authenticated user's org
+        // to prevent cross-organization deletion
+        const page = await prisma.landingPage.findFirst({
+          where: { id: req.params.pageId, organizationId: req.organizationId! },
+        });
+        if (!page) {
+          res.status(404).json({ error: "Landing page not found" });
+          return;
+        }
+
+        await prisma.landingPage.delete({ where: { id: page.id } });
         res.json({ deleted: true });
       } catch (err) {
         console.error("Delete landing page error:", err);

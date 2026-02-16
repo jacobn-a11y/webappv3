@@ -7,33 +7,17 @@
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import type { PrismaClient, UserRole } from "@prisma/client";
 import type { RAGEngine } from "../services/rag-engine.js";
-import { AccountAccessService } from "../services/account-access.js";
+import { VALID_FUNNEL_STAGES } from "../types/taxonomy.js";
 
-// ─── Validation ──────────────────────────────────────────────────────────────
+// ─── Types ──────────────────────────────────────────────────────────────────
 
-interface AuthReq extends Request {
+interface AuthenticatedRequest extends Request {
   organizationId?: string;
   userId?: string;
-  userRole?: UserRole;
 }
 
-const ChatMessageSchema = z.object({
-  role: z.enum(["user", "assistant"]),
-  content: z.string().min(1),
-});
-
-const ChatSchema = z.object({
-  query: z
-    .string()
-    .min(3, "Query must be at least 3 characters")
-    .max(1000, "Query must be under 1000 characters"),
-  account_id: z.string().nullable(),
-  history: z.array(ChatMessageSchema).max(50).default([]),
-  top_k: z.number().int().min(1).max(20).optional(),
-  funnel_stages: z.array(z.string()).optional(),
-});
+// ─── Validation ──────────────────────────────────────────────────────────────
 
 const QuerySchema = z.object({
   query: z
@@ -41,27 +25,26 @@ const QuerySchema = z.object({
     .min(3, "Query must be at least 3 characters")
     .max(1000, "Query must be under 1000 characters"),
   account_id: z.string().min(1),
-  organization_id: z.string().min(1),
   top_k: z.number().int().min(1).max(20).optional(),
-  funnel_stages: z.array(z.string()).optional(),
+  funnel_stages: z.array(z.enum(VALID_FUNNEL_STAGES as unknown as [string, ...string[]])).optional(),
 });
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
-export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Router {
+export function createRAGRoutes(ragEngine: RAGEngine): Router {
   const router = Router();
-  const accessService = new AccountAccessService(prisma);
 
   /**
    * POST /api/rag/query
    *
    * Query the RAG engine with a natural language question about an account.
+   * Organization ID is taken from the authenticated session (not from body)
+   * to prevent cross-org data access.
    *
    * Request body:
    *   {
    *     "query": "How was the onboarding for Account X?",
    *     "account_id": "clx123...",
-   *     "organization_id": "clx456...",
    *     "top_k": 8,                   // optional, default 8
    *     "funnel_stages": ["MOFU"]     // optional filter
    *   }
@@ -84,6 +67,15 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    *   }
    */
   router.post("/query", async (req: Request, res: Response) => {
+    const authReq = req as AuthenticatedRequest;
+
+    // SECURITY: Always use org ID from authenticated session, never from request body
+    const organizationId = authReq.organizationId;
+    if (!organizationId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+
     const parseResult = QuerySchema.safeParse(req.body);
     if (!parseResult.success) {
       res.status(400).json({
@@ -93,14 +85,14 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
       return;
     }
 
-    const { query, account_id, organization_id, top_k, funnel_stages } =
+    const { query, account_id, top_k, funnel_stages } =
       parseResult.data;
 
     try {
       const result = await ragEngine.query({
         query,
         accountId: account_id,
-        organizationId: organization_id,
+        organizationId, // From auth, not request body
         topK: top_k,
         funnelStages: funnel_stages,
       });
@@ -121,120 +113,6 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
     } catch (err) {
       console.error("RAG query error:", err);
       res.status(500).json({ error: "Failed to process query" });
-    }
-  });
-
-  /**
-   * POST /api/rag/chat
-   *
-   * Conversation-aware chat endpoint. Carries message history so
-   * follow-up questions are resolved with context.
-   * When account_id is null, searches across all org accounts.
-   */
-  router.post("/chat", async (req: AuthReq, res: Response) => {
-    const orgId = req.organizationId ?? req.body?.organization_id;
-    if (!orgId) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
-
-    const parseResult = ChatSchema.safeParse(req.body);
-    if (!parseResult.success) {
-      res.status(400).json({
-        error: "validation_error",
-        details: parseResult.error.issues,
-      });
-      return;
-    }
-
-    const { query, account_id, history, top_k, funnel_stages } =
-      parseResult.data;
-
-    try {
-      const result = await ragEngine.chat({
-        query,
-        accountId: account_id,
-        organizationId: orgId,
-        history,
-        topK: top_k,
-        funnelStages: funnel_stages,
-      });
-
-      res.json({
-        answer: result.answer,
-        sources: result.sources.map((s) => ({
-          chunk_id: s.chunkId,
-          call_id: s.callId,
-          call_title: s.callTitle,
-          call_date: s.callDate,
-          text: s.text,
-          speaker: s.speaker,
-          relevance_score: s.relevanceScore,
-        })),
-        tokens_used: result.tokensUsed,
-      });
-    } catch (err) {
-      console.error("RAG chat error:", err);
-      res.status(500).json({ error: "Failed to process chat query" });
-    }
-  });
-
-  /**
-   * GET /api/rag/accounts
-   *
-   * Returns accounts the current user has access to, for the account
-   * context selector in the chat UI.
-   * Query params: search (optional text filter)
-   */
-  router.get("/accounts", async (req: AuthReq, res: Response) => {
-    const orgId = req.organizationId;
-    if (!orgId || !req.userId) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
-
-    try {
-      const accessibleIds = await accessService.getAccessibleAccountIds(
-        req.userId,
-        orgId,
-        req.userRole
-      );
-
-      const search = (req.query.search as string | undefined)?.trim();
-
-      const where: Record<string, unknown> = { organizationId: orgId };
-      if (accessibleIds !== null) {
-        where.id = { in: accessibleIds };
-      }
-      if (search) {
-        where.name = { contains: search, mode: "insensitive" };
-      }
-
-      const accounts = await prisma.account.findMany({
-        where,
-        select: {
-          id: true,
-          name: true,
-          domain: true,
-          industry: true,
-          _count: { select: { calls: true } },
-        },
-        orderBy: { name: "asc" },
-        take: 100,
-      });
-
-      res.json({
-        accounts: accounts.map((a) => ({
-          id: a.id,
-          name: a.name,
-          domain: a.domain,
-          industry: a.industry,
-          call_count: a._count.calls,
-        })),
-      });
-    } catch (err) {
-      console.error("List accounts error:", err);
-      res.status(500).json({ error: "Failed to load accounts" });
     }
   });
 

@@ -8,23 +8,22 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { StoryBuilder } from "../services/story-builder.js";
 import type { PrismaClient } from "@prisma/client";
-import type { NotificationService } from "../services/notification-service.js";
+import { VALID_FUNNEL_STAGES, ALL_TOPICS } from "../types/taxonomy.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 const BuildStorySchema = z.object({
   account_id: z.string().min(1),
-  funnel_stages: z.array(z.string()).optional(),
-  filter_topics: z.array(z.string()).optional(),
-  title: z.string().optional(),
+  funnel_stages: z.array(z.enum(VALID_FUNNEL_STAGES as unknown as [string, ...string[]])).optional(),
+  filter_topics: z.array(z.enum(ALL_TOPICS as unknown as [string, ...string[]])).optional(),
+  title: z.string().max(500).optional(),
 });
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
 export function createStoryRoutes(
   storyBuilder: StoryBuilder,
-  prisma: PrismaClient,
-  notificationService?: NotificationService
+  prisma: PrismaClient
 ): Router {
   const router = Router();
 
@@ -60,14 +59,6 @@ export function createStoryRoutes(
         filterTopics: filter_topics as never[],
         title,
       });
-
-      // Send notification that story is ready
-      const userId = (req as Record<string, unknown>).userId as string;
-      if (notificationService && userId) {
-        notificationService
-          .notifyStoryCompleted(organizationId, userId, account_id, result.title)
-          .catch((err) => console.error("Story notification error:", err));
-      }
 
       res.json({
         title: result.title,

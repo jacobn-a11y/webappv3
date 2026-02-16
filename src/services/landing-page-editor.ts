@@ -11,8 +11,8 @@
  */
 
 import crypto from "crypto";
+import bcryptjs from "bcryptjs";
 import type { PrismaClient, PageVisibility, PageStatus } from "@prisma/client";
-import bcrypt from "bcryptjs";
 import { CompanyScrubber } from "./company-scrubber.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -241,6 +241,12 @@ export class LandingPageEditor {
       scrubbedCallouts = scrubbedArray as unknown as typeof page.calloutBoxes;
     }
 
+    // Hash password with bcrypt before storing (never store plaintext)
+    let hashedPassword: string | null = null;
+    if (options.password) {
+      hashedPassword = await bcryptjs.hash(options.password, 12);
+    }
+
     await this.prisma.landingPage.update({
       where: { id: pageId },
       data: {
@@ -248,7 +254,7 @@ export class LandingPageEditor {
         calloutBoxes: scrubbedCallouts ?? undefined,
         status: "PUBLISHED",
         visibility: options.visibility,
-        password: options.password ? await bcrypt.hash(options.password, 10) : null,
+        password: hashedPassword,
         expiresAt: options.expiresAt ?? null,
         publishedAt: new Date(),
         noIndex: true, // always noindex
@@ -336,11 +342,11 @@ export class LandingPageEditor {
     // Check visibility
     if (page.visibility === "PRIVATE") return null;
 
-    // Check password
+    // Check password using bcrypt comparison (timing-safe)
     if (page.password) {
       if (!password) return null;
-      const valid = await bcrypt.compare(password, page.password);
-      if (!valid) return null;
+      const passwordValid = await bcryptjs.compare(password, page.password);
+      if (!passwordValid) return null;
     }
 
     // Increment view count
@@ -362,112 +368,22 @@ export class LandingPageEditor {
   }
 
   /**
-   * Generates a preview of the landing page as it would appear publicly.
-   * Runs the company scrubber on the current editable content (title,
-   * subtitle, body, callout boxes) and returns the result in the same
-   * shape consumed by `renderLandingPageHtml`.
-   */
-  async getPreview(pageId: string): Promise<{
-    title: string;
-    subtitle: string | null;
-    body: string;
-    calloutBoxes: CalloutBox[];
-    totalCallHours: number;
-    heroImageUrl: string | null;
-    customCss: string | null;
-  }> {
-    const page = await this.prisma.landingPage.findUniqueOrThrow({
-      where: { id: pageId },
-      include: { story: { select: { accountId: true } } },
-    });
-
-    const skipScrub = page.includeCompanyName;
-    const scrubOpts = { skipScrub };
-
-    // Scrub body
-    const bodyScrub = await this.scrubber.scrubForAccount(
-      page.story.accountId,
-      page.editableBody,
-      scrubOpts
-    );
-
-    // Scrub title
-    const titleScrub = await this.scrubber.scrubForAccount(
-      page.story.accountId,
-      page.title,
-      scrubOpts
-    );
-
-    // Scrub subtitle
-    const subtitleScrub = page.subtitle
-      ? await this.scrubber.scrubForAccount(
-          page.story.accountId,
-          page.subtitle,
-          scrubOpts
-        )
-      : null;
-
-    // Scrub callout boxes
-    let previewCallouts: CalloutBox[] = [];
-    if (page.calloutBoxes && Array.isArray(page.calloutBoxes)) {
-      const callouts = page.calloutBoxes as unknown as CalloutBox[];
-      for (const box of callouts) {
-        const boxBody = await this.scrubber.scrubForAccount(
-          page.story.accountId,
-          box.body,
-          scrubOpts
-        );
-        const boxTitle = await this.scrubber.scrubForAccount(
-          page.story.accountId,
-          box.title,
-          scrubOpts
-        );
-        previewCallouts.push({
-          ...box,
-          title: boxTitle.scrubbedText,
-          body: boxBody.scrubbedText,
-        });
-      }
-    }
-
-    return {
-      title: titleScrub.scrubbedText,
-      subtitle: subtitleScrub?.scrubbedText ?? null,
-      body: bodyScrub.scrubbedText,
-      calloutBoxes: previewCallouts,
-      totalCallHours: page.totalCallHours,
-      heroImageUrl: page.heroImageUrl,
-      customCss: page.customCss,
-    };
-  }
-
-  /**
    * Dashboard: list all landing pages for an org.
-   * Supports filtering by status, visibility, creator, and title search.
-   * Supports sorting by any summary field.
    */
   async listForOrg(
     organizationId: string,
     filters?: {
       status?: PageStatus;
-      visibility?: PageVisibility;
       createdById?: string;
       search?: string;
-      sortBy?: string;
-      sortDir?: "asc" | "desc";
     }
   ): Promise<LandingPageSummary[]> {
     const where: Record<string, unknown> = { organizationId };
     if (filters?.status) where.status = filters.status;
-    if (filters?.visibility) where.visibility = filters.visibility;
     if (filters?.createdById) where.createdById = filters.createdById;
     if (filters?.search) {
       where.title = { contains: filters.search, mode: "insensitive" };
     }
-
-    const sortField = filters?.sortBy ?? "updatedAt";
-    const sortDir = filters?.sortDir ?? "desc";
-    const orderBy: Record<string, string> = { [sortField]: sortDir };
 
     const pages = await this.prisma.landingPage.findMany({
       where,
@@ -477,7 +393,7 @@ export class LandingPageEditor {
           include: { account: { select: { name: true } } },
         },
       },
-      orderBy,
+      orderBy: { updatedAt: "desc" },
     });
 
     return pages.map((p) => ({
@@ -495,56 +411,6 @@ export class LandingPageEditor {
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
     }));
-  }
-
-  /**
-   * Dashboard: aggregate stats scoped to a user (non-admin) or whole org (admin).
-   */
-  async getDashboardStatsForUser(
-    organizationId: string,
-    userId: string
-  ): Promise<{
-    totalPages: number;
-    publishedPages: number;
-    draftPages: number;
-    totalViews: number;
-  }> {
-    const scope = { organizationId, createdById: userId };
-    const [total, published, drafts, viewsAgg] = await Promise.all([
-      this.prisma.landingPage.count({ where: scope }),
-      this.prisma.landingPage.count({ where: { ...scope, status: "PUBLISHED" } }),
-      this.prisma.landingPage.count({ where: { ...scope, status: "DRAFT" } }),
-      this.prisma.landingPage.aggregate({ where: scope, _sum: { viewCount: true } }),
-    ]);
-
-    return {
-      totalPages: total,
-      publishedPages: published,
-      draftPages: drafts,
-      totalViews: viewsAgg._sum.viewCount ?? 0,
-    };
-  }
-
-  /**
-   * Returns the list of distinct creators for pages in an org.
-   */
-  async getCreatorsForOrg(
-    organizationId: string
-  ): Promise<Array<{ userId: string; name: string | null; email: string }>> {
-    const byUser = await this.prisma.landingPage.groupBy({
-      by: ["createdById"],
-      where: { organizationId },
-    });
-
-    const userIds = byUser.map((b) => b.createdById);
-    if (userIds.length === 0) return [];
-
-    const users = await this.prisma.user.findMany({
-      where: { id: { in: userIds } },
-      select: { id: true, name: true, email: true },
-    });
-
-    return users.map((u) => ({ userId: u.id, name: u.name, email: u.email }));
   }
 
   /**
