@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/FormatSelector.tsx","./src/components/MultiSelect.tsx","./src/components/StoryGeneratorModal.tsx","./src/lib/api.ts","./src/pages/AccountDetailPage.tsx","./src/pages/LandingPageEditorPage.tsx","./src/types/taxonomy.ts"],"version":"5.9.3"}

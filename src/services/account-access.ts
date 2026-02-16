@@ -371,12 +371,12 @@ export class AccountAccessService {
   private async getMergeAccountToken(
     organizationId: string
   ): Promise<string | null> {
-    const org = await this.prisma.organization.findUnique({
-      where: { id: organizationId },
-      select: { mergeAccountToken: true },
+    const linkedAccount = await this.prisma.linkedAccount.findFirst({
+      where: { organizationId, category: "CRM", status: "ACTIVE" },
+      select: { accountToken: true },
     });
 
-    return (org as { mergeAccountToken?: string | null })?.mergeAccountToken ?? null;
+    return linkedAccount?.accountToken ?? null;
   }
 
   // ─── Private: CRM Integration ──────────────────────────────────────

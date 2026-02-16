@@ -47,7 +47,7 @@ export type PIIType =
 const PII_PATTERNS: Array<{ type: PIIType; regex: RegExp; replacement: string }> = [
   {
     type: "email",
-    regex: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g,
+    regex: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
     replacement: "[EMAIL_REDACTED]",
   },
   {
@@ -77,7 +77,7 @@ const PII_PATTERNS: Array<{ type: PIIType; regex: RegExp; replacement: string }>
     type: "date_of_birth",
     // Common DOB patterns: "date of birth" or "born on" followed by a date
     regex:
-      /(?:date of birth|DOB|born on)[:\s]+\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/gi,
+      /(?:date of birth|DOB|born on)[:\s]+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}/gi,
     replacement: "[DOB_REDACTED]",
   },
 ];

@@ -87,7 +87,7 @@ export function createIntegrationRoutes(
   // ── Get a specific integration config ───────────────────────────────
   router.get("/:provider", async (req: Request, res: Response) => {
     const organizationId = (req as any).organizationId as string;
-    const provider = req.params.provider.toUpperCase() as IntegrationProvider;
+    const provider = (req.params.provider as string).toUpperCase() as IntegrationProvider;
 
     if (!VALID_PROVIDERS.includes(provider as any)) {
       res.status(400).json({ error: `Invalid provider: ${req.params.provider}` });
@@ -175,7 +175,7 @@ export function createIntegrationRoutes(
   // ── Update an integration ───────────────────────────────────────────
   router.patch("/:provider", async (req: Request, res: Response) => {
     const organizationId = (req as any).organizationId as string;
-    const provider = req.params.provider.toUpperCase() as IntegrationProvider;
+    const provider = (req.params.provider as string).toUpperCase() as IntegrationProvider;
 
     if (!VALID_PROVIDERS.includes(provider as any)) {
       res.status(400).json({ error: `Invalid provider: ${req.params.provider}` });
@@ -232,7 +232,7 @@ export function createIntegrationRoutes(
   // ── Delete an integration ───────────────────────────────────────────
   router.delete("/:provider", async (req: Request, res: Response) => {
     const organizationId = (req as any).organizationId as string;
-    const provider = req.params.provider.toUpperCase() as IntegrationProvider;
+    const provider = (req.params.provider as string).toUpperCase() as IntegrationProvider;
 
     if (!VALID_PROVIDERS.includes(provider as any)) {
       res.status(400).json({ error: `Invalid provider: ${req.params.provider}` });
@@ -256,7 +256,7 @@ export function createIntegrationRoutes(
   // ── Test credentials ────────────────────────────────────────────────
   router.post("/:provider/test", async (req: Request, res: Response) => {
     const organizationId = (req as any).organizationId as string;
-    const provider = req.params.provider.toUpperCase() as IntegrationProvider;
+    const provider = (req.params.provider as string).toUpperCase() as IntegrationProvider;
 
     if (!VALID_PROVIDERS.includes(provider as any)) {
       res.status(400).json({ error: `Invalid provider: ${req.params.provider}` });
@@ -326,7 +326,7 @@ export function createIntegrationRoutes(
   // ── Trigger on-demand sync ──────────────────────────────────────────
   router.post("/:provider/sync", async (req: Request, res: Response) => {
     const organizationId = (req as any).organizationId as string;
-    const provider = req.params.provider.toUpperCase() as IntegrationProvider;
+    const provider = (req.params.provider as string).toUpperCase() as IntegrationProvider;
 
     if (!VALID_PROVIDERS.includes(provider as any)) {
       res.status(400).json({ error: `Invalid provider: ${req.params.provider}` });

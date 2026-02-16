@@ -550,7 +550,7 @@ export class MergeApiClient {
           mergeContact.phone_numbers?.[0]?.phone_number ?? null;
 
         // Find the CRM account this contact belongs to
-        let account = await this.findAccountForContact(
+        const account = await this.findAccountForContact(
           linkedAccount.organizationId,
           mergeContact.account,
           domain

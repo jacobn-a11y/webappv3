@@ -27,7 +27,7 @@ export function createMergeRoutes(
    * Body: { publicToken: string }
    */
   router.post("/link", async (req: Request, res: Response) => {
-    const organizationId = (req as Record<string, unknown>).organizationId as string;
+    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
 
     if (!organizationId) {
       res.status(401).json({ error: "Missing organization context" });
@@ -66,7 +66,7 @@ export function createMergeRoutes(
    * Returns all linked accounts for the current organization.
    */
   router.get("/linked", async (req: Request, res: Response) => {
-    const organizationId = (req as Record<string, unknown>).organizationId as string;
+    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
 
     if (!organizationId) {
       res.status(401).json({ error: "Missing organization context" });
@@ -97,7 +97,7 @@ export function createMergeRoutes(
    * Useful when an admin wants to force a re-sync outside the 15-min interval.
    */
   router.post("/sync/:linkedAccountId", async (req: Request, res: Response) => {
-    const organizationId = (req as Record<string, unknown>).organizationId as string;
+    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
 
     if (!organizationId) {
       res.status(401).json({ error: "Missing organization context" });
@@ -107,7 +107,7 @@ export function createMergeRoutes(
     const { linkedAccountId } = req.params;
 
     const linkedAccount = await prisma.linkedAccount.findFirst({
-      where: { id: linkedAccountId, organizationId },
+      where: { id: linkedAccountId as string, organizationId },
     });
 
     if (!linkedAccount) {

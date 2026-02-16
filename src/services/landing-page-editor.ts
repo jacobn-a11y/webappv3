@@ -403,7 +403,7 @@ export class LandingPageEditor {
       : null;
 
     // Scrub callout boxes
-    let previewCallouts: CalloutBox[] = [];
+    const previewCallouts: CalloutBox[] = [];
     if (page.calloutBoxes && Array.isArray(page.calloutBoxes)) {
       const callouts = page.calloutBoxes as unknown as CalloutBox[];
       for (const box of callouts) {

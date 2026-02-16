@@ -44,7 +44,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
    */
   router.post("/:pageId/export/pdf", async (req: Request, res: Response) => {
     try {
-      const { buffer, filename } = await exporter.exportPdf(req.params.pageId);
+      const { buffer, filename } = await exporter.exportPdf(req.params.pageId as string);
 
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -87,7 +87,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
 
       try {
         const result = await exporter.exportGoogleDoc(
-          req.params.pageId,
+          req.params.pageId as string,
           parse.data.access_token
         );
 
@@ -133,7 +133,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
 
       try {
         const result = await exporter.exportSlack(
-          req.params.pageId,
+          req.params.pageId as string,
           parse.data.webhook_url
         );
 

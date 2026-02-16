@@ -66,20 +66,29 @@ export function createDashboardPageRoutes(prisma: PrismaClient): Router {
     const effectiveCreatorFilter = isAdmin ? creatorFilter : req.userId;
 
     try {
-      const [stats, pages, creators] = await Promise.all([
-        isAdmin
-          ? editor.getDashboardStats(req.organizationId)
-          : editor.getDashboardStatsForUser(req.organizationId, req.userId),
+      const [dashboardStats, pages] = await Promise.all([
+        editor.getDashboardStats(req.organizationId),
         editor.listForOrg(req.organizationId, {
           status: statusFilter as "DRAFT" | "PUBLISHED" | "ARCHIVED" | undefined,
-          visibility: visibilityFilter as "PRIVATE" | "SHARED_WITH_LINK" | undefined,
           createdById: effectiveCreatorFilter,
           search: search || undefined,
-          sortBy,
-          sortDir,
         }),
-        isAdmin ? editor.getCreatorsForOrg(req.organizationId) : Promise.resolve([]),
       ]);
+
+      const stats: DashboardStats = {
+        totalPages: dashboardStats.totalPages,
+        publishedPages: dashboardStats.publishedPages,
+        draftPages: dashboardStats.draftPages,
+        totalViews: dashboardStats.totalViews,
+      };
+
+      const creators: Creator[] = isAdmin
+        ? dashboardStats.pagesByUser.map((u) => ({
+            userId: u.userId,
+            name: u.name,
+            email: u.name ?? u.userId,
+          }))
+        : [];
 
       const html = renderDashboardHtml({
         stats,

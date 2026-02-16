@@ -149,7 +149,7 @@ export function requirePageOwnerOrPermission(prisma: PrismaClient) {
     next: NextFunction
   ) => {
     const { userId, userRole, organizationId } = req;
-    const pageId = req.params.pageId ?? req.params.id;
+    const pageId = (req.params.pageId ?? req.params.id) as string;
 
     if (!userId || !organizationId) {
       res.status(401).json({ error: "Authentication required" });

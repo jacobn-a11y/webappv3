@@ -103,7 +103,7 @@ const CALLOUT_LABELS: Record<string, string> = {
 
 // ─── HTML Template ───────────────────────────────────────────────────────────
 
-function renderLandingPageHtml(page: {
+export function renderLandingPageHtml(page: {
   title: string;
   subtitle: string | null;
   body: string;
@@ -620,7 +620,7 @@ export function createPublicPageRoutes(prisma: PrismaClient): Router {
 
   // Shared handler for both GET (with query param) and POST (with body) password flows
   async function handleSlugRequest(req: Request, res: Response): Promise<void> {
-    const { slug } = req.params;
+    const slug = req.params.slug as string;
     const password =
       (req.query.p as string | undefined) ??
       (req.body?.p as string | undefined);
@@ -790,6 +790,46 @@ function render410(): string {
   </main>
 </body>
 </html>`;
+}
+
+// ─── CSS Sanitization ─────────────────────────────────────────────────────────
+
+/**
+ * Sanitizes user-provided custom CSS to prevent XSS attacks.
+ * Strips dangerous constructs like script injection, @import rules,
+ * javascript: URLs, expression(), -moz-binding, behavior:, and data: URIs.
+ */
+export function sanitizeCustomCss(css: string | null): string | null {
+  if (css === null) return null;
+
+  let sanitized = css;
+
+  // Remove </style> and <style> tag injection attempts
+  sanitized = sanitized.replace(/<\/?\s*style\s*>/gi, "");
+
+  // Remove <script> tags and their content
+  sanitized = sanitized.replace(/<script[\s\S]*?<\/script>/gi, "");
+  sanitized = sanitized.replace(/<\/?script[^>]*>/gi, "");
+
+  // Remove @import rules (data exfiltration vector)
+  sanitized = sanitized.replace(/@import\s+[^;]*;?/gi, "");
+
+  // Remove javascript: URLs
+  sanitized = sanitized.replace(/javascript\s*:/gi, "");
+
+  // Remove CSS expression() (IE exploits)
+  sanitized = sanitized.replace(/expression\s*\([^)]*\)/gi, "");
+
+  // Remove -moz-binding (Firefox XBL injection)
+  sanitized = sanitized.replace(/-moz-binding\s*:[^;]*(;|$)/gi, "");
+
+  // Remove behavior: (IE HTC injection)
+  sanitized = sanitized.replace(/behavior\s*:[^;]*(;|$)/gi, "");
+
+  // Remove data: URIs in url()
+  sanitized = sanitized.replace(/url\s*\(\s*["']?\s*data:[^)]*\)/gi, "");
+
+  return sanitized;
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────────────

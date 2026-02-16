@@ -7,7 +7,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { StoryBuilder } from "../services/story-builder.js";
-import type { PrismaClient, TranscriptTruncationMode } from "@prisma/client";
+import type { PrismaClient, TranscriptTruncationMode, HighValueQuote } from "@prisma/client";
 import { TranscriptMerger } from "../services/transcript-merger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ export function createStoryRoutes(
       return;
     }
 
-    const organizationId = (req as Record<string, unknown>).organizationId as string;
+    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
@@ -92,7 +92,7 @@ export function createStoryRoutes(
    * Retrieves all previously generated stories for an account.
    */
   router.get("/:accountId", async (req: Request, res: Response) => {
-    const organizationId = (req as Record<string, unknown>).organizationId as string;
+    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
@@ -101,7 +101,7 @@ export function createStoryRoutes(
     try {
       const stories = await prisma.story.findMany({
         where: {
-          accountId: req.params.accountId,
+          accountId: req.params.accountId as string,
           organizationId,
         },
         include: {
@@ -119,7 +119,7 @@ export function createStoryRoutes(
           filter_tags: s.filterTags,
           generated_at: s.generatedAt.toISOString(),
           markdown: s.markdownBody,
-          quotes: s.quotes.map((q) => ({
+          quotes: (s as unknown as { quotes: HighValueQuote[] }).quotes.map((q: HighValueQuote) => ({
             speaker: q.speaker,
             quote_text: q.quoteText,
             context: q.context,
@@ -155,7 +155,7 @@ export function createStoryRoutes(
       return;
     }
 
-    const organizationId = (req as Record<string, unknown>).organizationId as string;
+    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;

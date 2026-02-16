@@ -41,7 +41,7 @@ export function createEditorPageRoutes(prisma: PrismaClient): Router {
     requirePageOwnerOrPermission(prisma),
     async (req: AuthReq, res: Response) => {
       try {
-        const page = await editor.getForEditing(req.params.pageId);
+        const page = await editor.getForEditing(req.params.pageId as string);
 
         // Check PUBLISH_NAMED_LANDING_PAGE permission
         let canPublishNamed = false;

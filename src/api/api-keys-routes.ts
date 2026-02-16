@@ -17,10 +17,10 @@ import { requirePermission } from "../middleware/permissions.js";
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 const CreateApiKeySchema = z.object({
-  name: z
+  label: z
     .string()
-    .min(1, "Name is required")
-    .max(100, "Name must be under 100 characters"),
+    .min(1, "Label is required")
+    .max(100, "Label must be under 100 characters"),
 });
 
 interface AuthReq extends Request {
@@ -70,10 +70,9 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
           },
           select: {
             id: true,
-            name: true,
+            label: true,
             keyPrefix: true,
             lastUsedAt: true,
-            createdById: true,
             createdAt: true,
           },
           orderBy: { createdAt: "desc" },
@@ -81,10 +80,9 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
 
         res.json({ api_keys: keys.map((k) => ({
           id: k.id,
-          name: k.name,
+          label: k.label,
           key_prefix: k.keyPrefix,
           last_used_at: k.lastUsedAt,
-          created_by: k.createdById,
           created_at: k.createdAt,
         })) });
       } catch (err) {
@@ -120,10 +118,9 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
         const apiKey = await prisma.apiKey.create({
           data: {
             organizationId: req.organizationId!,
-            name: parse.data.name,
+            label: parse.data.label,
             keyHash,
             keyPrefix,
-            createdById: req.userId!,
           },
         });
 
@@ -131,7 +128,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
         res.status(201).json({
           api_key: {
             id: apiKey.id,
-            name: apiKey.name,
+            label: apiKey.label,
             key: rawKey,
             key_prefix: keyPrefix,
             created_at: apiKey.createdAt,
@@ -160,7 +157,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
       try {
         const apiKey = await prisma.apiKey.findFirst({
           where: {
-            id: req.params.keyId,
+            id: req.params.keyId as string,
             organizationId: req.organizationId!,
             revokedAt: null,
           },

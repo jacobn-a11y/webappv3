@@ -488,6 +488,7 @@ describe("Permissions Integration Tests", () => {
 
     it("OWNER bypasses DELETE_ANY_LANDING_PAGE permission check", async () => {
       const prisma = createMockPrisma();
+      prisma.landingPage.findFirst.mockResolvedValue({ id: "page-1", organizationId: "org-1" });
       prisma.landingPage.delete.mockResolvedValue({ id: "page-1" });
 
       const app = createApp(prisma, { userRole: "OWNER" });
@@ -502,6 +503,7 @@ describe("Permissions Integration Tests", () => {
 
     it("ADMIN bypasses DELETE_ANY_LANDING_PAGE permission check", async () => {
       const prisma = createMockPrisma();
+      prisma.landingPage.findFirst.mockResolvedValue({ id: "page-1", organizationId: "org-1" });
       prisma.landingPage.delete.mockResolvedValue({ id: "page-1" });
 
       const app = createApp(prisma, { userRole: "ADMIN" });

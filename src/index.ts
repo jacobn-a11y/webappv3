@@ -120,7 +120,7 @@ initSentry();
 const prisma = new PrismaClient();
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "", {
-  apiVersion: "2024-11-20.acacia",
+  apiVersion: "2025-02-24.acacia",
 });
 
 const workos = new WorkOS(process.env.WORKOS_API_KEY ?? "");
@@ -425,7 +425,7 @@ app.use(
   requireScope("rag:query"),
   publicApiRateLimiter,
   apiUsageLogger,
-  createRAGRoutes(ragEngine)
+  createRAGRoutes(ragEngine, prisma)
 );
 
 // ─── Platform Admin (API-key protected, no user auth) ────────────────────────
@@ -451,7 +451,7 @@ app.post("/api/billing/portal", createPortalHandler(prisma, stripe));
 app.use("/api/keys", trialGate, createApiKeyRoutes(prisma));
 
 // RAG Chatbot Connector — internal use (behind trial gate)
-app.use("/api/rag", trialGate, apiRateLimiter, createRAGRoutes(ragEngine));
+app.use("/api/rag", trialGate, apiRateLimiter, createRAGRoutes(ragEngine, prisma));
 
 // Story Builder (behind trial gate)
 app.use("/api/stories", trialGate, apiRateLimiter, createStoryRoutes(storyBuilder, prisma));

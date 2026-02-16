@@ -109,26 +109,36 @@ export async function runDailyUsageReport(
 
   for (const usage of orgUsages) {
     try {
-      // Upsert the usage record (idempotent)
-      const record = await prisma.usageRecord.upsert({
+      // Find or create the usage record (idempotent)
+      const periodEnd = new Date(
+        Date.UTC(dateKey.getUTCFullYear(), dateKey.getUTCMonth(), dateKey.getUTCDate(), 23, 59, 59, 999)
+      );
+
+      const existing = await prisma.usageRecord.findFirst({
         where: {
-          organizationId_date: {
-            organizationId: usage.organizationId,
-            date: dateKey,
-          },
-        },
-        create: {
           organizationId: usage.organizationId,
-          date: dateKey,
-          transcriptMinutes: usage.totalMinutes,
-          callCount: usage.callCount,
-          reportedToStripe: false,
-        },
-        update: {
-          transcriptMinutes: usage.totalMinutes,
-          callCount: usage.callCount,
+          metric: "TRANSCRIPT_MINUTES",
+          periodStart: dateKey,
         },
       });
+
+      const record = existing
+        ? await prisma.usageRecord.update({
+            where: { id: existing.id },
+            data: {
+              quantity: usage.totalMinutes,
+            },
+          })
+        : await prisma.usageRecord.create({
+            data: {
+              organizationId: usage.organizationId,
+              metric: "TRANSCRIPT_MINUTES",
+              quantity: usage.totalMinutes,
+              periodStart: dateKey,
+              periodEnd,
+              reportedToStripe: false,
+            },
+          });
 
       // Skip if already reported to Stripe
       if (record.reportedToStripe) {

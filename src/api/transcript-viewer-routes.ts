@@ -1174,14 +1174,14 @@ export function createTranscriptViewerRoutes(prisma: PrismaClient): Router {
    * Requires authentication (organizationId on request).
    */
   router.get("/:callId/transcript", async (req: Request, res: Response) => {
-    const organizationId = (req as Record<string, unknown>)
+    const organizationId = (req as unknown as Record<string, unknown>)
       .organizationId as string;
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
     }
 
-    const { callId } = req.params;
+    const callId = req.params.callId as string;
 
     // Fetch call with all related data
     const call = await prisma.call.findFirst({

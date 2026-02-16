@@ -85,8 +85,8 @@ model User {
   aiUsageRecords       AIUsageRecord[]
   aiUsageLimits        AIUsageLimit[]
   aiUsageNotifications AIUsageNotification[]
-  aiAccess             UserAIAccess?
-  aiBalance            UserAIBalance?
+  aiAccess             UserAIAccess[]
+  aiBalance            UserAIBalance[]
 
   @@index([organizationId])
   @@map("users")

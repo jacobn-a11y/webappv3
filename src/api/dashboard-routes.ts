@@ -285,7 +285,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
     async (req: AuthReq, res: Response) => {
       try {
         const grants = await accessService.listUserAccess(
-          req.params.userId,
+          req.params.userId as string,
           req.organizationId!
         );
         res.json({
@@ -371,7 +371,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        await accessService.revokeAccess(req.params.grantId);
+        await accessService.revokeAccess(req.params.grantId as string);
         res.json({ revoked: true });
       } catch (err) {
         logger.error("Revoke access error", { error: err });
@@ -390,7 +390,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        const result = await accessService.syncCrmReportGrant(req.params.grantId);
+        const result = await accessService.syncCrmReportGrant(req.params.grantId as string);
         res.json({ synced: true, account_count: result.accountCount });
       } catch (err) {
         logger.error("Sync CRM report error", { error: err });

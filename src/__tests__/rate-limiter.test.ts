@@ -1,53 +1,33 @@
 /**
  * Tests for Rate Limiter Middleware
  *
- * Tests the sliding-window rate limiter logic using mocked Redis.
+ * Tests the in-memory sliding-window rate limiter.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Response, NextFunction } from "express";
-import type { ApiKeyAuthRequest } from "../middleware/api-key-auth.js";
-
-// Mock ioredis before importing the rate limiter
-const mockExec = vi.fn();
-const mockPipeline = vi.fn().mockReturnValue({
-  zremrangebyscore: vi.fn().mockReturnThis(),
-  zcard: vi.fn().mockReturnThis(),
-  zadd: vi.fn().mockReturnThis(),
-  expire: vi.fn().mockReturnThis(),
-  exec: mockExec,
-});
-
-vi.mock("ioredis", () => {
-  class MockRedis {
-    pipeline = mockPipeline;
-    connect = vi.fn().mockResolvedValue(undefined);
-    status = "ready";
-  }
-  return { Redis: MockRedis };
-});
-
+import type { Request, Response, NextFunction } from "express";
 import { createRateLimiter } from "../middleware/rate-limiter.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function mockRequest(apiKeyId?: string): ApiKeyAuthRequest {
+function mockRequest(ip?: string): Request {
   return {
-    apiKeyId,
+    ip: ip ?? "127.0.0.1",
+    socket: { remoteAddress: ip ?? "127.0.0.1" },
     headers: {},
-  } as ApiKeyAuthRequest;
+  } as unknown as Request;
 }
 
-function mockResponse(): Response & { _headers: Record<string, string | number> } {
-  const headers: Record<string, string | number> = {};
-  return {
-    _headers: headers,
-    setHeader: vi.fn((key: string, value: string | number) => {
-      headers[key] = value;
+function mockResponse(): Response & { _status?: number } {
+  const res = {
+    setHeader: vi.fn().mockReturnThis(),
+    status: vi.fn().mockImplementation(function (this: Response, code: number) {
+      (this as Response & { _status?: number })._status = code;
+      return this;
     }),
-    status: vi.fn().mockReturnThis(),
     json: vi.fn().mockReturnThis(),
-  } as unknown as Response & { _headers: Record<string, string | number> };
+  } as unknown as Response & { _status?: number };
+  return res;
 }
 
 function mockNext(): NextFunction {
@@ -61,131 +41,137 @@ describe("createRateLimiter", () => {
     vi.clearAllMocks();
   });
 
-  it("allows requests under the limit", async () => {
-    mockExec.mockResolvedValue([
-      [null, 0], // zremrangebyscore
-      [null, 50], // zcard: 50 requests in window
-      [null, 1], // zadd
-      [null, 1], // expire
-    ]);
+  it("allows requests under the limit", () => {
+    const limiter = createRateLimiter({ maxRequests: 100, windowMs: 60_000 });
 
-    const limiter = createRateLimiter({ maxRequests: 100, windowSeconds: 60 });
-
-    // Wait for the Redis connection promise to resolve
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const req = mockRequest("key_1");
+    const req = mockRequest("10.0.0.1");
     const res = mockResponse();
     const next = mockNext();
 
-    await limiter(req, res, next);
+    limiter(req, res, next);
 
     expect(next).toHaveBeenCalled();
-    expect(res.setHeader).toHaveBeenCalledWith("X-RateLimit-Limit", 100);
-    expect(res.setHeader).toHaveBeenCalledWith("X-RateLimit-Remaining", 49);
   });
 
-  it("rejects requests over the limit with 429", async () => {
-    mockExec.mockResolvedValue([
-      [null, 0], // zremrangebyscore
-      [null, 100], // zcard: 100 requests (at limit)
-      [null, 1], // zadd
-      [null, 1], // expire
-    ]);
+  it("rejects requests over the limit with 429", () => {
+    const limiter = createRateLimiter({ maxRequests: 2, windowMs: 60_000 });
+    const ip = "10.0.0.2";
 
-    const limiter = createRateLimiter({ maxRequests: 100, windowSeconds: 60 });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // First two requests should pass
+    for (let i = 0; i < 2; i++) {
+      const req = mockRequest(ip);
+      const res = mockResponse();
+      const next = mockNext();
+      limiter(req, res, next);
+      expect(next).toHaveBeenCalled();
+    }
 
-    const req = mockRequest("key_1");
+    // Third request should be rate limited
+    const req = mockRequest(ip);
     const res = mockResponse();
     const next = mockNext();
-
-    await limiter(req, res, next);
+    limiter(req, res, next);
 
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(429);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         error: "rate_limit_exceeded",
-        limit: 100,
-        window_seconds: 60,
       })
     );
-    expect(res.setHeader).toHaveBeenCalledWith("X-RateLimit-Remaining", 0);
   });
 
-  it("sets Retry-After header on rate limit", async () => {
-    mockExec.mockResolvedValue([
-      [null, 0],
-      [null, 100],
-      [null, 1],
-      [null, 1],
-    ]);
+  it("sets Retry-After header on rate limit", () => {
+    const limiter = createRateLimiter({ maxRequests: 1, windowMs: 60_000 });
+    const ip = "10.0.0.3";
 
-    const limiter = createRateLimiter({ maxRequests: 100, windowSeconds: 60 });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // First request passes
+    limiter(mockRequest(ip), mockResponse(), mockNext());
 
-    const req = mockRequest("key_1");
+    // Second request gets rate limited
+    const req = mockRequest(ip);
     const res = mockResponse();
     const next = mockNext();
+    limiter(req, res, next);
 
-    await limiter(req, res, next);
-
-    expect(res.setHeader).toHaveBeenCalledWith(
-      "Retry-After",
-      expect.any(Number)
-    );
+    expect(res.setHeader).toHaveBeenCalledWith("Retry-After", expect.any(String));
   });
 
-  it("skips rate limiting when no API key is present", async () => {
-    const limiter = createRateLimiter({ maxRequests: 100, windowSeconds: 60 });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+  it("tracks rate limits per IP address", () => {
+    const limiter = createRateLimiter({ maxRequests: 1, windowMs: 60_000 });
 
-    const req = mockRequest(undefined);
-    const res = mockResponse();
-    const next = mockNext();
+    // IP A: first request passes
+    const reqA = mockRequest("10.0.0.10");
+    const resA = mockResponse();
+    const nextA = mockNext();
+    limiter(reqA, resA, nextA);
+    expect(nextA).toHaveBeenCalled();
 
-    await limiter(req, res, next);
+    // IP B: first request also passes (different IP)
+    const reqB = mockRequest("10.0.0.11");
+    const resB = mockResponse();
+    const nextB = mockNext();
+    limiter(reqB, resB, nextB);
+    expect(nextB).toHaveBeenCalled();
 
-    expect(next).toHaveBeenCalled();
-    expect(mockPipeline).not.toHaveBeenCalled();
+    // IP A: second request is rate limited
+    const reqA2 = mockRequest("10.0.0.10");
+    const resA2 = mockResponse();
+    const nextA2 = mockNext();
+    limiter(reqA2, resA2, nextA2);
+    expect(nextA2).not.toHaveBeenCalled();
+    expect(resA2.status).toHaveBeenCalledWith(429);
   });
 
-  it("fails open on Redis error", async () => {
-    mockExec.mockRejectedValue(new Error("Redis connection failed"));
+  it("supports custom error message", () => {
+    const limiter = createRateLimiter({
+      maxRequests: 1,
+      windowMs: 60_000,
+      message: "Slow down!",
+    });
+    const ip = "10.0.0.4";
 
-    const limiter = createRateLimiter({ maxRequests: 100, windowSeconds: 60 });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Exhaust limit
+    limiter(mockRequest(ip), mockResponse(), mockNext());
 
-    const req = mockRequest("key_1");
+    // Next request should get custom message
+    const req = mockRequest(ip);
     const res = mockResponse();
     const next = mockNext();
+    limiter(req, res, next);
 
-    await limiter(req, res, next);
-
-    expect(next).toHaveBeenCalled();
-  });
-
-  it("respects custom maxRequests and windowSeconds", async () => {
-    mockExec.mockResolvedValue([
-      [null, 0],
-      [null, 10], // at limit for maxRequests=10
-      [null, 1],
-      [null, 1],
-    ]);
-
-    const limiter = createRateLimiter({ maxRequests: 10, windowSeconds: 30 });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const req = mockRequest("key_1");
-    const res = mockResponse();
-    const next = mockNext();
-
-    await limiter(req, res, next);
-
-    expect(res.status).toHaveBeenCalledWith(429);
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ limit: 10, window_seconds: 30 })
+      expect.objectContaining({
+        message: "Slow down!",
+      })
     );
+  });
+
+  it("respects different maxRequests values", () => {
+    const limiter = createRateLimiter({ maxRequests: 3, windowMs: 60_000 });
+    const ip = "10.0.0.5";
+
+    // Three requests should pass
+    for (let i = 0; i < 3; i++) {
+      const req = mockRequest(ip);
+      const res = mockResponse();
+      const next = mockNext();
+      limiter(req, res, next);
+      expect(next).toHaveBeenCalled();
+    }
+
+    // Fourth request should be rate limited
+    const req = mockRequest(ip);
+    const res = mockResponse();
+    const next = mockNext();
+    limiter(req, res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(429);
+  });
+});
+
+describe("rate limiter exports", () => {
+  it("exports createRateLimiter as a function", () => {
+    expect(typeof createRateLimiter).toBe("function");
   });
 });
