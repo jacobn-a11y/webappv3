@@ -1,0 +1,201 @@
+/**
+ * Grain Webhook Handler
+ *
+ * Receives real-time notifications from Grain when meetings are recorded.
+ * This supplements the polling-based sync with immediate processing of
+ * new recordings.
+ *
+ * Grain webhooks deliver events when:
+ *   - A new recording is completed
+ *   - A transcript is ready
+ *   - Highlights/notes are generated
+ *
+ * The handler validates the webhook, fetches full recording data from
+ * the Grain API, then feeds it into the standard call processing pipeline.
+ */
+
+import type { Request, Response } from "express";
+import crypto from "crypto";
+import type { PrismaClient } from "@prisma/client";
+import type { Queue } from "bullmq";
+import {
+  EntityResolver,
+} from "../services/entity-resolution.js";
+import { GrainProvider } from "../integrations/grain-provider.js";
+import type { GrainCredentials } from "../integrations/types.js";
+
+// ─── Grain Webhook Payload Types ────────────────────────────────────────────
+
+interface GrainWebhookPayload {
+  /** Event type, e.g., "recording.completed", "transcript.ready" */
+  event: string;
+  /** The recording ID */
+  recording_id?: string;
+  /** Timestamp of the event */
+  timestamp?: string;
+  /** Additional event data */
+  data?: Record<string, unknown>;
+}
+
+// ─── Webhook Signature Verification ─────────────────────────────────────────
+
+function verifyGrainSignature(
+  payload: string,
+  signature: string,
+  secret: string
+): boolean {
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
+  return crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from(expected)
+  );
+}
+
+// ─── Handler Factory ────────────────────────────────────────────────────────
+
+export function createGrainWebhookHandler(deps: {
+  prisma: PrismaClient;
+  processingQueue: Queue;
+}) {
+  const { prisma, processingQueue } = deps;
+  const grainProvider = new GrainProvider();
+
+  return async (req: Request, res: Response) => {
+    // ── Find the integration config for this webhook ──────────────────
+    const signature = req.headers["x-grain-signature"] as string | undefined;
+    const rawBody =
+      typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+
+    const grainConfigs = await prisma.integrationConfig.findMany({
+      where: { provider: "GRAIN", enabled: true, status: "ACTIVE" },
+    });
+
+    if (grainConfigs.length === 0) {
+      res.status(404).json({ error: "No active Grain integration" });
+      return;
+    }
+
+    // Try to match signature to a specific org's webhook secret
+    type GrainConfig = (typeof grainConfigs)[number];
+    let matchedConfig: GrainConfig = grainConfigs[0];
+    if (signature) {
+      const matched = grainConfigs.find(
+        (c: GrainConfig) =>
+          c.webhookSecret &&
+          verifyGrainSignature(rawBody, signature, c.webhookSecret)
+      );
+      if (matched) {
+        matchedConfig = matched;
+      } else if (grainConfigs.every((c: GrainConfig) => c.webhookSecret)) {
+        res.status(401).json({ error: "Invalid webhook signature" });
+        return;
+      }
+    }
+
+    const payload = req.body as GrainWebhookPayload;
+    const credentials = matchedConfig.credentials as unknown as GrainCredentials;
+    const organizationId = matchedConfig.organizationId;
+
+    try {
+      if (
+        payload.event === "recording.completed" ||
+        payload.event === "transcript.ready"
+      ) {
+        if (!payload.recording_id) {
+          res.json({
+            received: true,
+            processed: false,
+            reason: "No recording_id",
+          });
+          return;
+        }
+
+        await handleRecordingReady(
+          prisma,
+          processingQueue,
+          grainProvider,
+          credentials,
+          organizationId,
+          payload.recording_id
+        );
+      }
+
+      res.json({ received: true, processed: true });
+    } catch (err) {
+      console.error("Grain webhook processing error:", err);
+      res.json({
+        received: true,
+        processed: false,
+        error: "Processing failed",
+      });
+    }
+  };
+}
+
+// ─── Event Handler ──────────────────────────────────────────────────────────
+
+async function handleRecordingReady(
+  prisma: PrismaClient,
+  processingQueue: Queue,
+  provider: GrainProvider,
+  credentials: GrainCredentials,
+  organizationId: string,
+  recordingId: string
+): Promise<void> {
+  const resolver = new EntityResolver(prisma);
+
+  // Fetch full recording details including transcript
+  const transcript = await provider.fetchTranscript(credentials, recordingId);
+
+  // Check if this call already exists
+  const existing = await prisma.call.findFirst({
+    where: {
+      organizationId,
+      provider: "GRAIN",
+      externalId: recordingId,
+    },
+  });
+
+  const call = existing
+    ? await prisma.call.update({
+        where: { id: existing.id },
+        data: {},
+      })
+    : await prisma.call.create({
+        data: {
+          organizationId,
+          provider: "GRAIN",
+          externalId: recordingId,
+          occurredAt: new Date(),
+        },
+      });
+
+  // Store transcript
+  if (transcript && !existing) {
+    await prisma.transcript.create({
+      data: {
+        callId: call.id,
+        fullText: transcript,
+        wordCount: transcript.split(/\s+/).length,
+      },
+    });
+  }
+
+  // Queue for async processing
+  await processingQueue.add(
+    "process-call",
+    {
+      callId: call.id,
+      organizationId,
+      accountId: call.accountId ?? null,
+      hasTranscript: !!transcript,
+    },
+    {
+      attempts: 3,
+      backoff: { type: "exponential", delay: 5000 },
+    }
+  );
+}
