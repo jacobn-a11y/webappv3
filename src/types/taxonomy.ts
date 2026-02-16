@@ -93,6 +93,17 @@ export const VERTICAL_TOPICS = [
   "public_sector_government",
 ] as const;
 
+// ─── Valid Funnel Stages (for input validation) ────────────────────────────
+
+export const VALID_FUNNEL_STAGES = [
+  "TOFU",
+  "MOFU",
+  "BOFU",
+  "POST_SALE",
+  "INTERNAL",
+  "VERTICAL",
+] as const;
+
 // ─── Combined Types ─────────────────────────────────────────────────────────
 
 export type TofuTopic = (typeof TOFU_TOPICS)[number];

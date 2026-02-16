@@ -30,6 +30,27 @@ export interface RAGQuery {
   funnelStages?: string[];
 }
 
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface RAGChatQuery {
+  query: string;
+  accountId: string | null;
+  organizationId: string;
+  /** Previous messages for conversation context. */
+  history: ChatMessage[];
+  topK?: number;
+  funnelStages?: string[];
+}
+
+export interface RAGChatResponse {
+  answer: string;
+  sources: RAGSource[];
+  tokensUsed: number;
+}
+
 export interface RAGResponse {
   answer: string;
   sources: RAGSource[];
@@ -143,6 +164,100 @@ TRANSCRIPT SOURCES:
 ${contextBlock}`,
         },
       ],
+    });
+
+    const answer =
+      response.choices[0]?.message?.content ?? "Unable to generate an answer.";
+    const tokensUsed = response.usage?.total_tokens ?? 0;
+
+    return { answer, sources, tokensUsed };
+  }
+
+  /**
+   * Conversation-aware chat: retrieves context for the latest query while
+   * carrying prior conversation history so the LLM can resolve follow-ups.
+   * When accountId is null, searches across all accounts in the org.
+   */
+  async chat(input: RAGChatQuery): Promise<RAGChatResponse> {
+    const topK = input.topK ?? 8;
+
+    // ── Step 1: Generate query embedding ─────────────────────────────
+    const queryEmbedding = await this.embed(input.query);
+
+    // ── Step 2: Search Pinecone ──────────────────────────────────────
+    const index = this.pinecone.Index(this.indexName);
+
+    const filter: Record<string, unknown> = {
+      organization_id: input.organizationId,
+    };
+    if (input.accountId) {
+      filter.account_id = input.accountId;
+    }
+    if (input.funnelStages && input.funnelStages.length > 0) {
+      filter.funnel_stage = { $in: input.funnelStages };
+    }
+
+    const searchResults = await index.query({
+      vector: queryEmbedding,
+      topK,
+      filter,
+      includeMetadata: true,
+    });
+
+    // ── Step 3: Hydrate sources from PostgreSQL ──────────────────────
+    const sources = await this.hydrateSources(searchResults.matches ?? []);
+
+    if (sources.length === 0) {
+      return {
+        answer:
+          "I couldn't find any relevant transcript segments matching your query.",
+        sources: [],
+        tokensUsed: 0,
+      };
+    }
+
+    // ── Step 4: Build context and generate answer with history ───────
+    const contextBlock = sources
+      .map(
+        (s, i) =>
+          `[Source ${i + 1}] Call: "${s.callTitle ?? "Untitled"}" (${s.callDate})${s.speaker ? ` — ${s.speaker}` : ""}\n${s.text}`
+      )
+      .join("\n\n---\n\n");
+
+    const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      {
+        role: "system",
+        content: `You are a helpful assistant that answers questions about customer accounts based on call transcript data.
+
+RULES:
+1. ONLY use information from the provided transcript sources.
+2. Cite sources using [Source N] notation.
+3. If the sources don't contain enough information to answer, say so honestly.
+4. Be specific and include any quantified metrics you find.
+5. Keep answers concise but complete.
+6. When the user asks follow-up questions, use the conversation history for context.`,
+      },
+    ];
+
+    // Inject prior conversation turns
+    for (const msg of input.history) {
+      messages.push({ role: msg.role, content: msg.content });
+    }
+
+    // Current query with fresh context
+    messages.push({
+      role: "user",
+      content: `QUESTION: ${input.query}
+
+TRANSCRIPT SOURCES:
+${contextBlock}`,
+    });
+
+    const response = await this.openai.chat.completions.create({
+      model: this.model,
+      temperature: 0.2,
+      max_tokens: 1500,
+      messages,
     });
 
     const answer =

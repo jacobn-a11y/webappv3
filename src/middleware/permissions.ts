@@ -13,7 +13,7 @@
  */
 
 import type { Request, Response, NextFunction } from "express";
-import type { PrismaClient, PermissionType, UserRole } from "@prisma/client";
+import type { PrismaClient, PermissionType, UserRole, TranscriptTruncationMode } from "@prisma/client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -280,15 +280,22 @@ export class PermissionManager {
       allowedPublishers?: UserRole[];
       maxPagesPerUser?: number | null;
       companyNameReplacements?: Record<string, string>;
+      transcriptMergeMaxWords?: number;
+      transcriptTruncationMode?: TranscriptTruncationMode;
     }
   ): Promise<void> {
+    // Filter out undefined values to avoid overwriting with undefined
+    const cleanUpdates = Object.fromEntries(
+      Object.entries(updates).filter(([, v]) => v !== undefined)
+    );
+
     await this.prisma.orgSettings.upsert({
       where: { organizationId },
       create: {
         organizationId,
-        ...updates,
+        ...cleanUpdates,
       },
-      update: updates,
+      update: cleanUpdates,
     });
   }
 }

@@ -69,6 +69,10 @@ const ACRONYM_CASE_SENSITIVE_THRESHOLD = 4;
  * We preserve the seniority level for context without revealing identity.
  */
 const TITLE_ANONYMIZER: Array<{ pattern: RegExp; replacement: string }> = [
+  // Multi-word VP/President titles must come before the bare "President" rule
+  // to avoid \bPresident\b matching "Senior Vice President" prematurely.
+  { pattern: /\b(SVP|Senior Vice President|EVP|Executive Vice President)\b/i, replacement: "a senior leader at the client" },
+  { pattern: /\b(VP|Vice President)\b/i, replacement: "a VP at the client" },
   { pattern: /\b(CEO|Chief Executive Officer|Founder|Co-Founder|President)\b/i, replacement: "a senior executive at the client" },
   { pattern: /\b(CFO|Chief Financial Officer)\b/i, replacement: "a finance leader at the client" },
   { pattern: /\b(CTO|Chief Technology Officer|CIO|Chief Information Officer)\b/i, replacement: "a technology leader at the client" },
@@ -76,8 +80,6 @@ const TITLE_ANONYMIZER: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /\b(COO|Chief Operating Officer)\b/i, replacement: "an operations leader at the client" },
   { pattern: /\b(CRO|Chief Revenue Officer)\b/i, replacement: "a revenue leader at the client" },
   { pattern: /\b(CISO|Chief Information Security Officer)\b/i, replacement: "a security leader at the client" },
-  { pattern: /\b(SVP|Senior Vice President|EVP|Executive Vice President)\b/i, replacement: "a senior leader at the client" },
-  { pattern: /\b(VP|Vice President)\b/i, replacement: "a VP at the client" },
   { pattern: /\b(Director)\b/i, replacement: "a director at the client" },
   { pattern: /\b(Head of)\b/i, replacement: "a department head at the client" },
   { pattern: /\b(Manager|Senior Manager)\b/i, replacement: "a manager at the client" },
@@ -151,20 +153,10 @@ export class CompanyScrubber {
     count += contactScrubResult.replacementsMade;
     replaced.push(...contactScrubResult.termsReplaced);
 
-    // ── Step 2: Scrub company name and variations ────────────────────
-    const terms = this.buildReplacementTerms(account, customMappings, placeholder);
-
-    for (const term of terms) {
-      term.regex.lastIndex = 0;
-      const matches = scrubbed.match(term.regex);
-      if (matches) {
-        count += matches.length;
-        replaced.push(term.label);
-        scrubbed = scrubbed.replace(term.regex, term.replacement);
-      }
-    }
-
-    // ── Step 3: Scrub email domains ─────────────────────────────────
+    // ── Step 2: Scrub email domains ────────────────────────────────
+    // This MUST run before company name scrubbing, because the company
+    // name (e.g., "acme") can match inside domains (e.g., "acme.com")
+    // and clobber them before the domain regex gets a chance to act.
     const domains = this.collectDomains(account);
     for (const domain of domains) {
       // Domains are always case-insensitive, bounded by non-word chars naturally
@@ -174,6 +166,19 @@ export class CompanyScrubber {
         count += domainMatches.length;
         replaced.push(domain);
         scrubbed = scrubbed.replace(domainRegex, DOMAIN_PLACEHOLDER);
+      }
+    }
+
+    // ── Step 3: Scrub company name and variations ────────────────────
+    const terms = this.buildReplacementTerms(account, customMappings, placeholder);
+
+    for (const term of terms) {
+      term.regex.lastIndex = 0;
+      const matches = scrubbed.match(term.regex);
+      if (matches) {
+        count += matches.length;
+        replaced.push(term.label);
+        scrubbed = scrubbed.replace(term.regex, term.replacement);
       }
     }
 
