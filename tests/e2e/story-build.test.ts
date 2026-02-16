@@ -169,7 +169,7 @@ describe("POST /api/stories/build — trial gate", () => {
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("trial_expired");
     expect(res.body.message).toMatch(/trial.*expired/i);
-    expect(res.body.upgradeUrl).toContain(EXPIRED_ORG.id);
+    expect(res.body.upgradeUrl).toBe("/api/billing/checkout");
   });
 
   it("passes through when the org trial is still active", async () => {

@@ -142,8 +142,7 @@ export class TranscriptProcessor {
 
     // ── Step 5: Tag with AI ──────────────────────────────────────────
     const taggingResults = await this.tagger.tagCallTranscript(
-      callId,
-      aiClient
+      callId
     );
 
     // ── Step 6: Generate embeddings and index ────────────────────────

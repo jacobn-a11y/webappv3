@@ -152,7 +152,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
     requirePageOwnerOrPermission(prisma),
     async (req: AuthReq, res: Response) => {
       try {
-        const page = await editor.getForEditing(req.params.pageId);
+        const page = await editor.getForEditing(req.params.pageId as string);
 
         res.json({
           id: page.id,
@@ -197,7 +197,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
     requirePageOwnerOrPermission(prisma),
     async (req: AuthReq, res: Response) => {
       try {
-        const preview = await editor.getPreview(req.params.pageId);
+        const preview = await editor.getPreview(req.params.pageId as string);
 
         res.setHeader("Content-Type", "text/html; charset=utf-8");
         res.setHeader("X-Robots-Tag", "noindex, nofollow");
@@ -223,7 +223,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
       }
 
       try {
-        await editor.update(req.params.pageId, req.userId!, {
+        await editor.update(req.params.pageId as string, req.userId!, {
           title: parse.data.title,
           subtitle: parse.data.subtitle,
           editableBody: parse.data.editable_body,
@@ -254,7 +254,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
       }
 
       try {
-        const result = await editor.publish(req.params.pageId, {
+        const result = await editor.publish(req.params.pageId as string, {
           visibility: parse.data.visibility,
           password: parse.data.password,
           expiresAt: parse.data.expires_at
@@ -281,7 +281,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
     requirePageOwnerOrPermission(prisma),
     async (req: AuthReq, res: Response) => {
       try {
-        await editor.unpublish(req.params.pageId);
+        await editor.unpublish(req.params.pageId as string);
         res.json({ unpublished: true });
       } catch (err) {
         console.error("Unpublish error:", err);
@@ -297,7 +297,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
     requirePageOwnerOrPermission(prisma),
     async (req: AuthReq, res: Response) => {
       try {
-        await editor.archive(req.params.pageId);
+        await editor.archive(req.params.pageId as string);
         res.json({ archived: true });
       } catch (err) {
         console.error("Archive error:", err);
@@ -316,7 +316,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
         // SECURITY: Ensure the page belongs to the authenticated user's org
         // to prevent cross-organization deletion
         const page = await prisma.landingPage.findFirst({
-          where: { id: req.params.pageId, organizationId: req.organizationId! },
+          where: { id: req.params.pageId as string, organizationId: req.organizationId! },
         });
         if (!page) {
           res.status(404).json({ error: "Landing page not found" });

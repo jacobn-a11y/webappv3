@@ -12,7 +12,7 @@
 
 import type { Request, Response, NextFunction } from "express";
 import Stripe from "stripe";
-import type { PrismaClient, Plan } from "@prisma/client";
+import type { PrismaClient, Plan, SubscriptionStatus } from "@prisma/client";
 import { z } from "zod";
 import {
   PLAN_CONFIGS,
@@ -253,14 +253,14 @@ export async function reportUsageToStripe(
  */
 function mapStripeStatus(
   status: Stripe.Subscription.Status
-): "ACTIVE" | "PAST_DUE" | "CANCELED" | "UNPAID" | "INCOMPLETE" | "TRIALING" {
-  const statusMap: Record<string, "ACTIVE" | "PAST_DUE" | "CANCELED" | "UNPAID" | "INCOMPLETE" | "TRIALING"> = {
+): SubscriptionStatus {
+  const statusMap: Record<string, SubscriptionStatus> = {
     active: "ACTIVE",
     past_due: "PAST_DUE",
     canceled: "CANCELED",
-    unpaid: "UNPAID",
-    incomplete: "INCOMPLETE",
-    incomplete_expired: "INCOMPLETE",
+    unpaid: "PAST_DUE",
+    incomplete: "PAST_DUE",
+    incomplete_expired: "CANCELED",
     trialing: "TRIALING",
     paused: "CANCELED",
   };
@@ -328,8 +328,8 @@ export function createStripeWebhookHandler(
             create: {
               organizationId: orgId,
               stripeSubscriptionId: stripeSubscription.id,
-              stripePriceId: priceId ?? "",
-              plan,
+              pricingModel: "METERED",
+              billingChannel: "SELF_SERVE",
               status: mapStripeStatus(stripeSubscription.status),
               currentPeriodStart: new Date(
                 stripeSubscription.current_period_start * 1000
@@ -339,8 +339,6 @@ export function createStripeWebhookHandler(
               ),
             },
             update: {
-              stripePriceId: priceId ?? "",
-              plan,
               status: mapStripeStatus(stripeSubscription.status),
               currentPeriodStart: new Date(
                 stripeSubscription.current_period_start * 1000
@@ -395,9 +393,13 @@ export function createStripeWebhookHandler(
             });
 
             // Ensure the org plan stays active
+            const invoicePriceId = stripeSub.items.data[0]?.price.id;
+            const invoicePlan: Plan = invoicePriceId
+              ? (getPlanByPriceId(invoicePriceId) ?? "STARTER")
+              : "STARTER";
             await prisma.organization.update({
               where: { id: localSub.organizationId },
-              data: { plan: localSub.plan },
+              data: { plan: invoicePlan },
             });
           }
 
@@ -458,8 +460,8 @@ export function createStripeWebhookHandler(
             create: {
               organizationId: orgId,
               stripeSubscriptionId: stripeSubscription.id,
-              stripePriceId: priceId ?? "",
-              plan,
+              pricingModel: "METERED",
+              billingChannel: "SELF_SERVE",
               status,
               currentPeriodStart: new Date(
                 stripeSubscription.current_period_start * 1000
@@ -467,14 +469,11 @@ export function createStripeWebhookHandler(
               currentPeriodEnd: new Date(
                 stripeSubscription.current_period_end * 1000
               ),
-              cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
               canceledAt: stripeSubscription.canceled_at
                 ? new Date(stripeSubscription.canceled_at * 1000)
                 : null,
             },
             update: {
-              stripePriceId: priceId ?? "",
-              plan,
               status,
               currentPeriodStart: new Date(
                 stripeSubscription.current_period_start * 1000
@@ -482,7 +481,6 @@ export function createStripeWebhookHandler(
               currentPeriodEnd: new Date(
                 stripeSubscription.current_period_end * 1000
               ),
-              cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
               canceledAt: stripeSubscription.canceled_at
                 ? new Date(stripeSubscription.canceled_at * 1000)
                 : null,

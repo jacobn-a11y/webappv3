@@ -1,25 +1,25 @@
 import { describe, it, expect } from "vitest";
 import {
-  globalRateLimiter,
-  expensiveRateLimiter,
+  createRateLimiter,
+  apiRateLimiter,
   webhookRateLimiter,
-  authRateLimiter,
+  passwordRateLimiter,
 } from "../src/middleware/rate-limiter.js";
 
 describe("rate limiter exports", () => {
-  it("exports globalRateLimiter as a function (middleware)", () => {
-    expect(typeof globalRateLimiter).toBe("function");
+  it("exports apiRateLimiter as a function (middleware)", () => {
+    expect(typeof apiRateLimiter).toBe("function");
   });
 
-  it("exports expensiveRateLimiter as a function (middleware)", () => {
-    expect(typeof expensiveRateLimiter).toBe("function");
+  it("exports passwordRateLimiter as a function (middleware)", () => {
+    expect(typeof passwordRateLimiter).toBe("function");
   });
 
   it("exports webhookRateLimiter as a function (middleware)", () => {
     expect(typeof webhookRateLimiter).toBe("function");
   });
 
-  it("exports authRateLimiter as a function (middleware)", () => {
-    expect(typeof authRateLimiter).toBe("function");
+  it("exports createRateLimiter as a function (factory)", () => {
+    expect(typeof createRateLimiter).toBe("function");
   });
 });

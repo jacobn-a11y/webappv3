@@ -293,7 +293,7 @@ export function createAISettingsRoutes(
       }
 
       try {
-        await usageTracker.acknowledgeNotification(req.params.id);
+        await usageTracker.acknowledgeNotification(req.params.id as string);
         res.json({ acknowledged: true });
       } catch (err) {
         console.error("Acknowledge notification error:", err);
@@ -770,7 +770,7 @@ export function createAISettingsRoutes(
         await prisma.userAIAccess.deleteMany({
           where: {
             organizationId: req.organizationId,
-            userId: req.params.userId,
+            userId: req.params.userId as string,
           },
         });
 
@@ -877,7 +877,7 @@ export function createAISettingsRoutes(
       try {
         const balance = await usageTracker.getBalance(
           req.organizationId,
-          req.params.userId
+          req.params.userId as string
         );
 
         if (!balance) {
@@ -1002,7 +1002,7 @@ export function createAISettingsRoutes(
         const userId =
           req.params.userId === "org_default"
             ? undefined
-            : req.params.userId;
+            : (req.params.userId as string);
 
         await usageTracker.removeLimit(req.organizationId, userId);
         res.json({ deleted: true });

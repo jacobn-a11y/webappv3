@@ -52,7 +52,7 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
 
     try {
       const data = await journeyService.getAccountJourney(
-        req.params.accountId,
+        req.params.accountId as string,
         req.organizationId
       );
 
@@ -137,7 +137,7 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
 
       try {
         const data = await journeyService.getAccountJourney(
-          req.params.accountId,
+          req.params.accountId as string,
           req.organizationId
         );
 

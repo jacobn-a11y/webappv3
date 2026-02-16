@@ -14,7 +14,7 @@
  *      match, the call is flagged for human review.
  */
 
-import Fuse from "fuse.js";
+import Fuse, { type FuseResult } from "fuse.js";
 import type { PrismaClient } from "@prisma/client";
 import logger from "../lib/logger.js";
 import { metrics } from "../lib/metrics.js";
@@ -313,7 +313,7 @@ export class EntityResolver {
       includeScore: true,
     });
 
-    let bestMatch: Fuse.FuseResult<AccountRecord> | null = null;
+    let bestMatch: FuseResult<AccountRecord> | null = null;
 
     for (const candidate of candidateNames) {
       const results = fuse.search(candidate);

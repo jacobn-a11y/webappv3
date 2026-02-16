@@ -163,7 +163,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         return;
       }
 
-      const { memberId } = req.params;
+      const memberId = req.params.memberId as string;
       const newRole = parse.data.role as UserRole;
 
       try {
@@ -227,7 +227,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/members/:memberId",
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
-      const { memberId } = req.params;
+      const memberId = req.params.memberId as string;
 
       try {
         const targetUser = await prisma.user.findFirst({
@@ -407,7 +407,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
       try {
         const invite = await prisma.orgInvite.findFirst({
           where: {
-            id: req.params.inviteId,
+            id: req.params.inviteId as string,
             organizationId: req.organizationId!,
           },
         });

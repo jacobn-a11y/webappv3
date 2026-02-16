@@ -3,7 +3,7 @@ import { TranscriptMerger, DEFAULT_TRANSCRIPT_MERGE_MAX_WORDS, DEFAULT_TRUNCATIO
 
 // ─── Mock Prisma ─────────────────────────────────────────────────────────────
 
-function createMockPrisma() {
+function createMockPrisma(): { orgSettings: { findUnique: ReturnType<typeof vi.fn> }; call: { findMany: ReturnType<typeof vi.fn> } } {
   return {
     orgSettings: {
       findUnique: vi.fn(),
@@ -11,7 +11,7 @@ function createMockPrisma() {
     call: {
       findMany: vi.fn(),
     },
-  } as unknown as Parameters<typeof TranscriptMerger.prototype.mergeTranscripts extends (...args: infer A) => unknown ? never : never> & ReturnType<typeof createMockPrisma>;
+  };
 }
 
 // ─── Test Helpers ────────────────────────────────────────────────────────────

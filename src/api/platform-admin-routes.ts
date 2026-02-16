@@ -199,7 +199,7 @@ export function createPlatformAdminRoutes(
       }
 
       try {
-        await configService.deleteModelPricing(provider, req.params.modelId);
+        await configService.deleteModelPricing(provider, req.params.modelId as string);
         res.json({ deleted: true });
       } catch (err) {
         console.error("Platform delete model pricing error:", err);

@@ -11,7 +11,7 @@
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import type { PrismaClient, UserRole } from "@prisma/client";
+import type { PrismaClient, UserRole, LinkedAccount } from "@prisma/client";
 import { requirePermission } from "../middleware/permissions.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -53,24 +53,20 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
       }
 
       try {
-        const linkedAccounts = await prisma.mergeLinkedAccount.findMany({
+        const linkedAccounts = await prisma.linkedAccount.findMany({
           where: { organizationId: req.organizationId },
           orderBy: { createdAt: "asc" },
         });
 
         res.json({
-          integrations: linkedAccounts.map((la) => ({
+          integrations: linkedAccounts.map((la: LinkedAccount) => ({
             id: la.id,
-            merge_account_id: la.mergeAccountId,
+            merge_account_id: la.mergeLinkedAccountId,
             integration: la.integrationSlug,
             category: la.category,
             status: la.status,
-            crm_polling_enabled: la.crmPollingEnabled,
-            last_sync: {
-              started_at: la.lastSyncStartedAt,
-              completed_at: la.lastSyncCompletedAt,
-              error: la.lastSyncError,
-            },
+            last_synced_at: la.lastSyncedAt,
+            initial_sync_done: la.initialSyncDone,
             created_at: la.createdAt,
           })),
         });
@@ -186,13 +182,14 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
         };
 
         // Store the linked account
-        const linkedAccount = await prisma.mergeLinkedAccount.create({
+        const linkedAccount = await prisma.linkedAccount.create({
           data: {
             organizationId: req.organizationId!,
-            mergeAccountId: data.account_token,
+            mergeLinkedAccountId: data.account_token,
+            accountToken: data.account_token,
             integrationSlug: data.integration.slug,
-            category: data.integration.categories[0] ?? "crm",
-            status: "CONNECTED",
+            category: (data.integration.categories[0]?.toUpperCase() === "CRM" ? "CRM" : "RECORDING") as "CRM" | "RECORDING",
+            status: "ACTIVE",
           },
         });
 
@@ -229,9 +226,9 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
       }
 
       try {
-        const linked = await prisma.mergeLinkedAccount.findFirst({
+        const linked = await prisma.linkedAccount.findFirst({
           where: {
-            id: req.params.integrationId,
+            id: req.params.integrationId as string,
             organizationId: req.organizationId!,
           },
         });
@@ -241,12 +238,14 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
           return;
         }
 
-        await prisma.mergeLinkedAccount.update({
+        // Toggle status between ACTIVE and PAUSED to control polling
+        const newStatus = parse.data.enabled ? "ACTIVE" : "PAUSED";
+        await prisma.linkedAccount.update({
           where: { id: linked.id },
-          data: { crmPollingEnabled: parse.data.enabled },
+          data: { status: newStatus },
         });
 
-        res.json({ updated: true, crm_polling_enabled: parse.data.enabled });
+        res.json({ updated: true, polling_enabled: parse.data.enabled });
       } catch (err) {
         console.error("Toggle polling error:", err);
         res.status(500).json({ error: "Failed to toggle CRM polling" });
@@ -273,9 +272,9 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
       }
 
       try {
-        const linked = await prisma.mergeLinkedAccount.findFirst({
+        const linked = await prisma.linkedAccount.findFirst({
           where: {
-            id: req.params.integrationId,
+            id: req.params.integrationId as string,
             organizationId: req.organizationId!,
           },
         });
@@ -285,19 +284,9 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
           return;
         }
 
-        // Mark as syncing
-        await prisma.mergeLinkedAccount.update({
-          where: { id: linked.id },
-          data: {
-            status: "SYNCING",
-            lastSyncStartedAt: new Date(),
-            lastSyncError: null,
-          },
-        });
-
         // Trigger force sync via Merge.dev API
         const response = await fetch(
-          `https://api.merge.dev/api/integrations/linked-accounts/${linked.mergeAccountId}/force-resync`,
+          `https://api.merge.dev/api/integrations/linked-accounts/${linked.mergeLinkedAccountId}/force-resync`,
           {
             method: "POST",
             headers: {
@@ -308,12 +297,9 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
         );
 
         if (!response.ok) {
-          await prisma.mergeLinkedAccount.update({
+          await prisma.linkedAccount.update({
             where: { id: linked.id },
-            data: {
-              status: "ERROR",
-              lastSyncError: `Sync request failed with status ${response.status}`,
-            },
+            data: { status: "ERROR" },
           });
           res.status(502).json({ error: "Failed to trigger sync" });
           return;
@@ -339,9 +325,9 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        const linked = await prisma.mergeLinkedAccount.findFirst({
+        const linked = await prisma.linkedAccount.findFirst({
           where: {
-            id: req.params.integrationId,
+            id: req.params.integrationId as string,
             organizationId: req.organizationId!,
           },
         });
@@ -356,7 +342,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
         if (mergeApiKey) {
           try {
             await fetch(
-              `https://api.merge.dev/api/integrations/linked-accounts/${linked.mergeAccountId}`,
+              `https://api.merge.dev/api/integrations/linked-accounts/${linked.mergeLinkedAccountId}`,
               {
                 method: "DELETE",
                 headers: { "Authorization": `Bearer ${mergeApiKey}` },
@@ -367,7 +353,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
           }
         }
 
-        await prisma.mergeLinkedAccount.delete({ where: { id: linked.id } });
+        await prisma.linkedAccount.delete({ where: { id: linked.id } });
         res.json({ disconnected: true });
       } catch (err) {
         console.error("Disconnect integration error:", err);

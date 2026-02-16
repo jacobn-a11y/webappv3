@@ -243,7 +243,7 @@ export class PricingService {
    */
   async recordUsage(
     organizationId: string,
-    metric: "TRANSCRIPT_MINUTES" | "STORY_GENERATED" | "PAGE_PUBLISHED" | "ACTIVE_SEAT",
+    metric: "TRANSCRIPT_MINUTES" | "STORIES_GENERATED" | "PAGES_PUBLISHED" | "CALLS_PROCESSED",
     quantity: number,
     metadata?: Record<string, unknown>
   ): Promise<void> {
@@ -258,7 +258,6 @@ export class PricingService {
         quantity,
         periodStart,
         periodEnd,
-        metadata: metadata ?? undefined,
       },
     });
 
