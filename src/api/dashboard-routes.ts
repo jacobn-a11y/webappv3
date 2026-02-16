@@ -77,16 +77,27 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
    * GET /api/dashboard/stats
    *
    * Returns aggregate stats for the landing pages dashboard.
+   * Non-admin users get stats scoped to their own pages only.
    */
   router.get("/stats", async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId || !req.userId) {
       res.status(401).json({ error: "Authentication required" });
       return;
     }
 
+    const isAdmin = req.userRole && ["OWNER", "ADMIN"].includes(req.userRole);
+
     try {
-      const stats = await editor.getDashboardStats(req.organizationId);
-      res.json(stats);
+      if (isAdmin) {
+        const stats = await editor.getDashboardStats(req.organizationId);
+        res.json(stats);
+      } else {
+        const stats = await editor.getDashboardStatsForUser(
+          req.organizationId,
+          req.userId
+        );
+        res.json(stats);
+      }
     } catch (err) {
       console.error("Dashboard stats error:", err);
       res.status(500).json({ error: "Failed to load dashboard stats" });
@@ -97,29 +108,66 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
    * GET /api/dashboard/pages
    *
    * Lists all landing pages for the org with optional filters.
-   * Query params: status, created_by, search
+   * Query params: status, visibility, created_by, search, sort_by, sort_dir
+   *
+   * Non-admin users only see their own pages (created_by is forced to their userId).
+   * Admin/Owner users see all pages unless they explicitly filter by created_by.
    */
   router.get("/pages", async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId || !req.userId) {
       res.status(401).json({ error: "Authentication required" });
       return;
     }
 
+    const isAdmin = req.userRole && ["OWNER", "ADMIN"].includes(req.userRole);
+
+    // Non-admin users can only see their own pages
+    let createdByFilter = req.query.created_by as string | undefined;
+    if (!isAdmin) {
+      createdByFilter = req.userId;
+    }
+
     try {
       const pages = await editor.listForOrg(req.organizationId, {
-        status: req.query.status as string | undefined as
+        status: req.query.status as
           | "DRAFT"
           | "PUBLISHED"
           | "ARCHIVED"
           | undefined,
-        createdById: req.query.created_by as string | undefined,
+        visibility: req.query.visibility as
+          | "PRIVATE"
+          | "SHARED_WITH_LINK"
+          | undefined,
+        createdById: createdByFilter,
         search: req.query.search as string | undefined,
+        sortBy: req.query.sort_by as string | undefined,
+        sortDir: req.query.sort_dir as "asc" | "desc" | undefined,
       });
 
       res.json({ pages });
     } catch (err) {
       console.error("Dashboard pages error:", err);
       res.status(500).json({ error: "Failed to load pages" });
+    }
+  });
+
+  /**
+   * GET /api/dashboard/creators
+   *
+   * Returns the list of distinct page creators for the org (for filter dropdowns).
+   */
+  router.get("/creators", async (req: AuthReq, res: Response) => {
+    if (!req.organizationId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+
+    try {
+      const creators = await editor.getCreatorsForOrg(req.organizationId);
+      res.json({ creators });
+    } catch (err) {
+      console.error("Dashboard creators error:", err);
+      res.status(500).json({ error: "Failed to load creators" });
     }
   });
 
