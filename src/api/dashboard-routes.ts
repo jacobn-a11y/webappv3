@@ -337,23 +337,21 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        const orgUsers = await prisma.orgMembership.findMany({
+        const orgUsers = await prisma.user.findMany({
           where: { organizationId: req.organizationId! },
-          include: {
-            user: { select: { id: true, name: true, email: true } },
-          },
+          select: { id: true, name: true, email: true, role: true },
         });
 
         const users = await Promise.all(
-          orgUsers.map(async (m) => {
+          orgUsers.map(async (m: { id: string; name: string | null; email: string; role: string }) => {
             const grants = await accessService.listUserAccess(
-              m.user.id,
+              m.id,
               req.organizationId!
             );
             return {
-              user_id: m.user.id,
-              user_name: m.user.name,
-              user_email: m.user.email,
+              user_id: m.id,
+              user_name: m.name,
+              user_email: m.email,
               role: m.role,
               grants: grants.map((g) => ({
                 id: g.id,
@@ -559,19 +557,22 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
       }
 
       try {
-        const reports = await prisma.crmReport.findMany({
+        const accessRecords = await prisma.userAccountAccess.findMany({
           where: {
             organizationId: req.organizationId!,
-            provider: provider as CRMProvider,
+            scopeType: "CRM_REPORT",
+            crmProvider: provider as CRMProvider,
+            crmReportId: { not: null },
           },
-          select: { id: true, name: true, reportId: true, provider: true },
-          orderBy: { name: "asc" },
+          select: { crmReportId: true, crmReportName: true, crmProvider: true },
+          distinct: ["crmReportId"],
+          orderBy: { crmReportName: "asc" },
         });
         res.json({
-          reports: reports.map((r) => ({
-            id: r.reportId,
-            name: r.name,
-            provider: r.provider,
+          reports: accessRecords.map((r: { crmReportId: string | null; crmReportName: string | null; crmProvider: string | null }) => ({
+            id: r.crmReportId,
+            name: r.crmReportName,
+            provider: r.crmProvider,
           })),
         });
       } catch (err) {
