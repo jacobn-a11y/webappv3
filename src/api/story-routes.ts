@@ -7,8 +7,8 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { StoryBuilder } from "../services/story-builder.js";
-import type { PrismaClient, TranscriptTruncationMode } from "@prisma/client";
-import { TranscriptMerger } from "../services/transcript-merger.js";
+import type { PrismaClient } from "@prisma/client";
+import type { NotificationService } from "../services/notification-service.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -19,19 +19,12 @@ const BuildStorySchema = z.object({
   title: z.string().optional(),
 });
 
-const MergeTranscriptsSchema = z.object({
-  account_id: z.string().min(1),
-  max_words: z.number().int().min(1000).optional(),
-  truncation_mode: z.enum(["OLDEST_FIRST", "NEWEST_FIRST"]).optional(),
-  after_date: z.string().datetime().optional(),
-  before_date: z.string().datetime().optional(),
-});
-
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
 export function createStoryRoutes(
   storyBuilder: StoryBuilder,
-  prisma: PrismaClient
+  prisma: PrismaClient,
+  notificationService?: NotificationService
 ): Router {
   const router = Router();
 
@@ -68,6 +61,14 @@ export function createStoryRoutes(
         title,
       });
 
+      // Send notification that story is ready
+      const userId = (req as Record<string, unknown>).userId as string;
+      if (notificationService && userId) {
+        notificationService
+          .notifyStoryCompleted(organizationId, userId, account_id, result.title)
+          .catch((err) => console.error("Story notification error:", err));
+      }
+
       res.json({
         title: result.title,
         markdown: result.markdownBody,
@@ -79,9 +80,6 @@ export function createStoryRoutes(
           metric_value: q.metricValue,
           call_id: q.callId,
         })),
-        _links: {
-          create_landing_page: `/editor/new?storyId=${result.id}&title=${encodeURIComponent(result.title)}`,
-        },
       });
     } catch (err) {
       console.error("Story build error:", err);
@@ -129,69 +127,11 @@ export function createStoryRoutes(
             metric_type: q.metricType,
             metric_value: q.metricValue,
           })),
-          _links: {
-            create_landing_page: `/editor/new?storyId=${s.id}&title=${encodeURIComponent(s.title)}`,
-          },
         })),
       });
     } catch (err) {
       console.error("Story retrieval error:", err);
       res.status(500).json({ error: "Failed to retrieve stories" });
-    }
-  });
-
-  // ── Transcript Merging ───────────────────────────────────────────────
-
-  const merger = new TranscriptMerger(prisma);
-
-  /**
-   * POST /api/stories/merge-transcripts
-   *
-   * Merges all transcripts for an account into a single Markdown document.
-   * Respects org-level word count limits and truncation settings.
-   * Returns the merged markdown plus metadata about truncation.
-   */
-  router.post("/merge-transcripts", async (req: Request, res: Response) => {
-    const parseResult = MergeTranscriptsSchema.safeParse(req.body);
-    if (!parseResult.success) {
-      res.status(400).json({
-        error: "validation_error",
-        details: parseResult.error.issues,
-      });
-      return;
-    }
-
-    const organizationId = (req as Record<string, unknown>).organizationId as string;
-    if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
-
-    const { account_id, max_words, truncation_mode, after_date, before_date } =
-      parseResult.data;
-
-    try {
-      const result = await merger.mergeTranscripts({
-        accountId: account_id,
-        organizationId,
-        maxWords: max_words,
-        truncationMode: truncation_mode as TranscriptTruncationMode | undefined,
-        afterDate: after_date ? new Date(after_date) : undefined,
-        beforeDate: before_date ? new Date(before_date) : undefined,
-      });
-
-      res.json({
-        markdown: result.markdown,
-        word_count: result.wordCount,
-        total_calls: result.totalCalls,
-        included_calls: result.includedCalls,
-        truncated: result.truncated,
-        truncation_boundary: result.truncationBoundary?.toISOString() ?? null,
-        truncation_mode: result.truncationMode,
-      });
-    } catch (err) {
-      console.error("Transcript merge error:", err);
-      res.status(500).json({ error: "Failed to merge transcripts" });
     }
   });
 
