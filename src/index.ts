@@ -35,6 +35,10 @@ import {
 } from "./middleware/billing.js";
 import { requestIdMiddleware } from "./middleware/request-id.js";
 import { requestLoggingMiddleware } from "./middleware/request-logging.js";
+import { createApiKeyAuth, requireScope } from "./middleware/api-key-auth.js";
+import { createRateLimiter } from "./middleware/rate-limiter.js";
+import { createApiUsageLogger } from "./middleware/api-usage-logger.js";
+import { createApiKeyRoutes } from "./api/api-key-routes.js";
 import { AITagger } from "./services/ai-tagger.js";
 import { RAGEngine } from "./services/rag-engine.js";
 import { StoryBuilder } from "./services/story-builder.js";
@@ -174,9 +178,26 @@ app.post(
 app.use("/s", createPublicPageRoutes(prisma));
 
 // ─── Admin Metrics ───────────────────────────────────────────────────────────
-// Mounted before trial gate — admin metrics should be accessible with
-// admin-level auth only (in production, add appropriate auth middleware).
 app.use("/api/admin/metrics", createAdminMetricsRoutes(prisma));
+
+// ─── Public API (API-key authenticated, for third-party chatbot consumers) ──
+
+const apiKeyAuth = createApiKeyAuth(prisma);
+const rateLimiter = createRateLimiter({
+  redisUrl: REDIS_URL,
+  maxRequests: 100,
+  windowSeconds: 60,
+});
+const apiUsageLogger = createApiUsageLogger(prisma);
+
+app.use(
+  "/api/v1/rag",
+  apiKeyAuth,
+  requireScope("rag:query"),
+  rateLimiter,
+  apiUsageLogger,
+  createRAGRoutes(ragEngine)
+);
 
 // ─── Auth Routes (public — no JWT required) ─────────────────────────────────
 
@@ -192,7 +213,10 @@ const trialGate = createTrialGate(prisma, stripe);
 // Billing
 app.post("/api/billing/checkout", createCheckoutHandler(prisma, stripe));
 
-// RAG Chatbot Connector (behind trial gate)
+// API Key Management (behind auth + trial gate, for org admins)
+app.use("/api/keys", trialGate, createApiKeyRoutes(prisma));
+
+// RAG Chatbot Connector — internal use (behind trial gate)
 app.use("/api/rag", trialGate, createRAGRoutes(ragEngine));
 
 // Story Builder (behind trial gate)
@@ -213,6 +237,8 @@ app.listen(PORT, () => {
     endpoints: {
       health: `http://localhost:${PORT}/api/health`,
       rag: `http://localhost:${PORT}/api/rag/query`,
+      publicRag: `http://localhost:${PORT}/api/v1/rag/query`,
+      apiKeys: `http://localhost:${PORT}/api/keys`,
       stories: `http://localhost:${PORT}/api/stories/build`,
       pages: `http://localhost:${PORT}/api/pages`,
       dashboard: `http://localhost:${PORT}/api/dashboard`,

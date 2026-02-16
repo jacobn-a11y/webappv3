@@ -25,6 +25,7 @@ model Organization {
   stories      Story[]
   landingPages LandingPage[]
   orgSettings  OrgSettings?
+  apiKeys      ApiKey[]
 
   @@map("organizations")
 }
@@ -484,4 +485,51 @@ enum AccountScopeType {
 enum CRMProvider {
   SALESFORCE
   HUBSPOT
+}
+
+// ─── API Keys (External RAG Consumers) ──────────────────────────────────────
+
+model ApiKey {
+  id               String    @id @default(cuid())
+  organizationId   String
+  keyHash          String    @unique  // SHA-256 hash of the full key
+  keyPrefix        String             // first 8 chars for display (e.g., "se_live_ab...")
+  label            String             // human-readable label, e.g. "Intercom chatbot"
+  scopes           String[] @default(["rag:query"])
+  expiresAt        DateTime?
+  revokedAt        DateTime?
+  lastUsedAt       DateTime?
+
+  // Key rotation: points to the new key that replaced this one
+  replacedByKeyId   String?   @unique
+  gracePeriodEndsAt DateTime? // old key still works until this time
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization  Organization @relation(fields: [organizationId], references: [id])
+  replacedByKey ApiKey?      @relation("KeyRotation", fields: [replacedByKeyId], references: [id])
+  replacesKey   ApiKey?      @relation("KeyRotation")
+  usageLogs     ApiUsageLog[]
+
+  @@index([organizationId])
+  @@map("api_keys")
+}
+
+model ApiUsageLog {
+  id             String   @id @default(cuid())
+  apiKeyId       String
+  organizationId String
+  endpoint       String
+  method         String
+  statusCode     Int
+  tokensUsed     Int?
+  responseTimeMs Int?
+  createdAt      DateTime @default(now())
+
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id])
+
+  @@index([apiKeyId, createdAt])
+  @@index([organizationId, createdAt])
+  @@map("api_usage_logs")
 }
