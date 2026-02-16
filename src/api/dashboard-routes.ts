@@ -15,8 +15,7 @@ import {
   PermissionManager,
   requirePermission,
 } from "../middleware/permissions.js";
-import logger from "../lib/logger.js";
-import { Sentry } from "../lib/sentry.js";
+import type { PricingService } from "../services/pricing.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -44,6 +43,25 @@ const GrantPermissionSchema = z.object({
   ]),
 });
 
+const UpdateBillingConfigSchema = z.object({
+  billing_enabled: z.boolean().optional(),
+  pricing_model: z.enum(["METERED", "PER_SEAT", "METERED_PLUS_SEAT"]).optional(),
+  billing_channel: z.enum(["SELF_SERVE", "SALES_LED"]).optional(),
+  seat_limit: z.number().int().min(1).nullable().optional(),
+});
+
+const CreateSalesLedSubscriptionSchema = z.object({
+  plan: z.enum(["STARTER", "PROFESSIONAL", "ENTERPRISE"]),
+  pricing_model: z.enum(["METERED", "PER_SEAT", "METERED_PLUS_SEAT"]),
+  billing_interval: z.enum(["MONTHLY", "QUARTERLY", "ANNUAL"]),
+  seat_count: z.number().int().min(1).optional(),
+  seat_unit_price: z.number().int().min(0).optional(),
+  metered_unit_price: z.number().int().min(0).optional(),
+  included_units: z.number().int().min(0).optional(),
+  contract_value: z.number().int().min(0).optional(),
+  contract_end_date: z.string().datetime().optional(),
+});
+
 const GrantAccountAccessSchema = z.object({
   user_id: z.string().min(1),
   scope_type: z.enum(["ALL_ACCOUNTS", "SINGLE_ACCOUNT", "ACCOUNT_LIST", "CRM_REPORT"]),
@@ -65,7 +83,10 @@ interface AuthReq extends Request {
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
-export function createDashboardRoutes(prisma: PrismaClient): Router {
+export function createDashboardRoutes(
+  prisma: PrismaClient,
+  pricingService?: PricingService
+): Router {
   const router = Router();
   const editor = new LandingPageEditor(prisma);
   const permManager = new PermissionManager(prisma);
@@ -87,8 +108,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
       const stats = await editor.getDashboardStats(req.organizationId);
       res.json(stats);
     } catch (err) {
-      logger.error("Dashboard stats error", { error: err });
-      Sentry.captureException(err);
+      console.error("Dashboard stats error:", err);
       res.status(500).json({ error: "Failed to load dashboard stats" });
     }
   });
@@ -118,8 +138,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
 
       res.json({ pages });
     } catch (err) {
-      logger.error("Dashboard pages error", { error: err });
-      Sentry.captureException(err);
+      console.error("Dashboard pages error:", err);
       res.status(500).json({ error: "Failed to load pages" });
     }
   });
@@ -151,7 +170,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           },
         });
       } catch (err) {
-        logger.error("Get settings error", { error: err });
+        console.error("Get settings error:", err);
         res.status(500).json({ error: "Failed to load settings" });
       }
     }
@@ -184,7 +203,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
 
         res.json({ updated: true });
       } catch (err) {
-        logger.error("Update settings error", { error: err });
+        console.error("Update settings error:", err);
         res.status(500).json({ error: "Failed to update settings" });
       }
     }
@@ -207,7 +226,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
         );
         res.json({ users: matrix });
       } catch (err) {
-        logger.error("Get permissions error", { error: err });
+        console.error("Get permissions error:", err);
         res.status(500).json({ error: "Failed to load permissions" });
       }
     }
@@ -236,7 +255,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
         );
         res.json({ granted: true });
       } catch (err) {
-        logger.error("Grant permission error", { error: err });
+        console.error("Grant permission error:", err);
         res.status(500).json({ error: "Failed to grant permission" });
       }
     }
@@ -264,7 +283,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
         );
         res.json({ revoked: true });
       } catch (err) {
-        logger.error("Revoke permission error", { error: err });
+        console.error("Revoke permission error:", err);
         res.status(500).json({ error: "Failed to revoke permission" });
       }
     }
@@ -304,7 +323,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
           })),
         });
       } catch (err) {
-        logger.error("Get access error", { error: err });
+        console.error("Get access error:", err);
         res.status(500).json({ error: "Failed to load access grants" });
       }
     }
@@ -355,7 +374,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
 
         res.json({ granted: true, grant_id: grantId });
       } catch (err) {
-        logger.error("Grant access error", { error: err });
+        console.error("Grant access error:", err);
         res.status(500).json({ error: "Failed to grant account access" });
       }
     }
@@ -374,7 +393,7 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
         await accessService.revokeAccess(req.params.grantId);
         res.json({ revoked: true });
       } catch (err) {
-        logger.error("Revoke access error", { error: err });
+        console.error("Revoke access error:", err);
         res.status(500).json({ error: "Failed to revoke access" });
       }
     }
@@ -393,8 +412,157 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
         const result = await accessService.syncCrmReportGrant(req.params.grantId);
         res.json({ synced: true, account_count: result.accountCount });
       } catch (err) {
-        logger.error("Sync CRM report error", { error: err });
+        console.error("Sync CRM report error:", err);
         res.status(500).json({ error: "Failed to sync CRM report" });
+      }
+    }
+  );
+
+  // ── Admin: Billing & Pricing ────────────────────────────────────────
+
+  /**
+   * GET /api/dashboard/billing
+   *
+   * Returns billing overview for the org (plan, pricing model, usage, seats).
+   */
+  router.get(
+    "/billing",
+    requirePermission(prisma, "manage_permissions"),
+    async (req: AuthReq, res: Response) => {
+      if (!pricingService) {
+        res.json({
+          billing: {
+            billingEnabled: false,
+            message: "Pricing service not configured.",
+          },
+        });
+        return;
+      }
+
+      try {
+        const overview = await pricingService.getBillingOverview(
+          req.organizationId!
+        );
+        res.json({ billing: overview });
+      } catch (err) {
+        console.error("Get billing error:", err);
+        res.status(500).json({ error: "Failed to load billing info" });
+      }
+    }
+  );
+
+  /**
+   * PATCH /api/dashboard/billing
+   *
+   * Updates billing configuration for the org (enable/disable billing,
+   * change pricing model or channel, set seat limits).
+   * Admin only.
+   */
+  router.patch(
+    "/billing",
+    requirePermission(prisma, "manage_permissions"),
+    async (req: AuthReq, res: Response) => {
+      const parse = UpdateBillingConfigSchema.safeParse(req.body);
+      if (!parse.success) {
+        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        return;
+      }
+
+      try {
+        const data: Record<string, unknown> = {};
+        if (parse.data.billing_enabled !== undefined) {
+          data.billingEnabled = parse.data.billing_enabled;
+        }
+        if (parse.data.pricing_model !== undefined) {
+          data.pricingModel = parse.data.pricing_model;
+        }
+        if (parse.data.billing_channel !== undefined) {
+          data.billingChannel = parse.data.billing_channel;
+        }
+        if (parse.data.seat_limit !== undefined) {
+          data.seatLimit = parse.data.seat_limit;
+        }
+
+        await prisma.organization.update({
+          where: { id: req.organizationId! },
+          data,
+        });
+
+        res.json({ updated: true });
+      } catch (err) {
+        console.error("Update billing error:", err);
+        res.status(500).json({ error: "Failed to update billing config" });
+      }
+    }
+  );
+
+  /**
+   * POST /api/dashboard/billing/sales-led
+   *
+   * Creates a sales-led (B2B) subscription for the org. Used by internal
+   * sales/ops teams to onboard enterprise customers without self-checkout.
+   */
+  router.post(
+    "/billing/sales-led",
+    requirePermission(prisma, "manage_permissions"),
+    async (req: AuthReq, res: Response) => {
+      if (!pricingService) {
+        res.status(400).json({ error: "Pricing service not configured" });
+        return;
+      }
+
+      const parse = CreateSalesLedSubscriptionSchema.safeParse(req.body);
+      if (!parse.success) {
+        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        return;
+      }
+
+      try {
+        const subscriptionId = await pricingService.createSalesLedSubscription(
+          req.organizationId!,
+          {
+            plan: parse.data.plan,
+            pricingModel: parse.data.pricing_model,
+            billingInterval: parse.data.billing_interval,
+            seatCount: parse.data.seat_count,
+            seatUnitPrice: parse.data.seat_unit_price,
+            meteredUnitPrice: parse.data.metered_unit_price,
+            includedUnits: parse.data.included_units,
+            contractValue: parse.data.contract_value,
+            contractEndDate: parse.data.contract_end_date
+              ? new Date(parse.data.contract_end_date)
+              : undefined,
+          }
+        );
+
+        res.json({ created: true, subscription_id: subscriptionId });
+      } catch (err) {
+        console.error("Create sales-led subscription error:", err);
+        res.status(500).json({ error: "Failed to create subscription" });
+      }
+    }
+  );
+
+  /**
+   * GET /api/dashboard/billing/seats
+   *
+   * Returns current seat usage for the org.
+   */
+  router.get(
+    "/billing/seats",
+    requirePermission(prisma, "manage_permissions"),
+    async (req: AuthReq, res: Response) => {
+      if (!pricingService) {
+        res.json({ seats: { current: 0, limit: null, available: null } });
+        return;
+      }
+
+      try {
+        const seats = await pricingService.getSeatStatus(req.organizationId!);
+        res.json({ seats });
+      } catch (err) {
+        console.error("Get seats error:", err);
+        res.status(500).json({ error: "Failed to load seat info" });
       }
     }
   );
