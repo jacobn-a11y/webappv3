@@ -9,15 +9,12 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
 import { LandingPageEditor } from "../services/landing-page-editor.js";
-import { CompanyScrubber } from "../services/company-scrubber.js";
+import { renderLandingPageHtml } from "./public-page-renderer.js";
 import {
   requireLandingPagesEnabled,
   requirePermission,
   requirePageOwnerOrPermission,
 } from "../middleware/permissions.js";
-import logger from "../lib/logger.js";
-import { metrics } from "../lib/metrics.js";
-import { Sentry } from "../lib/sentry.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -142,8 +139,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           total_call_hours: page.totalCallHours,
         });
       } catch (err) {
-        logger.error("Create landing page error", { error: err });
-        Sentry.captureException(err);
+        console.error("Create landing page error:", err);
         res.status(500).json({ error: "Failed to create landing page" });
       }
     }
@@ -188,7 +184,27 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           })),
         });
       } catch (err) {
-        logger.error("Get landing page error", { error: err });
+        console.error("Get landing page error:", err);
+        res.status(404).json({ error: "Landing page not found" });
+      }
+    }
+  );
+
+  // ── PREVIEW (render public page from current draft) ─────────────────
+
+  router.get(
+    "/:pageId/preview",
+    requirePageOwnerOrPermission(prisma),
+    async (req: AuthReq, res: Response) => {
+      try {
+        const preview = await editor.getPreview(req.params.pageId);
+
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("X-Robots-Tag", "noindex, nofollow");
+        res.setHeader("Cache-Control", "private, no-store");
+        res.send(renderLandingPageHtml(preview));
+      } catch (err) {
+        console.error("Preview landing page error:", err);
         res.status(404).json({ error: "Landing page not found" });
       }
     }
@@ -219,7 +235,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
 
         res.json({ updated: true });
       } catch (err) {
-        logger.error("Update landing page error", { error: err });
+        console.error("Update landing page error:", err);
         res.status(500).json({ error: "Failed to update landing page" });
       }
     }
@@ -246,135 +262,14 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
             : undefined,
         });
 
-        metrics.incrementLandingPagesPublished();
-
         res.json({
           published: true,
           slug: result.slug,
           url: result.url,
         });
       } catch (err) {
-        logger.error("Publish landing page error", { error: err });
-        Sentry.captureException(err);
+        console.error("Publish landing page error:", err);
         res.status(500).json({ error: "Failed to publish landing page" });
-      }
-    }
-  );
-
-  // ── PREVIEW SCRUB (side-by-side comparison before publish) ─────────
-
-  router.post(
-    "/:pageId/preview-scrub",
-    requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const page = await prisma.landingPage.findUniqueOrThrow({
-          where: { id: req.params.pageId },
-          include: {
-            story: { select: { accountId: true } },
-          },
-        });
-
-        const scrubber = new CompanyScrubber(prisma);
-        const skipScrub = page.includeCompanyName;
-
-        const bodyScrub = await scrubber.scrubForAccount(
-          page.story.accountId,
-          page.editableBody,
-          { skipScrub }
-        );
-
-        const titleScrub = await scrubber.scrubForAccount(
-          page.story.accountId,
-          page.title,
-          { skipScrub }
-        );
-
-        const subtitleScrub = page.subtitle
-          ? await scrubber.scrubForAccount(
-              page.story.accountId,
-              page.subtitle,
-              { skipScrub }
-            )
-          : null;
-
-        res.json({
-          original: {
-            title: page.title,
-            subtitle: page.subtitle,
-            body: page.editableBody,
-          },
-          scrubbed: {
-            title: titleScrub.scrubbedText,
-            subtitle: subtitleScrub?.scrubbedText ?? null,
-            body: bodyScrub.scrubbedText,
-          },
-          replacements_made: bodyScrub.replacementsMade + titleScrub.replacementsMade + (subtitleScrub?.replacementsMade ?? 0),
-          terms_replaced: [
-            ...new Set([
-              ...bodyScrub.termsReplaced,
-              ...titleScrub.termsReplaced,
-              ...(subtitleScrub?.termsReplaced ?? []),
-            ]),
-          ],
-          include_company_name: page.includeCompanyName,
-        });
-      } catch (err) {
-        console.error("Preview scrub error:", err);
-        res.status(500).json({ error: "Failed to generate scrub preview" });
-      }
-    }
-  );
-
-  // ── PUBLISH OPTIONS (permissions & defaults for the publish modal) ──
-
-  router.get(
-    "/:pageId/publish-options",
-    requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const page = await prisma.landingPage.findUniqueOrThrow({
-          where: { id: req.params.pageId },
-          select: {
-            id: true,
-            status: true,
-            visibility: true,
-            password: true,
-            expiresAt: true,
-            includeCompanyName: true,
-          },
-        });
-
-        // Check if the user has PUBLISH_NAMED_LANDING_PAGE permission
-        let canPublishNamed = false;
-        const userRole = req.userRole;
-        const ADMIN_ROLES = ["OWNER", "ADMIN"];
-        if (userRole && ADMIN_ROLES.includes(userRole)) {
-          canPublishNamed = true;
-        } else if (req.userId) {
-          const namedPerm = await prisma.userPermission.findUnique({
-            where: {
-              userId_permission: {
-                userId: req.userId,
-                permission: "PUBLISH_NAMED_LANDING_PAGE",
-              },
-            },
-          });
-          canPublishNamed = !!namedPerm;
-        }
-
-        res.json({
-          page_id: page.id,
-          current_status: page.status,
-          current_visibility: page.visibility,
-          has_password: !!page.password,
-          current_expires_at: page.expiresAt,
-          include_company_name: page.includeCompanyName,
-          can_publish_named: canPublishNamed,
-        });
-      } catch (err) {
-        console.error("Publish options error:", err);
-        res.status(500).json({ error: "Failed to load publish options" });
       }
     }
   );
@@ -389,7 +284,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
         await editor.unpublish(req.params.pageId);
         res.json({ unpublished: true });
       } catch (err) {
-        logger.error("Unpublish error", { error: err });
+        console.error("Unpublish error:", err);
         res.status(500).json({ error: "Failed to unpublish" });
       }
     }
@@ -405,7 +300,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
         await editor.archive(req.params.pageId);
         res.json({ archived: true });
       } catch (err) {
-        logger.error("Archive error", { error: err });
+        console.error("Archive error:", err);
         res.status(500).json({ error: "Failed to archive" });
       }
     }
@@ -421,7 +316,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
         await prisma.landingPage.delete({ where: { id: req.params.pageId } });
         res.json({ deleted: true });
       } catch (err) {
-        logger.error("Delete landing page error", { error: err });
+        console.error("Delete landing page error:", err);
         res.status(500).json({ error: "Failed to delete landing page" });
       }
     }

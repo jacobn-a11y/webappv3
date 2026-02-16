@@ -357,6 +357,86 @@ export class LandingPageEditor {
   }
 
   /**
+   * Generates a preview of the landing page as it would appear publicly.
+   * Runs the company scrubber on the current editable content (title,
+   * subtitle, body, callout boxes) and returns the result in the same
+   * shape consumed by `renderLandingPageHtml`.
+   */
+  async getPreview(pageId: string): Promise<{
+    title: string;
+    subtitle: string | null;
+    body: string;
+    calloutBoxes: CalloutBox[];
+    totalCallHours: number;
+    heroImageUrl: string | null;
+    customCss: string | null;
+  }> {
+    const page = await this.prisma.landingPage.findUniqueOrThrow({
+      where: { id: pageId },
+      include: { story: { select: { accountId: true } } },
+    });
+
+    const skipScrub = page.includeCompanyName;
+    const scrubOpts = { skipScrub };
+
+    // Scrub body
+    const bodyScrub = await this.scrubber.scrubForAccount(
+      page.story.accountId,
+      page.editableBody,
+      scrubOpts
+    );
+
+    // Scrub title
+    const titleScrub = await this.scrubber.scrubForAccount(
+      page.story.accountId,
+      page.title,
+      scrubOpts
+    );
+
+    // Scrub subtitle
+    const subtitleScrub = page.subtitle
+      ? await this.scrubber.scrubForAccount(
+          page.story.accountId,
+          page.subtitle,
+          scrubOpts
+        )
+      : null;
+
+    // Scrub callout boxes
+    let previewCallouts: CalloutBox[] = [];
+    if (page.calloutBoxes && Array.isArray(page.calloutBoxes)) {
+      const callouts = page.calloutBoxes as unknown as CalloutBox[];
+      for (const box of callouts) {
+        const boxBody = await this.scrubber.scrubForAccount(
+          page.story.accountId,
+          box.body,
+          scrubOpts
+        );
+        const boxTitle = await this.scrubber.scrubForAccount(
+          page.story.accountId,
+          box.title,
+          scrubOpts
+        );
+        previewCallouts.push({
+          ...box,
+          title: boxTitle.scrubbedText,
+          body: boxBody.scrubbedText,
+        });
+      }
+    }
+
+    return {
+      title: titleScrub.scrubbedText,
+      subtitle: subtitleScrub?.scrubbedText ?? null,
+      body: bodyScrub.scrubbedText,
+      calloutBoxes: previewCallouts,
+      totalCallHours: page.totalCallHours,
+      heroImageUrl: page.heroImageUrl,
+      customCss: page.customCss,
+    };
+  }
+
+  /**
    * Dashboard: list all landing pages for an org.
    * Supports filtering by status, visibility, creator, and title search.
    * Supports sorting by any summary field.
