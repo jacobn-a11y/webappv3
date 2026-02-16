@@ -13,7 +13,7 @@
  */
 
 import type { Request, Response, NextFunction } from "express";
-import type { PrismaClient, PermissionType, UserRole, TranscriptTruncationMode } from "@prisma/client";
+import type { PrismaClient, PermissionType, UserRole } from "@prisma/client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -37,7 +37,7 @@ const ACTION_PERMISSION_MAP: Record<string, PermissionType> = {
   delete_any: "DELETE_ANY_LANDING_PAGE",
   manage_permissions: "MANAGE_PERMISSIONS",
   view_analytics: "VIEW_ANALYTICS",
-  manage_ai_settings: "MANAGE_AI_SETTINGS",
+  manage_entity_resolution: "MANAGE_ENTITY_RESOLUTION",
 };
 
 // ─── Middleware Factories ────────────────────────────────────────────────────
@@ -281,22 +281,15 @@ export class PermissionManager {
       allowedPublishers?: UserRole[];
       maxPagesPerUser?: number | null;
       companyNameReplacements?: Record<string, string>;
-      transcriptMergeMaxWords?: number;
-      transcriptTruncationMode?: TranscriptTruncationMode;
     }
   ): Promise<void> {
-    // Filter out undefined values to avoid overwriting with undefined
-    const cleanUpdates = Object.fromEntries(
-      Object.entries(updates).filter(([, v]) => v !== undefined)
-    );
-
     await this.prisma.orgSettings.upsert({
       where: { organizationId },
       create: {
         organizationId,
-        ...cleanUpdates,
+        ...updates,
       },
-      update: cleanUpdates,
+      update: updates,
     });
   }
 }

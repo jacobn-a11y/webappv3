@@ -142,6 +142,9 @@ model Call {
   recordingUrl     String?
   duration         Int?         // seconds
   occurredAt       DateTime
+  matchMethod      MatchMethod  @default(NONE)
+  matchConfidence  Float        @default(0) // 0.0–1.0; entity resolution confidence
+  dismissedAt      DateTime?    // set when manually dismissed from review queue
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
@@ -153,7 +156,15 @@ model Call {
 
   @@index([organizationId, accountId])
   @@index([organizationId, occurredAt])
+  @@index([organizationId, matchMethod, matchConfidence])
   @@map("calls")
+}
+
+enum MatchMethod {
+  NONE
+  EMAIL_DOMAIN
+  FUZZY_NAME
+  MANUAL
 }
 
 enum CallProvider {
@@ -443,6 +454,7 @@ enum PermissionType {
   DELETE_ANY_LANDING_PAGE
   MANAGE_PERMISSIONS
   VIEW_ANALYTICS
+  MANAGE_ENTITY_RESOLUTION    // resolve unmatched calls, merge accounts
 }
 
 // ─── Account-Scoped Access Control ───────────────────────────────────────────
