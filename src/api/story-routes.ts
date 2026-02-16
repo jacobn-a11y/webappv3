@@ -8,15 +8,15 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { StoryBuilder } from "../services/story-builder.js";
 import type { PrismaClient } from "@prisma/client";
-import { VALID_FUNNEL_STAGES, ALL_TOPICS } from "../types/taxonomy.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 const BuildStorySchema = z.object({
   account_id: z.string().min(1),
-  funnel_stages: z.array(z.enum(VALID_FUNNEL_STAGES as unknown as [string, ...string[]])).optional(),
-  filter_topics: z.array(z.enum(ALL_TOPICS as unknown as [string, ...string[]])).optional(),
-  title: z.string().max(500).optional(),
+  funnel_stages: z.array(z.string()).optional(),
+  filter_topics: z.array(z.string()).optional(),
+  title: z.string().optional(),
+  format: z.string().optional(),
 });
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
