@@ -4,17 +4,14 @@ import path from "path";
 export default defineConfig({
   test: {
     globals: true,
-    environment: "node",
+    root: ".",
     include: ["tests/**/*.test.ts"],
-    coverage: {
-      provider: "v8",
-      include: ["src/**/*.ts"],
-      exclude: ["src/index.ts", "src/types/**"],
-    },
+    testTimeout: 15_000,
+    hookTimeout: 10_000,
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(__dirname, "src"),
     },
   },
 });
