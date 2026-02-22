@@ -115,6 +115,9 @@ export function DashboardPagesPage() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
+  // Inline error state (replaces native alert)
+  const [actionError, setActionError] = useState<string | null>(null);
+
   // Load data
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -280,10 +283,12 @@ export function DashboardPagesPage() {
           break;
       }
       setConfirmAction(null);
+      setActionError(null);
       // Reload data after action
       await loadData();
     } catch (err) {
-      alert(
+      setConfirmAction(null);
+      setActionError(
         "Action failed: " +
           (err instanceof Error ? err.message : "Unknown error")
       );
@@ -397,6 +402,7 @@ export function DashboardPagesPage() {
               strokeWidth="2"
               width="20"
               height="20"
+              aria-hidden="true"
             >
               <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
               <polyline points="14,2 14,8 20,8" />
@@ -418,6 +424,7 @@ export function DashboardPagesPage() {
               strokeWidth="2"
               width="20"
               height="20"
+              aria-hidden="true"
             >
               <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
               <polyline points="22,4 12,14.01 9,11.01" />
@@ -436,6 +443,7 @@ export function DashboardPagesPage() {
               strokeWidth="2"
               width="20"
               height="20"
+              aria-hidden="true"
             >
               <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
               <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -454,6 +462,7 @@ export function DashboardPagesPage() {
               strokeWidth="2"
               width="20"
               height="20"
+              aria-hidden="true"
             >
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
               <circle cx="12" cy="12" r="3" />
@@ -477,6 +486,7 @@ export function DashboardPagesPage() {
               strokeWidth="2"
               width="16"
               height="16"
+              aria-hidden="true"
             >
               <circle cx="11" cy="11" r="8" />
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -541,6 +551,28 @@ export function DashboardPagesPage() {
           </button>
         )}
       </div>
+
+      {/* Accessible result count announcement */}
+      <div className="sr-only" aria-live="polite" role="status">
+        {hasActiveFilters
+          ? `${filteredPages.length} page${filteredPages.length !== 1 ? "s" : ""} found`
+          : ""}
+      </div>
+
+      {/* Action error banner */}
+      {actionError && (
+        <div className="dash-pages__action-error" role="alert">
+          <span>{actionError}</span>
+          <button
+            type="button"
+            className="dash-pages__action-error-dismiss"
+            onClick={() => setActionError(null)}
+            aria-label="Dismiss error"
+          >
+            &times;
+          </button>
+        </div>
+      )}
 
       {/* Table */}
       <div className="dash-pages__table-wrap">
@@ -665,7 +697,9 @@ export function DashboardPagesPage() {
                               openMenuId === page.id ? null : page.id
                             );
                           }}
-                          title="More actions"
+                          aria-label={`More actions for ${page.title}`}
+                          aria-haspopup="menu"
+                          aria-expanded={openMenuId === page.id}
                         >
                           &#8943;
                         </button>
@@ -772,6 +806,47 @@ function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  // Capture previous focus, auto-focus cancel button, and trap focus
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement;
+    cancelBtnRef.current?.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onCancel();
+        return;
+      }
+      if (e.key === "Tab" && dialogRef.current) {
+        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocusRef.current?.focus();
+    };
+  }, [onCancel]);
 
   const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === overlayRef.current) onCancel();
@@ -785,6 +860,7 @@ function ConfirmDialog({
     >
       <div
         className="dash-pages__confirm-dialog"
+        ref={dialogRef}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-title"
@@ -794,6 +870,7 @@ function ConfirmDialog({
         <p id="confirm-message">{message}</p>
         <div className="dash-pages__confirm-actions">
           <button
+            ref={cancelBtnRef}
             type="button"
             className="dash-pages__confirm-btn"
             onClick={onCancel}

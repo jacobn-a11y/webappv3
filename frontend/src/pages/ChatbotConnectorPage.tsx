@@ -245,6 +245,9 @@ export function ChatbotConnectorPage() {
             type="button"
             className="chat__account-trigger"
             onClick={() => setAccountDropdownOpen(!accountDropdownOpen)}
+            aria-label="Select account"
+            aria-expanded={accountDropdownOpen}
+            aria-haspopup="listbox"
           >
             <svg
               width="16"

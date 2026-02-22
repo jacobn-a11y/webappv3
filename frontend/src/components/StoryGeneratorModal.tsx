@@ -258,7 +258,7 @@ export function StoryGeneratorModal({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" role="presentation" onClick={onClose}>
       <div
         ref={modalRef}
         className={`modal ${phase === "preview" ? "modal--wide" : ""}`}
