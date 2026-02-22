@@ -35,10 +35,14 @@ export function HomePage() {
   }, []);
 
   if (error) {
-    return <div className="page-error">{error}</div>;
+    return <div className="page-error" role="alert">{error}</div>;
   }
   if (!data) {
-    return <div className="admin-security__page">Loading home...</div>;
+    return (
+      <div className="admin-security__page" role="status" aria-live="polite">
+        Loading home...
+      </div>
+    );
   }
 
   return (

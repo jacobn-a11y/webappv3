@@ -116,6 +116,7 @@ export function MultiSelect({
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
+          aria-hidden="true"
         >
           <path d="M4 6l4 4 4-4" />
         </svg>
@@ -130,6 +131,7 @@ export function MultiSelect({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             autoFocus
+            aria-label={`Search ${label} options`}
           />
           <div className="multi-select__options">
             {Object.entries(groups).map(([groupName, groupOptions]) => (

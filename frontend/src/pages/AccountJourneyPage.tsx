@@ -271,8 +271,8 @@ export function AccountJourneyPage() {
 
   if (loading) {
     return (
-      <div className="journey__loading">
-        <div className="journey__spinner" />
+      <div className="journey__loading" role="status" aria-live="polite">
+        <div className="journey__spinner" aria-hidden="true" />
         <p>Loading account journey...</p>
       </div>
     );
@@ -280,7 +280,7 @@ export function AccountJourneyPage() {
 
   if (error || !account) {
     return (
-      <div className="journey__error">
+      <div className="journey__error" role="alert">
         <p>Error: {error ?? "No data available"}</p>
       </div>
     );

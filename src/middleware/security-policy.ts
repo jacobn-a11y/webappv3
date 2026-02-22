@@ -55,15 +55,32 @@ function hasMfa(req: Request): boolean {
   return false;
 }
 
+function ipToLong(ip: string): number {
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) {
+    return -1;
+  }
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+}
+
 function ipMatchesAllowlist(ip: string, value: string): boolean {
   const entry = value.trim();
   if (!entry) return false;
+
+  // Exact match (no CIDR notation)
   if (!entry.includes("/")) return ip === entry;
-  // Minimal CIDR handling for explicit host match.
-  if (entry.endsWith("/32")) {
-    return ip === entry.replace("/32", "");
-  }
-  return false;
+
+  const [network, prefixStr] = entry.split("/");
+  const prefix = parseInt(prefixStr, 10);
+  if (isNaN(prefix) || prefix < 0 || prefix > 32) return false;
+
+  const ipLong = ipToLong(ip);
+  const networkLong = ipToLong(network);
+  if (ipLong === -1 || networkLong === -1) return false;
+
+  // Build subnet mask from prefix length
+  const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+  return (ipLong & mask) === (networkLong & mask);
 }
 
 export function requireOrgSecurityPolicy(

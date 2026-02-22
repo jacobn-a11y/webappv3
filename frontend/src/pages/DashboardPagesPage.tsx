@@ -347,8 +347,8 @@ export function DashboardPagesPage() {
 
   if (loading) {
     return (
-      <div className="dash-pages__loading">
-        <div className="dash-pages__spinner" />
+      <div className="dash-pages__loading" role="status" aria-live="polite">
+        <div className="dash-pages__spinner" aria-hidden="true" />
         <span>Loading dashboard...</span>
       </div>
     );
@@ -356,7 +356,7 @@ export function DashboardPagesPage() {
 
   if (error) {
     return (
-      <div className="dash-pages__error">
+      <div className="dash-pages__error" role="alert">
         <h2>Failed to load dashboard</h2>
         <p>{error}</p>
         <button
@@ -488,6 +488,7 @@ export function DashboardPagesPage() {
             placeholder="Search by title..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search landing pages by title"
           />
         </div>
 
@@ -495,6 +496,7 @@ export function DashboardPagesPage() {
           className="dash-pages__select"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
+          aria-label="Filter by status"
         >
           <option value="">All Statuses</option>
           <option value="DRAFT">Draft</option>
@@ -506,6 +508,7 @@ export function DashboardPagesPage() {
           className="dash-pages__select"
           value={visibilityFilter}
           onChange={(e) => setVisibilityFilter(e.target.value)}
+          aria-label="Filter by visibility"
         >
           <option value="">All Visibility</option>
           <option value="PRIVATE">Private</option>
@@ -517,6 +520,7 @@ export function DashboardPagesPage() {
             className="dash-pages__select"
             value={creatorFilter}
             onChange={(e) => setCreatorFilter(e.target.value)}
+            aria-label="Filter by creator"
           >
             <option value="">All Creators</option>
             {creators.map((c) => (
@@ -779,9 +783,15 @@ function ConfirmDialog({
       ref={overlayRef}
       onClick={handleOverlayClick}
     >
-      <div className="dash-pages__confirm-dialog">
-        <h3>{title}</h3>
-        <p>{message}</p>
+      <div
+        className="dash-pages__confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        aria-describedby="confirm-message"
+      >
+        <h3 id="confirm-title">{title}</h3>
+        <p id="confirm-message">{message}</p>
         <div className="dash-pages__confirm-actions">
           <button
             type="button"

@@ -222,6 +222,7 @@ export function ChatbotConnectorPage() {
               viewBox="0 0 32 32"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
             >
               <rect width="32" height="32" rx="8" fill="#4f46e5" />
               <path
@@ -252,6 +253,7 @@ export function ChatbotConnectorPage() {
               fill="none"
               stroke="currentColor"
               strokeWidth="1.5"
+              aria-hidden="true"
             >
               <path d="M2 3h12M2 8h12M2 13h12" />
             </svg>
@@ -268,6 +270,7 @@ export function ChatbotConnectorPage() {
               className={`chat__account-chevron ${
                 accountDropdownOpen ? "chat__account-chevron--open" : ""
               }`}
+              aria-hidden="true"
             >
               <path d="M3 4.5l3 3 3-3" />
             </svg>
@@ -283,6 +286,7 @@ export function ChatbotConnectorPage() {
                   fill="none"
                   stroke="#9ca3af"
                   strokeWidth="1.5"
+                  aria-hidden="true"
                 >
                   <circle cx="6" cy="6" r="4.5" />
                   <path d="M9.5 9.5L13 13" />
@@ -294,11 +298,12 @@ export function ChatbotConnectorPage() {
                   value={accountSearch}
                   onChange={(e) => setAccountSearch(e.target.value)}
                   autoFocus
+                  aria-label="Search accounts"
                 />
               </div>
               <div className="chat__account-list">
                 {accountsLoading && (
-                  <div className="chat__account-loading">Searching...</div>
+                  <div className="chat__account-loading" role="status" aria-live="polite">Searching...</div>
                 )}
                 {!accountsLoading && accountOptions.length === 0 && (
                   <div className="chat__account-empty">No accounts found</div>
@@ -343,6 +348,7 @@ export function ChatbotConnectorPage() {
                 fill="none"
                 stroke="#d1d5db"
                 strokeWidth="1.5"
+                aria-hidden="true"
               >
                 <rect x="8" y="12" width="48" height="36" rx="6" />
                 <path d="M20 28h24M20 36h16" />
@@ -393,12 +399,12 @@ export function ChatbotConnectorPage() {
 
             {/* Typing indicator */}
             {loading && (
-              <div className="chat__message chat__message--assistant">
+              <div className="chat__message chat__message--assistant" role="status" aria-live="polite">
                 <div className="chat__bubble chat__bubble--assistant">
                   <div className="chat__typing">
-                    <span className="chat__typing-dot" />
-                    <span className="chat__typing-dot" />
-                    <span className="chat__typing-dot" />
+                    <span className="chat__typing-dot" aria-hidden="true" />
+                    <span className="chat__typing-dot" aria-hidden="true" />
+                    <span className="chat__typing-dot" aria-hidden="true" />
                   </div>
                 </div>
               </div>
@@ -425,6 +431,7 @@ export function ChatbotConnectorPage() {
             onKeyDown={handleKeyDown}
             disabled={!selectedAccount || loading}
             rows={1}
+            aria-label="Chat message"
           />
           <button
             type="button"
@@ -442,6 +449,7 @@ export function ChatbotConnectorPage() {
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
+              aria-hidden="true"
             >
               <path d="M18 2L9 11" />
               <path d="M18 2l-6 16-3-7-7-3 16-6z" />
@@ -496,6 +504,7 @@ function SourceCard({ source, index }: { source: ChatSource; index: number }) {
           className={`chat__source-chevron ${
             expanded ? "chat__source-chevron--open" : ""
           }`}
+          aria-hidden="true"
         >
           <path d="M4 5.5l3 3 3-3" />
         </svg>
@@ -512,6 +521,7 @@ function SourceCard({ source, index }: { source: ChatSource; index: number }) {
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.5"
+                aria-hidden="true"
               >
                 <circle cx="7" cy="5" r="3" />
                 <path d="M2 13c0-2.8 2.2-5 5-5s5 2.2 5 5" />

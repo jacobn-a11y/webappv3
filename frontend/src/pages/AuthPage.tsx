@@ -61,6 +61,11 @@ export function AuthPage() {
     }
   };
 
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void submit();
+  };
+
   return (
     <div className="auth-page">
       <div className="auth-card">
@@ -73,52 +78,64 @@ export function AuthPage() {
             : "Use your workspace credentials to continue."}
         </p>
 
-        {error && <div className="auth-card__error">{error}</div>}
-
-        <label className="auth-card__field">
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-          />
-        </label>
-
-        {mode === "signup" && (
-          <>
-            <label className="auth-card__field">
-              Full name
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                autoComplete="name"
-              />
-            </label>
-            <label className="auth-card__field">
-              Company name
-              <input
-                value={organizationName}
-                onChange={(e) => setOrganizationName(e.target.value)}
-                placeholder="Acme Inc."
-              />
-            </label>
-          </>
+        {error && (
+          <div className="auth-card__error" role="alert" id="auth-error">
+            {error}
+          </div>
         )}
 
-        <label className="auth-card__field">
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={mode === "signup" ? "new-password" : "current-password"}
-          />
-        </label>
+        <form onSubmit={handleFormSubmit} noValidate>
+          <label className="auth-card__field">
+            Email
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              required
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? "auth-error" : undefined}
+            />
+          </label>
 
-        <button className="btn btn--primary auth-card__submit" onClick={submit} disabled={submitting}>
-          {mode === "signup" ? "Create account" : "Sign in"}
-        </button>
+          {mode === "signup" && (
+            <>
+              <label className="auth-card__field">
+                Full name
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  autoComplete="name"
+                />
+              </label>
+              <label className="auth-card__field">
+                Company name
+                <input
+                  value={organizationName}
+                  onChange={(e) => setOrganizationName(e.target.value)}
+                  placeholder="Acme Inc."
+                />
+              </label>
+            </>
+          )}
+
+          <label className="auth-card__field">
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={mode === "signup" ? "new-password" : "current-password"}
+              required
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? "auth-error" : undefined}
+            />
+          </label>
+
+          <button type="submit" className="btn btn--primary auth-card__submit" disabled={submitting}>
+            {mode === "signup" ? "Create account" : "Sign in"}
+          </button>
+        </form>
         <button className="btn btn--secondary auth-card__submit" onClick={startSso} disabled={submitting}>
           Continue with Google SSO
         </button>

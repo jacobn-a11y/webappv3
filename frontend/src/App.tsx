@@ -1,5 +1,6 @@
-import { BrowserRouter, Routes, Route, Link, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Link, Navigate, useLocation } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AccountDetailPage } from "./pages/AccountDetailPage";
 import { LandingPageEditorPage } from "./pages/LandingPageEditorPage";
 import { AdminAccountAccessPage } from "./pages/AdminAccountAccessPage";
@@ -123,24 +124,41 @@ function AuthenticatedApp({
     ];
   }, [persona]);
 
+  const location = useLocation();
+
   return (
     <div className="app-shell">
-      <nav className="app-nav">
+      <a href="#main-content" className="skip-to-content">
+        Skip to main content
+      </a>
+      <nav className="app-nav" aria-label="Main navigation">
         <Link to="/" className="app-nav__logo">
           StoryEngine
         </Link>
-        {links.map((item) => (
-          <Link key={item.to} to={item.to} className="app-nav__link">
-            {item.label}
-          </Link>
-        ))}
+        {links.map((item) => {
+          const isActive =
+            item.to === "/"
+              ? location.pathname === "/"
+              : location.pathname.startsWith(item.to);
+          return (
+            <Link
+              key={item.to}
+              to={item.to}
+              className={`app-nav__link${isActive ? " app-nav__link--active" : ""}`}
+              aria-current={isActive ? "page" : undefined}
+            >
+              {item.label}
+            </Link>
+          );
+        })}
         <div className="app-nav__spacer" />
         <span className="app-nav__user">{user.email}</span>
         <button className="btn btn--ghost btn--sm" onClick={() => void onLogout()}>
           Logout
         </button>
       </nav>
-      <main className="app-content">
+      <main className="app-content" id="main-content">
+        <ErrorBoundary>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/accounts/:accountId" element={<AccountDetailPage />} />
@@ -179,6 +197,7 @@ function AuthenticatedApp({
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </ErrorBoundary>
       </main>
     </div>
   );
@@ -227,7 +246,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="auth-page">
+      <div className="auth-page" role="status" aria-live="polite">
         <div className="auth-card">
           <h1 className="auth-card__title">Loading workspace</h1>
         </div>

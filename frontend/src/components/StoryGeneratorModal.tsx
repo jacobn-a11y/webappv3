@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { MultiSelect } from "./MultiSelect";
@@ -83,6 +83,10 @@ export function StoryGeneratorModal({
   const [storyOutline, setStoryOutline] = useState<StoryOutline>("CHRONOLOGICAL_JOURNEY");
   const [storyType, setStoryType] = useState<StoryTypeInput>("FULL_ACCOUNT_JOURNEY");
 
+  // Focus trap refs
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
   // Flow state
   const [phase, setPhase] = useState<ModalPhase>("form");
   const [result, setResult] = useState<BuildStoryResponse | null>(null);
@@ -91,6 +95,51 @@ export function StoryGeneratorModal({
   const [creatingPage, setCreatingPage] = useState(false);
 
   const topicOptions = buildTopicOptions(selectedStages);
+
+  // Capture previous focus and manage focus trap
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key === "Tab" && modalRef.current) {
+        const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    // Focus the modal on open
+    const timer = requestAnimationFrame(() => {
+      modalRef.current?.focus();
+    });
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      cancelAnimationFrame(timer);
+      // Restore focus to the element that opened the modal
+      previousFocusRef.current?.focus();
+    };
+  }, [onClose]);
 
   useEffect(() => {
     getStoryContextSettings()
@@ -211,11 +260,13 @@ export function StoryGeneratorModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
+        ref={modalRef}
         className={`modal ${phase === "preview" ? "modal--wide" : ""}`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label="Generate Story"
+        tabIndex={-1}
       >
         {/* Header */}
         <div className="modal__header">
@@ -230,7 +281,7 @@ export function StoryGeneratorModal({
             onClick={onClose}
             aria-label="Close"
           >
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <path d="M5 5l10 10M15 5l-10 10" />
             </svg>
           </button>
@@ -335,7 +386,7 @@ export function StoryGeneratorModal({
                   className="btn btn--primary"
                   onClick={handleSubmit}
                 >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                     <path d="M8 2v12M2 8h12" />
                   </svg>
                   Generate Story
@@ -346,8 +397,8 @@ export function StoryGeneratorModal({
 
           {/* ── LOADING PHASE ──────────────────────────────────────── */}
           {phase === "loading" && (
-            <div className="loading-state">
-              <div className="loading-state__spinner" />
+            <div className="loading-state" role="status" aria-live="polite">
+              <div className="loading-state__spinner" aria-hidden="true" />
               <h3 className="loading-state__title">Generating your story...</h3>
               <p className="loading-state__text">
                 Analyzing transcripts, extracting insights, and composing a
@@ -379,7 +430,7 @@ export function StoryGeneratorModal({
                   className="btn btn--ghost"
                   onClick={handleBackToForm}
                 >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                     <path d="M10 12L6 8l4-4" />
                   </svg>
                   Back
@@ -392,14 +443,14 @@ export function StoryGeneratorModal({
                   >
                     {copyFeedback ? (
                       <>
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                           <path d="M3 8l3 3 7-7" />
                         </svg>
                         Copied!
                       </>
                     ) : (
                       <>
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                           <rect x="5" y="5" width="8" height="8" rx="1" />
                           <path d="M3 11V3h8" />
                         </svg>
@@ -420,7 +471,7 @@ export function StoryGeneratorModal({
                       </>
                     ) : (
                       <>
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                           <rect x="2" y="2" width="12" height="12" rx="2" />
                           <path d="M5 6h6M5 8h6M5 10h4" />
                         </svg>
@@ -478,9 +529,9 @@ export function StoryGeneratorModal({
 
           {/* ── ERROR PHASE ────────────────────────────────────────── */}
           {phase === "error" && (
-            <div className="error-state">
+            <div className="error-state" role="alert">
               <div className="error-state__icon">
-                <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="#dc2626" strokeWidth="2">
+                <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="#dc2626" strokeWidth="2" aria-hidden="true">
                   <circle cx="24" cy="24" r="20" />
                   <path d="M24 16v10M24 30v2" />
                 </svg>

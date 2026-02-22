@@ -252,8 +252,8 @@ export function AdminOpsDiagnosticsPage() {
         </button>
       </header>
 
-      {loading && <div>Loading diagnostics...</div>}
-      {error && <div className="admin-story-context__error">{error}</div>}
+      {loading && <div role="status" aria-live="polite">Loading diagnostics...</div>}
+      {error && <div className="admin-story-context__error" role="alert">{error}</div>}
 
       {!loading && data && (
         <>
