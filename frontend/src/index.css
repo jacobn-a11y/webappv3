@@ -14,8 +14,8 @@
   --color-bg: #f8f9fb;
   --color-surface: #ffffff;
   --color-text: #1a1a2e;
-  --color-text-secondary: #555770;
-  --color-text-muted: #6b6d84;
+  --color-text-secondary: #4a4b63;
+  --color-text-muted: #616380;
   --color-accent: #4f46e5;
   --color-accent-hover: #4338ca;
   --color-accent-light: #eef2ff;
@@ -1246,6 +1246,7 @@ body {
 .analytics__table th { text-align: left; padding: 8px 12px; font-weight: 600; color: var(--color-text-secondary); border-bottom: 2px solid var(--color-border); }
 .analytics__table td { padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
 .analytics__table tr:hover td { background: var(--color-accent-light); }
+.analytics__note { margin-top: 8px; color: var(--color-text-muted); font-size: 13px; }
 @media (max-width: 768px) {
   .analytics__charts-row, .analytics__tables-row { grid-template-columns: 1fr; }
   .analytics__summary-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1555,6 +1556,16 @@ body {
 .dash-pages__confirm-btn:hover { background: var(--color-bg); }
 .dash-pages__confirm-btn--danger { background: var(--color-error); color: #fff; border-color: var(--color-error); }
 .dash-pages__confirm-btn--danger:hover { background: #b91c1c; }
+.dash-pages__action-error {
+  display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+  background: var(--color-error-light); border: 1px solid rgba(220, 38, 38, 0.2);
+  border-radius: var(--radius-md); color: var(--color-error); font-size: 13px;
+  margin-bottom: 16px;
+}
+.dash-pages__action-error-dismiss {
+  margin-left: auto; background: none; border: none; color: var(--color-error);
+  font-size: 18px; cursor: pointer; padding: 0 4px; line-height: 1;
+}
 @media (max-width: 768px) {
   .dash-pages__stats-grid { grid-template-columns: repeat(2, 1fr); }
   .dash-pages__toolbar { flex-direction: column; }

@@ -90,18 +90,14 @@ export function MultiSelect({
         </div>
       )}
 
-      <div
+      <button
+        type="button"
         className={`multi-select__trigger ${open ? "multi-select__trigger--open" : ""}`}
         onClick={() => setOpen(!open)}
         role="combobox"
         aria-expanded={open}
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setOpen(!open);
-          }
-        }}
+        aria-label={label}
+        aria-haspopup="listbox"
       >
         <span className="multi-select__placeholder">
           {selected.length === 0
@@ -120,7 +116,7 @@ export function MultiSelect({
         >
           <path d="M4 6l4 4 4-4" />
         </svg>
-      </div>
+      </button>
 
       {open && (
         <div className="multi-select__dropdown">

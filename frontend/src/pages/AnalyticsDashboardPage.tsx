@@ -231,7 +231,7 @@ export function AnalyticsDashboardPage() {
                   <tr><td>Campaign Links</td><td className="views">{kpis.attribution_links.linked_campaigns}</td></tr>
                 </tbody>
               </table>
-              <p style={{ marginTop: 8, color: "#6b7280" }}>{kpis.attribution_links.note}</p>
+              <p className="analytics__note">{kpis.attribution_links.note}</p>
             </div>
             <div className="analytics__table-card">
               <h3 className="analytics__table-title">Executive Summary</h3>
@@ -360,7 +360,7 @@ function CallsPerWeekChart({ data }: { data: AnalyticsData }) {
   const canvasRef = useChart(builder);
   return (
     <div className="analytics__chart-wrapper">
-      <canvas ref={canvasRef} />
+      <canvas ref={canvasRef} role="img" aria-label="Bar chart showing the number of calls per week" />
     </div>
   );
 }
@@ -403,7 +403,7 @@ function FunnelDonutChart({ data }: { data: AnalyticsData }) {
   const canvasRef = useChart(builder);
   return (
     <div className="analytics__chart-wrapper">
-      <canvas ref={canvasRef} />
+      <canvas ref={canvasRef} role="img" aria-label="Donut chart showing funnel stage distribution" />
     </div>
   );
 }
@@ -443,7 +443,7 @@ function TopAccountsChart({ data }: { data: AnalyticsData }) {
   const canvasRef = useChart(builder);
   return (
     <div className="analytics__chart-wrapper analytics__chart-wrapper--tall">
-      <canvas ref={canvasRef} />
+      <canvas ref={canvasRef} role="img" aria-label="Horizontal bar chart showing top 10 accounts by call volume" />
     </div>
   );
 }
@@ -497,7 +497,7 @@ function ResolutionChart({ data }: { data: AnalyticsData }) {
   const canvasRef = useChart(builder);
   return (
     <div className="analytics__chart-wrapper">
-      <canvas ref={canvasRef} />
+      <canvas ref={canvasRef} role="img" aria-label="Line chart showing entity resolution success rate over time" />
     </div>
   );
 }
@@ -539,7 +539,7 @@ function PageViewsChart({ data }: { data: AnalyticsData }) {
   const canvasRef = useChart(builder);
   return (
     <div className="analytics__chart-wrapper">
-      <canvas ref={canvasRef} />
+      <canvas ref={canvasRef} role="img" aria-label="Bar chart showing landing page views over time" />
     </div>
   );
 }

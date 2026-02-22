@@ -22,6 +22,105 @@ import {
   type EditorPageData,
 } from "../lib/api";
 
+// ─── Inline Confirm Dialog ──────────────────────────────────────────────────
+
+interface InlineConfirmProps {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function InlineConfirmDialog({
+  title,
+  message,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: InlineConfirmProps) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement;
+    cancelBtnRef.current?.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onCancel();
+        return;
+      }
+      if (e.key === "Tab" && dialogRef.current) {
+        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocusRef.current?.focus();
+    };
+  }, [onCancel]);
+
+  return (
+    <div
+      className="page-editor__modal-overlay"
+      ref={overlayRef}
+      onClick={(e) => { if (e.target === overlayRef.current) onCancel(); }}
+    >
+      <div
+        className="page-editor__modal"
+        ref={dialogRef}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="rollback-confirm-title"
+        aria-describedby="rollback-confirm-message"
+      >
+        <div className="page-editor__modal-header">
+          <h2 id="rollback-confirm-title">{title}</h2>
+        </div>
+        <div className="page-editor__modal-body">
+          <p id="rollback-confirm-message">{message}</p>
+        </div>
+        <div className="page-editor__modal-footer">
+          <div className="page-editor__modal-footer-right">
+            <button
+              ref={cancelBtnRef}
+              type="button"
+              className="page-editor__btn page-editor__btn--secondary"
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="page-editor__btn page-editor__btn--primary"
+              onClick={onConfirm}
+            >
+              {confirmLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- Main Component ----------------------------------------------------------
 
 export function LandingPageEditorPage() {
@@ -40,6 +139,7 @@ export function LandingPageEditorPage() {
   const [versionError, setVersionError] = useState<string | null>(null);
 
   const [showPublishModal, setShowPublishModal] = useState(false);
+  const [rollbackVersionId, setRollbackVersionId] = useState<string | null>(null);
 
   const loadPage = useCallback(async () => {
     if (!pageId) return;
@@ -101,24 +201,24 @@ export function LandingPageEditorPage() {
   }, [loadVersions]);
 
   const handleRollbackVersion = useCallback(
-    async (versionId: string) => {
-      if (!pageId) return;
-      const confirmed = window.confirm(
-        "Rollback to this version? The current published revision will be replaced."
-      );
-      if (!confirmed) return;
-
-      try {
-        await rollbackPageVersion(pageId, versionId);
-        setSaveMessage("Rolled back to selected version");
-        setTimeout(() => setSaveMessage(null), 3000);
-        await Promise.all([loadPage(), loadVersions()]);
-      } catch (err) {
-        setVersionError(err instanceof Error ? err.message : "Rollback failed");
-      }
+    (versionId: string) => {
+      setRollbackVersionId(versionId);
     },
-    [pageId, loadPage, loadVersions]
+    []
   );
+
+  const executeRollback = useCallback(async () => {
+    if (!pageId || !rollbackVersionId) return;
+    setRollbackVersionId(null);
+    try {
+      await rollbackPageVersion(pageId, rollbackVersionId);
+      setSaveMessage("Rolled back to selected version");
+      setTimeout(() => setSaveMessage(null), 3000);
+      await Promise.all([loadPage(), loadVersions()]);
+    } catch (err) {
+      setVersionError(err instanceof Error ? err.message : "Rollback failed");
+    }
+  }, [pageId, rollbackVersionId, loadPage, loadVersions]);
 
   if (!pageId) {
     return <div className="page-editor__error">No page ID provided.</div>;
@@ -126,8 +226,8 @@ export function LandingPageEditorPage() {
 
   if (loading) {
     return (
-      <div className="page-editor__loading">
-        <div className="page-editor__spinner" />
+      <div className="page-editor__loading" role="status" aria-live="polite">
+        <div className="page-editor__spinner" aria-hidden="true" />
         <span>Loading editor...</span>
       </div>
     );
@@ -135,7 +235,7 @@ export function LandingPageEditorPage() {
 
   if (error || !pageData) {
     return (
-      <div className="page-editor__error">
+      <div className="page-editor__error" role="alert">
         <h2>Failed to load page</h2>
         <p>{error || "Page not found"}</p>
       </div>
@@ -177,6 +277,7 @@ export function LandingPageEditorPage() {
           value={body}
           onChange={(e) => setBody(e.target.value)}
           placeholder="Write your landing page content in markdown..."
+          aria-label="Page content editor"
         />
       </div>
 
@@ -232,6 +333,16 @@ export function LandingPageEditorPage() {
           onPublished={handlePublished}
         />
       )}
+
+      {rollbackVersionId && (
+        <InlineConfirmDialog
+          title="Rollback Version"
+          message="Rollback to this version? The current published revision will be replaced."
+          confirmLabel="Rollback"
+          onConfirm={executeRollback}
+          onCancel={() => setRollbackVersionId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -273,6 +384,8 @@ function PublishModal({
   const [copyFeedback, setCopyFeedback] = useState(false);
 
   const overlayRef = useRef<HTMLDivElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   const loadPreview = useCallback(async () => {
     setPreviewLoading(true);
@@ -293,12 +406,43 @@ function PublishModal({
     loadPreview();
   }, [loadPreview]);
 
+  // Focus management: capture focus, trap Tab, Escape to close
   useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+    previousFocusRef.current = document.activeElement as HTMLElement;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key === "Tab" && modalRef.current) {
+        const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    // Focus the modal on open
+    requestAnimationFrame(() => {
+      modalRef.current?.focus();
+    });
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocusRef.current?.focus();
+    };
   }, [onClose]);
 
   const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -372,7 +516,7 @@ function PublishModal({
 
   return (
     <div className="page-editor__modal-overlay" ref={overlayRef} onClick={handleOverlayClick}>
-      <div className="page-editor__modal" role="dialog" aria-labelledby="publishModalTitle">
+      <div className="page-editor__modal" ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="publishModalTitle" tabIndex={-1}>
         <div className="page-editor__modal-header">
           <h2 id="publishModalTitle">Publish Landing Page</h2>
           <button type="button" className="page-editor__modal-close" onClick={onClose} aria-label="Close">
@@ -404,8 +548,9 @@ function PublishModal({
               </div>
 
               <div className="page-editor__field">
-                <label className="page-editor__field-label">Password Protection</label>
+                <label className="page-editor__field-label" htmlFor="publish-password">Password Protection</label>
                 <input
+                  id="publish-password"
                   type="password"
                   className="page-editor__text-input"
                   placeholder="Leave empty for no password"
@@ -417,8 +562,9 @@ function PublishModal({
               </div>
 
               <div className="page-editor__field">
-                <label className="page-editor__field-label">Expiration Date</label>
+                <label className="page-editor__field-label" htmlFor="publish-expiration">Expiration Date</label>
                 <input
+                  id="publish-expiration"
                   type="datetime-local"
                   className="page-editor__text-input"
                   value={expirationDate}
@@ -427,8 +573,9 @@ function PublishModal({
               </div>
 
               <div className="page-editor__field page-editor__field--full">
-                <label className="page-editor__field-label">Release Notes</label>
+                <label className="page-editor__field-label" htmlFor="publish-release-notes">Release Notes</label>
                 <textarea
+                  id="publish-release-notes"
                   className="page-editor__text-input"
                   value={releaseNotes}
                   onChange={(e) => setReleaseNotes(e.target.value)}

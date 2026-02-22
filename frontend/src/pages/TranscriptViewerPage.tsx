@@ -693,8 +693,8 @@ export function TranscriptViewerPage() {
 
   if (loading) {
     return (
-      <div className="transcript__loading">
-        <div className="transcript__loading-spinner" />
+      <div className="transcript__loading" role="status" aria-live="polite">
+        <div className="transcript__loading-spinner" aria-hidden="true" />
         <span>Loading transcript...</span>
       </div>
     );
@@ -702,7 +702,7 @@ export function TranscriptViewerPage() {
 
   if (error) {
     return (
-      <div className="transcript__error">
+      <div className="transcript__error" role="alert">
         <svg
           className="transcript__error-icon"
           viewBox="0 0 24 24"
@@ -711,6 +711,7 @@ export function TranscriptViewerPage() {
           strokeWidth="1.5"
           width="48"
           height="48"
+          aria-hidden="true"
         >
           <circle cx="12" cy="12" r="10" />
           <line x1="15" y1="9" x2="9" y2="15" />
@@ -770,6 +771,7 @@ export function TranscriptViewerPage() {
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="2"
+                aria-hidden="true"
               >
                 <circle cx="11" cy="11" r="8" />
                 <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -784,6 +786,7 @@ export function TranscriptViewerPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
+                aria-label="Search transcript"
               />
               <span className="transcript__search-count">
                 {debouncedQuery.length >= 2
