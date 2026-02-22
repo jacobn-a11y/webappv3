@@ -142,18 +142,21 @@ export function createApp(deps: AppDeps): express.Application {
   // Webhook endpoints (authenticated by signature, not user auth)
   app.post(
     "/api/webhooks/merge",
+    express.raw({ type: "application/json" }),
     webhookRateLimiter,
     createMergeWebhookHandler({ prisma, processingQueue })
   );
 
   app.post(
     "/api/webhooks/gong",
+    express.raw({ type: "application/json" }),
     webhookRateLimiter,
     createGongWebhookHandler({ prisma, processingQueue })
   );
 
   app.post(
     "/api/webhooks/grain",
+    express.raw({ type: "application/json" }),
     webhookRateLimiter,
     createGrainWebhookHandler({ prisma, processingQueue })
   );

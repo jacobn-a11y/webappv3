@@ -17,9 +17,6 @@ import type { Request, Response } from "express";
 import crypto from "crypto";
 import type { PrismaClient } from "@prisma/client";
 import type { Queue } from "bullmq";
-import {
-  EntityResolver,
-} from "../services/entity-resolution.js";
 import { GongProvider } from "../integrations/gong-provider.js";
 import type { GongCredentials } from "../integrations/types.js";
 
@@ -45,10 +42,12 @@ function verifyGongSignature(
     .createHmac("sha256", secret)
     .update(payload)
     .digest("hex");
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expected)
-  );
+  const sigBuffer = Buffer.from(signature, "utf8");
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  if (sigBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(sigBuffer, expectedBuffer);
 }
 
 // ─── Handler Factory ────────────────────────────────────────────────────────
@@ -63,9 +62,13 @@ export function createGongWebhookHandler(deps: {
   return async (req: Request, res: Response) => {
     // ── Find the integration config for this webhook ──────────────────
     // Gong webhooks include an X-Gong-Signature header for verification.
-    const signature = req.headers["x-gong-signature"] as string | undefined;
-    const rawBody =
-      typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+    const signatureHeader = req.headers["x-gong-signature"];
+    const signature = typeof signatureHeader === "string" ? signatureHeader : "";
+    const rawBody = Buffer.isBuffer(req.body)
+      ? req.body.toString("utf8")
+      : typeof req.body === "string"
+        ? req.body
+        : JSON.stringify(req.body ?? {});
 
     // Look up all active Gong integrations to find the matching one
     const gongConfigs = await prisma.integrationConfig.findMany({
@@ -77,25 +80,42 @@ export function createGongWebhookHandler(deps: {
       return;
     }
 
+    // If any active config has a webhook secret, enforce signature auth.
+    if (gongConfigs.some((c: { webhookSecret: string | null }) => !!c.webhookSecret) && !signature) {
+      res.status(401).json({ error: "Missing webhook signature" });
+      return;
+    }
+
     // Try to match signature to a specific org's webhook secret
     type GongConfig = (typeof gongConfigs)[number];
-    let matchedConfig: GongConfig = gongConfigs[0]; // default to first if no signature
+    let matchedConfig: GongConfig | null = null;
     if (signature) {
-      const matched = gongConfigs.find(
+      matchedConfig = gongConfigs.find(
         (c: GongConfig) =>
           c.webhookSecret &&
           verifyGongSignature(rawBody, signature, c.webhookSecret)
-      );
-      if (matched) {
-        matchedConfig = matched;
-      } else if (gongConfigs.every((c: GongConfig) => c.webhookSecret)) {
-        // All configs have secrets but none matched — reject
+      ) ?? null;
+      if (!matchedConfig) {
         res.status(401).json({ error: "Invalid webhook signature" });
+        return;
+      }
+    } else {
+      // Backward compatibility: allow only config without a secret.
+      matchedConfig = gongConfigs.find((c: GongConfig) => !c.webhookSecret) ?? null;
+      if (!matchedConfig) {
+        res.status(401).json({ error: "Invalid webhook configuration" });
         return;
       }
     }
 
-    const payload = req.body as GongWebhookPayload;
+    let payload: GongWebhookPayload;
+    try {
+      payload = JSON.parse(rawBody) as GongWebhookPayload;
+    } catch {
+      res.status(400).json({ error: "Invalid JSON payload" });
+      return;
+    }
+
     const credentials = matchedConfig.credentials as unknown as GongCredentials;
     const organizationId = matchedConfig.organizationId;
 
@@ -137,8 +157,6 @@ async function handleCallReady(
   organizationId: string,
   gongCallId: string
 ): Promise<void> {
-  const resolver = new EntityResolver(prisma);
-
   // Fetch the transcript from Gong
   const transcript = await provider.fetchTranscript(credentials, gongCallId);
 
@@ -167,10 +185,15 @@ async function handleCallReady(
       });
 
   // Store transcript if we got one and it's new
-  if (transcript && !existing) {
-    await prisma.transcript.create({
-      data: {
+  if (transcript) {
+    await prisma.transcript.upsert({
+      where: { callId: call.id },
+      create: {
         callId: call.id,
+        fullText: transcript,
+        wordCount: transcript.split(/\s+/).length,
+      },
+      update: {
         fullText: transcript,
         wordCount: transcript.split(/\s+/).length,
       },

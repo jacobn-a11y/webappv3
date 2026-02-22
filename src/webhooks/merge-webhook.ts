@@ -86,10 +86,12 @@ function verifyMergeSignature(
     .createHmac("sha256", secret)
     .update(payload)
     .digest("hex");
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expected)
-  );
+  const sigBuffer = Buffer.from(signature, "utf8");
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  if (sigBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(sigBuffer, expectedBuffer);
 }
 
 // ─── Provider Mapping ────────────────────────────────────────────────────────
@@ -123,20 +125,41 @@ export function createMergeWebhookHandler(deps: {
   const resolver = new EntityResolver(prisma);
 
   return async (req: Request, res: Response) => {
+    const rawBody = Buffer.isBuffer(req.body)
+      ? req.body.toString("utf8")
+      : typeof req.body === "string"
+        ? req.body
+        : JSON.stringify(req.body ?? {});
+
     // ── Verify signature ──────────────────────────────────────────────
-    const signature = req.headers["x-merge-webhook-signature"] as string;
+    const signatureHeader = req.headers["x-merge-webhook-signature"];
+    const signature = typeof signatureHeader === "string" ? signatureHeader : "";
     const webhookSecret = process.env.MERGE_WEBHOOK_SECRET;
 
-    if (webhookSecret && signature) {
-      const rawBody =
-        typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+    if (webhookSecret) {
+      if (!signature) {
+        res.status(401).json({ error: "Missing webhook signature" });
+        return;
+      }
       if (!verifyMergeSignature(rawBody, signature, webhookSecret)) {
         res.status(401).json({ error: "Invalid webhook signature" });
         return;
       }
     }
 
-    const payload = req.body as MergeWebhookPayload;
+    let payload: MergeWebhookPayload;
+    try {
+      payload = JSON.parse(rawBody) as MergeWebhookPayload;
+    } catch {
+      res.status(400).json({ error: "Invalid JSON payload" });
+      return;
+    }
+
+    if (!payload.hook?.event || !payload.linked_account?.organization) {
+      res.status(400).json({ error: "Malformed webhook payload" });
+      return;
+    }
+
     const eventType = payload.hook.event;
 
     // ── Resolve which organization this webhook belongs to ────────────
@@ -230,7 +253,31 @@ async function handleRecordingEvent(
 
   // ── Store participants ──────────────────────────────────────────────
   const participants = recording.participants ?? [];
+  const seenParticipantKeys = new Set<string>();
   for (const p of participants) {
+    const participantKey = [
+      (p.email ?? "").toLowerCase(),
+      p.name ?? "",
+      p.is_organizer ? "1" : "0",
+    ].join("|");
+    if (seenParticipantKeys.has(participantKey)) {
+      continue;
+    }
+    seenParticipantKeys.add(participantKey);
+
+    const existingParticipant = await prisma.callParticipant.findFirst({
+      where: {
+        callId: call.id,
+        email: p.email?.toLowerCase() ?? null,
+        name: p.name ?? null,
+        isHost: p.is_organizer ?? false,
+      },
+      select: { id: true },
+    });
+    if (existingParticipant) {
+      continue;
+    }
+
     await prisma.callParticipant.create({
       data: {
         callId: call.id,
@@ -255,9 +302,14 @@ async function handleRecordingEvent(
 
   // ── Store transcript if included ────────────────────────────────────
   if (recording.transcript) {
-    await prisma.transcript.create({
-      data: {
+    await prisma.transcript.upsert({
+      where: { callId: call.id },
+      create: {
         callId: call.id,
+        fullText: recording.transcript,
+        wordCount: recording.transcript.split(/\s+/).length,
+      },
+      update: {
         fullText: recording.transcript,
         wordCount: recording.transcript.split(/\s+/).length,
       },

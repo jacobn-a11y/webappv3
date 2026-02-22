@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { sanitizeCustomCss } from "./public-page-renderer.js";
+import { sanitizeCustomCss, renderLandingPageHtml } from "./public-page-renderer.js";
 
 describe("sanitizeCustomCss", () => {
   it("should return null for null input", () => {
@@ -100,5 +100,52 @@ describe("sanitizeCustomCss", () => {
     expect(result).not.toContain("<script>");
     expect(result).not.toContain("expression(");
     expect(result).not.toContain("-moz-binding:");
+  });
+});
+
+describe("renderLandingPageHtml", () => {
+  it("escapes raw HTML from markdown body", () => {
+    const html = renderLandingPageHtml({
+      title: "Test Page",
+      subtitle: null,
+      body: '<img src=x onerror="alert(1)"><script>alert(2)</script>',
+      calloutBoxes: [],
+      totalCallHours: 2,
+      heroImageUrl: null,
+      customCss: null,
+    });
+
+    expect(html).not.toContain("<script>alert(2)</script>");
+    expect(html).not.toContain('<img src=x onerror="alert(1)">');
+    expect(html).toContain("&lt;script&gt;alert(2)&lt;/script&gt;");
+  });
+
+  it("sanitizes custom CSS before rendering", () => {
+    const html = renderLandingPageHtml({
+      title: "CSS Test",
+      subtitle: null,
+      body: "Body",
+      calloutBoxes: [],
+      totalCallHours: 1,
+      heroImageUrl: null,
+      customCss: "@import url('https://evil.com/x.css'); body { color: red; }",
+    });
+
+    expect(html).not.toContain("@import");
+    expect(html).toContain("body { color: red; }");
+  });
+
+  it("drops non-http(s) hero image URLs", () => {
+    const html = renderLandingPageHtml({
+      title: "Image Test",
+      subtitle: null,
+      body: "Body",
+      calloutBoxes: [],
+      totalCallHours: 1,
+      heroImageUrl: "javascript:alert(1)",
+      customCss: null,
+    });
+
+    expect(html).not.toContain("background-image:");
   });
 });

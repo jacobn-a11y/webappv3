@@ -18,9 +18,6 @@ import type { Request, Response } from "express";
 import crypto from "crypto";
 import type { PrismaClient } from "@prisma/client";
 import type { Queue } from "bullmq";
-import {
-  EntityResolver,
-} from "../services/entity-resolution.js";
 import { GrainProvider } from "../integrations/grain-provider.js";
 import type { GrainCredentials } from "../integrations/types.js";
 
@@ -48,10 +45,12 @@ function verifyGrainSignature(
     .createHmac("sha256", secret)
     .update(payload)
     .digest("hex");
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expected)
-  );
+  const sigBuffer = Buffer.from(signature, "utf8");
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  if (sigBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(sigBuffer, expectedBuffer);
 }
 
 // ─── Handler Factory ────────────────────────────────────────────────────────
@@ -65,9 +64,13 @@ export function createGrainWebhookHandler(deps: {
 
   return async (req: Request, res: Response) => {
     // ── Find the integration config for this webhook ──────────────────
-    const signature = req.headers["x-grain-signature"] as string | undefined;
-    const rawBody =
-      typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+    const signatureHeader = req.headers["x-grain-signature"];
+    const signature = typeof signatureHeader === "string" ? signatureHeader : "";
+    const rawBody = Buffer.isBuffer(req.body)
+      ? req.body.toString("utf8")
+      : typeof req.body === "string"
+        ? req.body
+        : JSON.stringify(req.body ?? {});
 
     const grainConfigs = await prisma.integrationConfig.findMany({
       where: { provider: "GRAIN", enabled: true, status: "ACTIVE" },
@@ -78,24 +81,40 @@ export function createGrainWebhookHandler(deps: {
       return;
     }
 
+    if (grainConfigs.some((c: { webhookSecret: string | null }) => !!c.webhookSecret) && !signature) {
+      res.status(401).json({ error: "Missing webhook signature" });
+      return;
+    }
+
     // Try to match signature to a specific org's webhook secret
     type GrainConfig = (typeof grainConfigs)[number];
-    let matchedConfig: GrainConfig = grainConfigs[0];
+    let matchedConfig: GrainConfig | null = null;
     if (signature) {
-      const matched = grainConfigs.find(
+      matchedConfig = grainConfigs.find(
         (c: GrainConfig) =>
           c.webhookSecret &&
           verifyGrainSignature(rawBody, signature, c.webhookSecret)
-      );
-      if (matched) {
-        matchedConfig = matched;
-      } else if (grainConfigs.every((c: GrainConfig) => c.webhookSecret)) {
+      ) ?? null;
+      if (!matchedConfig) {
         res.status(401).json({ error: "Invalid webhook signature" });
+        return;
+      }
+    } else {
+      matchedConfig = grainConfigs.find((c: GrainConfig) => !c.webhookSecret) ?? null;
+      if (!matchedConfig) {
+        res.status(401).json({ error: "Invalid webhook configuration" });
         return;
       }
     }
 
-    const payload = req.body as GrainWebhookPayload;
+    let payload: GrainWebhookPayload;
+    try {
+      payload = JSON.parse(rawBody) as GrainWebhookPayload;
+    } catch {
+      res.status(400).json({ error: "Invalid JSON payload" });
+      return;
+    }
+
     const credentials = matchedConfig.credentials as unknown as GrainCredentials;
     const organizationId = matchedConfig.organizationId;
 
@@ -145,8 +164,6 @@ async function handleRecordingReady(
   organizationId: string,
   recordingId: string
 ): Promise<void> {
-  const resolver = new EntityResolver(prisma);
-
   // Fetch full recording details including transcript
   const transcript = await provider.fetchTranscript(credentials, recordingId);
 
@@ -174,10 +191,15 @@ async function handleRecordingReady(
       });
 
   // Store transcript
-  if (transcript && !existing) {
-    await prisma.transcript.create({
-      data: {
+  if (transcript) {
+    await prisma.transcript.upsert({
+      where: { callId: call.id },
+      create: {
         callId: call.id,
+        fullText: transcript,
+        wordCount: transcript.split(/\s+/).length,
+      },
+      update: {
         fullText: transcript,
         wordCount: transcript.split(/\s+/).length,
       },

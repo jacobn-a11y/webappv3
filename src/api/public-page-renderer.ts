@@ -19,7 +19,9 @@ import type { PrismaClient } from "@prisma/client";
 // ─── Markdown to HTML (simple converter) ─────────────────────────────────────
 
 function markdownToHtml(md: string): string {
-  let html = md
+  const safeMd = escapeHtml(md);
+
+  let html = safeMd
     // Headers
     .replace(/^#### (.+)$/gm, "<h4>$1</h4>")
     .replace(/^### (.+)$/gm, "<h3>$1</h3>")
@@ -113,6 +115,8 @@ export function renderLandingPageHtml(page: {
   customCss: string | null;
 }): string {
   const bodyHtml = markdownToHtml(page.body);
+  const safeCustomCss = sanitizeCustomCss(page.customCss) ?? "";
+  const safeHeroImageUrl = sanitizeHeroImageUrl(page.heroImageUrl);
 
   const calloutsHtml = page.calloutBoxes
     .map(
@@ -126,15 +130,15 @@ export function renderLandingPageHtml(page: {
         </div>
         <div class="callout__content">
           <h3 class="callout__title">${escapeHtml(box.title)}</h3>
-          <p class="callout__body">${markdownToHtml(box.body)}</p>
+          <div class="callout__body">${markdownToHtml(box.body)}</div>
         </div>
       </div>`;
       }
     )
     .join("\n");
 
-  const heroSection = page.heroImageUrl
-    ? `<div class="hero" role="img" aria-label="Page hero image" style="background-image: url('${escapeHtml(page.heroImageUrl)}')"></div>`
+  const heroSection = safeHeroImageUrl
+    ? `<div class="hero" role="img" aria-label="Page hero image" style="background-image: url('${escapeHtml(safeHeroImageUrl)}')"></div>`
     : "";
 
   const hours = page.totalCallHours;
@@ -449,7 +453,7 @@ export function renderLandingPageHtml(page: {
       a[href]::after { content: " (" attr(href) ")"; font-size: 0.8em; color: #666; }
     }
 
-    ${page.customCss ?? ""}
+    ${safeCustomCss}
   </style>
 </head>
 <body>
@@ -830,6 +834,20 @@ export function sanitizeCustomCss(css: string | null): string | null {
   sanitized = sanitized.replace(/url\s*\(\s*["']?\s*data:[^)]*\)/gi, "");
 
   return sanitized;
+}
+
+function sanitizeHeroImageUrl(url: string | null): string | null {
+  if (!url) return null;
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.toString();
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
