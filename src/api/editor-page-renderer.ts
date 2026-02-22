@@ -14,7 +14,8 @@
 import { Router, type Request, type Response } from "express";
 import { LandingPageEditor } from "../services/landing-page-editor.js";
 import { requirePageOwnerOrPermission } from "../middleware/permissions.js";
-import type { PrismaClient } from "@prisma/client";
+import { RoleProfileService } from "../services/role-profiles.js";
+import type { PrismaClient, UserRole } from "@prisma/client";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ interface AuthReq extends Request {
 export function createEditorPageRoutes(prisma: PrismaClient): Router {
   const router = Router();
   const editor = new LandingPageEditor(prisma);
+  const roleProfiles = new RoleProfileService(prisma);
 
   /**
    * GET /editor/:pageId
@@ -43,21 +45,18 @@ export function createEditorPageRoutes(prisma: PrismaClient): Router {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
 
-        // Check PUBLISH_NAMED_LANDING_PAGE permission
         let canPublishNamed = false;
-        const ADMIN_ROLES = ["OWNER", "ADMIN"];
-        if (req.userRole && ADMIN_ROLES.includes(req.userRole)) {
+        if (req.userRole && ["OWNER", "ADMIN"].includes(req.userRole)) {
           canPublishNamed = true;
-        } else if (req.userId) {
-          const namedPerm = await prisma.userPermission.findUnique({
-            where: {
-              userId_permission: {
-                userId: req.userId,
-                permission: "PUBLISH_NAMED_LANDING_PAGE",
-              },
-            },
-          });
-          canPublishNamed = !!namedPerm;
+        } else if (req.organizationId && req.userId) {
+          const policy = await roleProfiles.getEffectivePolicy(
+            req.organizationId,
+            req.userId,
+            req.userRole as UserRole | undefined
+          );
+          canPublishNamed =
+            policy.canGenerateNamedStories ||
+            policy.permissions.includes("PUBLISH_NAMED_LANDING_PAGE");
         }
 
         res.send(

@@ -8,6 +8,9 @@ import { DashboardPagesPage } from "./pages/DashboardPagesPage";
 import { ChatbotConnectorPage } from "./pages/ChatbotConnectorPage";
 import { AnalyticsDashboardPage } from "./pages/AnalyticsDashboardPage";
 import { AccountJourneyPage } from "./pages/AccountJourneyPage";
+import { AdminRolesPage } from "./pages/AdminRolesPage";
+import { AdminStoryContextPage } from "./pages/AdminStoryContextPage";
+import { AdminAuditLogsPage } from "./pages/AdminAuditLogsPage";
 
 export default function App() {
   return (
@@ -32,12 +35,21 @@ export default function App() {
           <Link to="/admin/permissions" className="app-nav__link">
             Admin
           </Link>
+          <Link to="/admin/roles" className="app-nav__link">
+            Roles
+          </Link>
+          <Link to="/admin/story-context" className="app-nav__link">
+            Story Context
+          </Link>
+          <Link to="/admin/audit-logs" className="app-nav__link">
+            Audit Logs
+          </Link>
         </nav>
         <main className="app-content">
           <Routes>
             <Route
               path="/"
-              element={<Navigate to="/accounts/demo-account" replace />}
+              element={<Navigate to="/accounts/acc_meridian" replace />}
             />
             <Route
               path="/accounts/:accountId"
@@ -58,6 +70,18 @@ export default function App() {
             <Route
               path="/admin/permissions"
               element={<AdminPermissionsPage />}
+            />
+            <Route
+              path="/admin/roles"
+              element={<AdminRolesPage />}
+            />
+            <Route
+              path="/admin/story-context"
+              element={<AdminStoryContextPage />}
+            />
+            <Route
+              path="/admin/audit-logs"
+              element={<AdminAuditLogsPage />}
             />
             <Route
               path="/calls/:callId/transcript"

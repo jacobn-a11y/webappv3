@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { MultiSelect } from "./MultiSelect";
@@ -7,13 +7,20 @@ import {
   type FunnelStage,
   type TaxonomyTopic,
   type StoryFormat,
+  type StoryLength,
+  type StoryOutline,
+  type StoryTypeInput,
   FUNNEL_STAGE_LABELS,
   STAGE_TOPICS,
   TOPIC_LABELS,
+  STORY_LENGTH_LABELS,
+  STORY_OUTLINE_LABELS,
+  STORY_TYPE_INPUT_LABELS,
 } from "../types/taxonomy";
 import {
   buildStory,
   createLandingPage,
+  getStoryContextSettings,
   type BuildStoryResponse,
 } from "../lib/api";
 
@@ -49,6 +56,16 @@ function buildTopicOptions(selectedStages: FunnelStage[]) {
   );
 }
 
+const STORY_TYPE_OPTIONS = Object.entries(
+  STORY_TYPE_INPUT_LABELS
+) as [StoryTypeInput, string][];
+const STORY_LENGTH_OPTIONS = Object.entries(
+  STORY_LENGTH_LABELS
+) as [StoryLength, string][];
+const STORY_OUTLINE_OPTIONS = Object.entries(
+  STORY_OUTLINE_LABELS
+) as [StoryOutline, string][];
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function StoryGeneratorModal({
@@ -62,6 +79,9 @@ export function StoryGeneratorModal({
   const [selectedTopics, setSelectedTopics] = useState<TaxonomyTopic[]>([]);
   const [customTitle, setCustomTitle] = useState("");
   const [selectedFormat, setSelectedFormat] = useState<StoryFormat | "">("");
+  const [storyLength, setStoryLength] = useState<StoryLength>("MEDIUM");
+  const [storyOutline, setStoryOutline] = useState<StoryOutline>("CHRONOLOGICAL_JOURNEY");
+  const [storyType, setStoryType] = useState<StoryTypeInput>("FULL_ACCOUNT_JOURNEY");
 
   // Flow state
   const [phase, setPhase] = useState<ModalPhase>("form");
@@ -71,6 +91,21 @@ export function StoryGeneratorModal({
   const [creatingPage, setCreatingPage] = useState(false);
 
   const topicOptions = buildTopicOptions(selectedStages);
+
+  useEffect(() => {
+    getStoryContextSettings()
+      .then((settings) => {
+        setStoryLength(settings.default_story_length ?? "MEDIUM");
+        setStoryOutline(
+          settings.default_story_outline ?? "CHRONOLOGICAL_JOURNEY"
+        );
+        setStoryType(settings.default_story_type ?? "FULL_ACCOUNT_JOURNEY");
+        setSelectedFormat(settings.default_story_format ?? "");
+      })
+      .catch(() => {
+        // Use local defaults if org settings are unavailable.
+      });
+  }, []);
 
   // When stages change, remove any selected topics that no longer belong
   const handleStagesChange = (stages: string[]) => {
@@ -96,6 +131,9 @@ export function StoryGeneratorModal({
         filter_topics: selectedTopics.length > 0 ? selectedTopics : undefined,
         title: customTitle.trim() || undefined,
         format: selectedFormat || undefined,
+        story_length: storyLength,
+        story_outline: storyOutline,
+        story_type: storyType,
       });
       setResult(res);
       setPhase("preview");
@@ -103,7 +141,16 @@ export function StoryGeneratorModal({
       setError(err instanceof Error ? err.message : "Failed to generate story");
       setPhase("error");
     }
-  }, [accountId, selectedStages, selectedTopics, customTitle, selectedFormat]);
+  }, [
+    accountId,
+    selectedStages,
+    selectedTopics,
+    customTitle,
+    selectedFormat,
+    storyLength,
+    storyOutline,
+    storyType,
+  ]);
 
   const handleCopyMarkdown = useCallback(async () => {
     if (!result) return;
@@ -229,6 +276,51 @@ export function StoryGeneratorModal({
                 value={selectedFormat}
                 onChange={setSelectedFormat}
               />
+
+              <div className="form-field">
+                <label className="form-field__label">Story Length</label>
+                <select
+                  className="form-field__input"
+                  value={storyLength}
+                  onChange={(e) => setStoryLength(e.target.value as StoryLength)}
+                >
+                  {STORY_LENGTH_OPTIONS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-field">
+                <label className="form-field__label">Story Outline</label>
+                <select
+                  className="form-field__input"
+                  value={storyOutline}
+                  onChange={(e) => setStoryOutline(e.target.value as StoryOutline)}
+                >
+                  {STORY_OUTLINE_OPTIONS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-field">
+                <label className="form-field__label">Story Type</label>
+                <select
+                  className="form-field__input"
+                  value={storyType}
+                  onChange={(e) => setStoryType(e.target.value as StoryTypeInput)}
+                >
+                  {STORY_TYPE_OPTIONS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <div className="story-form__actions">
                 <button

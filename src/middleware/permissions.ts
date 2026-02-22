@@ -14,6 +14,7 @@
 
 import type { Request, Response, NextFunction } from "express";
 import type { PrismaClient, PermissionType, UserRole, TranscriptTruncationMode } from "@prisma/client";
+import { RoleProfileService } from "../services/role-profiles.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -80,6 +81,7 @@ export function requireLandingPagesEnabled(prisma: PrismaClient) {
  * Admins always pass. For other roles, checks UserPermission table.
  */
 export function requirePermission(prisma: PrismaClient, action: string) {
+  const roleProfiles = new RoleProfileService(prisma);
   return async (
     req: AuthenticatedRequest,
     res: Response,
@@ -101,6 +103,17 @@ export function requirePermission(prisma: PrismaClient, action: string) {
     const permissionType = ACTION_PERMISSION_MAP[action];
     if (!permissionType) {
       res.status(500).json({ error: `Unknown permission action: ${action}` });
+      return;
+    }
+
+    // Check role-profile permission (team/custom role assignment)
+    const policy = await roleProfiles.getEffectivePolicy(
+      organizationId,
+      userId,
+      userRole
+    );
+    if (policy.permissions.includes(permissionType)) {
+      next();
       return;
     }
 
@@ -143,6 +156,7 @@ export function requirePermission(prisma: PrismaClient, action: string) {
  * Checks that the user either owns the landing page or has edit_any permission.
  */
 export function requirePageOwnerOrPermission(prisma: PrismaClient) {
+  const roleProfiles = new RoleProfileService(prisma);
   return async (
     req: AuthenticatedRequest,
     res: Response,
@@ -174,6 +188,16 @@ export function requirePageOwnerOrPermission(prisma: PrismaClient) {
     }
 
     if (page.createdById === userId) {
+      next();
+      return;
+    }
+
+    const policy = await roleProfiles.getEffectivePolicy(
+      organizationId,
+      userId,
+      userRole
+    );
+    if (policy.permissions.includes("EDIT_ANY_LANDING_PAGE")) {
       next();
       return;
     }

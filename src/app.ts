@@ -12,7 +12,6 @@ import helmet from "helmet";
 import { PrismaClient } from "@prisma/client";
 import Stripe from "stripe";
 import { WorkOS } from "@workos-inc/node";
-import type { Queue } from "bullmq";
 
 // ─── Webhooks ────────────────────────────────────────────────────────────────
 import { createMergeWebhookHandler } from "./webhooks/merge-webhook.js";
@@ -28,6 +27,7 @@ import { createExportRoutes } from "./api/export-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
 import { createAdminMetricsRoutes } from "./api/admin-metrics-routes.js";
+import { createQueueHealthRoutes } from "./api/queue-health-routes.js";
 import { createApiKeyRoutes } from "./api/api-key-routes.js";
 import { createMergeRoutes } from "./api/merge-routes.js";
 import { createIntegrationRoutes } from "./api/integration-routes.js";
@@ -62,6 +62,7 @@ import {
 import { requestIdMiddleware } from "./middleware/request-id.js";
 import { requestLoggingMiddleware } from "./middleware/request-logging.js";
 import { createApiKeyAuth, requireScope } from "./middleware/api-key-auth.js";
+import { createDevAuthBypass } from "./middleware/dev-auth.js";
 import {
   createRateLimiter,
   apiRateLimiter,
@@ -69,22 +70,24 @@ import {
   passwordRateLimiter,
 } from "./middleware/rate-limiter.js";
 import { createApiUsageLogger } from "./middleware/api-usage-logger.js";
+import { requirePermission } from "./middleware/permissions.js";
 
 // ─── Observability ───────────────────────────────────────────────────────────
 import { Sentry } from "./lib/sentry.js";
 
 import type { Services } from "./services.js";
+import type { Queues } from "./queues.js";
 
 export interface AppDeps {
   prisma: PrismaClient;
   stripe: Stripe;
   workos: WorkOS;
-  processingQueue: Queue;
+  queues: Queues;
   services: Services;
 }
 
 export function createApp(deps: AppDeps): express.Application {
-  const { prisma, stripe, workos, processingQueue, services } = deps;
+  const { prisma, stripe, workos, queues, services } = deps;
   const {
     ragEngine,
     storyBuilder,
@@ -144,21 +147,21 @@ export function createApp(deps: AppDeps): express.Application {
     "/api/webhooks/merge",
     express.raw({ type: "application/json" }),
     webhookRateLimiter,
-    createMergeWebhookHandler({ prisma, processingQueue })
+    createMergeWebhookHandler({ prisma, processingQueue: queues.processingQueue })
   );
 
   app.post(
     "/api/webhooks/gong",
     express.raw({ type: "application/json" }),
     webhookRateLimiter,
-    createGongWebhookHandler({ prisma, processingQueue })
+    createGongWebhookHandler({ prisma, processingQueue: queues.processingQueue })
   );
 
   app.post(
     "/api/webhooks/grain",
     express.raw({ type: "application/json" }),
     webhookRateLimiter,
-    createGrainWebhookHandler({ prisma, processingQueue })
+    createGrainWebhookHandler({ prisma, processingQueue: queues.processingQueue })
   );
 
   // Public landing pages — no auth, served at /s/:slug
@@ -166,6 +169,11 @@ export function createApp(deps: AppDeps): express.Application {
 
   // ─── Admin Metrics ─────────────────────────────────────────────────────
   app.use("/api/admin/metrics", createAdminMetricsRoutes(prisma));
+  app.use(
+    "/api/admin/queues",
+    requirePermission(prisma, "manage_permissions"),
+    createQueueHealthRoutes(queues)
+  );
 
   // ─── Public API (API-key authenticated, for third-party consumers) ─────
 
@@ -190,6 +198,9 @@ export function createApp(deps: AppDeps): express.Application {
 
   // ─── Auth Routes (public — no JWT required) ────────────────────────────
   app.use("/api/auth", createAuthRoutes(prisma, workos));
+
+  // Local development convenience: inject seeded auth context when enabled.
+  app.use(createDevAuthBypass(prisma));
 
   // ─── Setup Wizard (before auth — needed for first-run onboarding) ──────
   app.use("/api/setup", createSetupRoutes(prisma, stripe));
@@ -263,6 +274,7 @@ export function createApp(deps: AppDeps): express.Application {
   app.use(
     "/api/integrations",
     trialGate,
+    requirePermission(prisma, "manage_permissions"),
     createIntegrationRoutes(prisma, providerRegistry, syncEngine)
   );
 
@@ -284,20 +296,28 @@ export function createApp(deps: AppDeps): express.Application {
   app.use("/api/analytics", trialGate, createAnalyticsRoutes(prisma));
 
   // Admin Settings Pages
-  app.use("/api/settings/org", trialGate, createOrgSettingsRoutes(prisma));
+  app.use(
+    "/api/settings/org",
+    trialGate,
+    requirePermission(prisma, "manage_permissions"),
+    createOrgSettingsRoutes(prisma)
+  );
   app.use(
     "/api/settings/integrations",
     trialGate,
+    requirePermission(prisma, "manage_permissions"),
     createIntegrationsRoutes(prisma)
   );
   app.use(
     "/api/settings/billing",
     trialGate,
+    requirePermission(prisma, "manage_permissions"),
     createBillingRoutes(prisma, stripe)
   );
   app.use(
     "/api/settings/api-keys",
     trialGate,
+    requirePermission(prisma, "manage_permissions"),
     createApiKeysRoutes(prisma)
   );
 

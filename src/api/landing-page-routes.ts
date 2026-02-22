@@ -7,8 +7,11 @@
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, UserRole } from "@prisma/client";
 import { LandingPageEditor } from "../services/landing-page-editor.js";
+import { AccountAccessService } from "../services/account-access.js";
+import { RoleProfileService } from "../services/role-profiles.js";
+import { AuditLogService } from "../services/audit-log.js";
 import { renderLandingPageHtml } from "./public-page-renderer.js";
 import {
   requireLandingPagesEnabled,
@@ -77,6 +80,48 @@ interface AuthReq extends Request {
 export function createLandingPageRoutes(prisma: PrismaClient): Router {
   const router = Router();
   const editor = new LandingPageEditor(prisma);
+  const accessService = new AccountAccessService(prisma);
+  const roleProfiles = new RoleProfileService(prisma);
+  const auditLogs = new AuditLogService(prisma);
+
+  const isAdminRole = (userRole?: string): boolean =>
+    !!userRole && ["OWNER", "ADMIN"].includes(userRole);
+
+  async function canAccessNamedStories(req: AuthReq): Promise<boolean> {
+    if (isAdminRole(req.userRole)) {
+      return true;
+    }
+    if (!req.organizationId || !req.userId) {
+      return false;
+    }
+    const policy = await roleProfiles.getEffectivePolicy(
+      req.organizationId,
+      req.userId,
+      req.userRole as UserRole | undefined
+    );
+    return (
+      policy.canAccessNamedStories ||
+      policy.permissions.includes("PUBLISH_NAMED_LANDING_PAGE")
+    );
+  }
+
+  async function canGenerateNamedStories(req: AuthReq): Promise<boolean> {
+    if (isAdminRole(req.userRole)) {
+      return true;
+    }
+    if (!req.organizationId || !req.userId) {
+      return false;
+    }
+    const policy = await roleProfiles.getEffectivePolicy(
+      req.organizationId,
+      req.userId,
+      req.userRole as UserRole | undefined
+    );
+    return (
+      policy.canGenerateNamedStories ||
+      policy.permissions.includes("PUBLISH_NAMED_LANDING_PAGE")
+    );
+  }
 
   // All landing page routes require the feature to be enabled
   router.use(requireLandingPagesEnabled(prisma));
@@ -94,25 +139,43 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
       }
 
       const { story_id, title, subtitle, hero_image_url, callout_boxes, include_company_name } = parse.data;
+      if (!req.organizationId || !req.userId) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
 
-      // Named landing pages require the PUBLISH_NAMED_LANDING_PAGE permission.
-      // If the user doesn't have it, silently ignore the flag (don't expose the option).
+      const story = await prisma.story.findFirst({
+        where: { id: story_id, organizationId: req.organizationId },
+        select: { id: true, accountId: true },
+      });
+      if (!story) {
+        res.status(404).json({ error: "Story not found" });
+        return;
+      }
+
+      const canAccessAccount = await accessService.canAccessAccount(
+        req.userId,
+        req.organizationId,
+        story.accountId,
+        req.userRole as UserRole | undefined
+      );
+      if (!canAccessAccount) {
+        res.status(403).json({
+          error: "permission_denied",
+          message: "You do not have access to this account.",
+        });
+        return;
+      }
+
       let namedPageAllowed = false;
-      if (include_company_name) {
-        const userRole = (req as AuthReq).userRole;
-        const ADMIN_ROLES = ["OWNER", "ADMIN"];
-        if (userRole && ADMIN_ROLES.includes(userRole)) {
-          namedPageAllowed = true;
-        } else {
-          const namedPerm = await prisma.userPermission.findUnique({
-            where: {
-              userId_permission: {
-                userId: req.userId!,
-                permission: "PUBLISH_NAMED_LANDING_PAGE",
-              },
-            },
+      if (include_company_name === true) {
+        namedPageAllowed = await canGenerateNamedStories(req);
+        if (!namedPageAllowed) {
+          res.status(403).json({
+            error: "permission_denied",
+            message: "Your role cannot generate named stories.",
           });
-          namedPageAllowed = !!namedPerm;
+          return;
         }
       }
 
@@ -129,6 +192,21 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
         });
 
         const page = await editor.getForEditing(pageId);
+        await auditLogs.record({
+          organizationId: req.organizationId!,
+          actorUserId: req.userId,
+          category: "PUBLISH",
+          action: "PAGE_CREATED",
+          targetType: "landing_page",
+          targetId: page.id,
+          severity: "INFO",
+          metadata: {
+            story_id,
+            include_company_name: namedPageAllowed,
+          },
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+        });
         res.status(201).json({
           id: page.id,
           slug: page.slug,
@@ -153,6 +231,13 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
     async (req: AuthReq, res: Response) => {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
+        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+          res.status(403).json({
+            error: "permission_denied",
+            message: "Your role cannot access named stories.",
+          });
+          return;
+        }
 
         res.json({
           id: page.id,
@@ -198,21 +283,15 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
     async (req: AuthReq, res: Response) => {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
-
-        // Check if user has PUBLISH_NAMED_LANDING_PAGE permission
-        const isAdmin = req.userRole && ["OWNER", "ADMIN"].includes(req.userRole);
-        let canPublishNamed = !!isAdmin;
-        if (!canPublishNamed) {
-          const namedPerm = await prisma.userPermission.findUnique({
-            where: {
-              userId_permission: {
-                userId: req.userId!,
-                permission: "PUBLISH_NAMED_LANDING_PAGE",
-              },
-            },
+        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+          res.status(403).json({
+            error: "permission_denied",
+            message: "Your role cannot access named stories.",
           });
-          canPublishNamed = !!namedPerm;
+          return;
         }
+
+        const canPublishNamed = await canGenerateNamedStories(req);
 
         res.json({
           pageId: page.id,
@@ -239,6 +318,13 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
     async (req: AuthReq, res: Response) => {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
+        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+          res.status(403).json({
+            error: "permission_denied",
+            message: "Your role cannot access named stories.",
+          });
+          return;
+        }
         const preview = await editor.getPreview(req.params.pageId as string);
 
         res.json({
@@ -260,6 +346,14 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
     requirePageOwnerOrPermission(prisma),
     async (req: AuthReq, res: Response) => {
       try {
+        const page = await editor.getForEditing(req.params.pageId as string);
+        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+          res.status(403).json({
+            error: "permission_denied",
+            message: "Your role cannot access named stories.",
+          });
+          return;
+        }
         const preview = await editor.getPreview(req.params.pageId as string);
 
         res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -286,6 +380,15 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
       }
 
       try {
+        const page = await editor.getForEditing(req.params.pageId as string);
+        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+          res.status(403).json({
+            error: "permission_denied",
+            message: "Your role cannot access named stories.",
+          });
+          return;
+        }
+
         await editor.update(req.params.pageId as string, req.userId!, {
           title: parse.data.title,
           subtitle: parse.data.subtitle,
@@ -317,12 +420,37 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
       }
 
       try {
+        const page = await editor.getForEditing(req.params.pageId as string);
+        if (page.includeCompanyName && !(await canGenerateNamedStories(req))) {
+          res.status(403).json({
+            error: "permission_denied",
+            message: "Your role cannot generate named stories.",
+          });
+          return;
+        }
+
         const result = await editor.publish(req.params.pageId as string, {
           visibility: parse.data.visibility,
           password: parse.data.password,
           expiresAt: parse.data.expires_at
             ? new Date(parse.data.expires_at)
             : undefined,
+        });
+        await auditLogs.record({
+          organizationId: req.organizationId!,
+          actorUserId: req.userId,
+          category: "PUBLISH",
+          action: "PAGE_PUBLISHED",
+          targetType: "landing_page",
+          targetId: req.params.pageId as string,
+          severity: "INFO",
+          metadata: {
+            visibility: parse.data.visibility,
+            has_password: !!parse.data.password,
+            expires_at: parse.data.expires_at ?? null,
+          },
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
         });
 
         res.json({
@@ -344,7 +472,27 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
     requirePageOwnerOrPermission(prisma),
     async (req: AuthReq, res: Response) => {
       try {
+        const page = await editor.getForEditing(req.params.pageId as string);
+        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+          res.status(403).json({
+            error: "permission_denied",
+            message: "Your role cannot access named stories.",
+          });
+          return;
+        }
+
         await editor.unpublish(req.params.pageId as string);
+        await auditLogs.record({
+          organizationId: req.organizationId!,
+          actorUserId: req.userId,
+          category: "PUBLISH",
+          action: "PAGE_UNPUBLISHED",
+          targetType: "landing_page",
+          targetId: req.params.pageId as string,
+          severity: "INFO",
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+        });
         res.json({ unpublished: true });
       } catch (err) {
         console.error("Unpublish error:", err);
@@ -360,7 +508,27 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
     requirePageOwnerOrPermission(prisma),
     async (req: AuthReq, res: Response) => {
       try {
+        const page = await editor.getForEditing(req.params.pageId as string);
+        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+          res.status(403).json({
+            error: "permission_denied",
+            message: "Your role cannot access named stories.",
+          });
+          return;
+        }
+
         await editor.archive(req.params.pageId as string);
+        await auditLogs.record({
+          organizationId: req.organizationId!,
+          actorUserId: req.userId,
+          category: "PUBLISH",
+          action: "PAGE_ARCHIVED",
+          targetType: "landing_page",
+          targetId: req.params.pageId as string,
+          severity: "INFO",
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+        });
         res.json({ archived: true });
       } catch (err) {
         console.error("Archive error:", err);
@@ -387,6 +555,17 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
         }
 
         await prisma.landingPage.delete({ where: { id: page.id } });
+        await auditLogs.record({
+          organizationId: req.organizationId!,
+          actorUserId: req.userId,
+          category: "PUBLISH",
+          action: "PAGE_DELETED",
+          targetType: "landing_page",
+          targetId: page.id,
+          severity: "WARN",
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+        });
         res.json({ deleted: true });
       } catch (err) {
         console.error("Delete landing page error:", err);

@@ -117,8 +117,11 @@ export function renderLandingPageHtml(page: {
   const bodyHtml = markdownToHtml(page.body);
   const safeCustomCss = sanitizeCustomCss(page.customCss) ?? "";
   const safeHeroImageUrl = sanitizeHeroImageUrl(page.heroImageUrl);
+  const calloutBoxes = Array.isArray(page.calloutBoxes)
+    ? page.calloutBoxes
+    : [];
 
-  const calloutsHtml = page.calloutBoxes
+  const calloutsHtml = calloutBoxes
     .map(
       (box) => {
         const iconType = box.icon ?? "insight";
@@ -468,7 +471,7 @@ export function renderLandingPageHtml(page: {
     </header>
 
     ${
-      page.calloutBoxes.length > 0
+      calloutBoxes.length > 0
         ? `<section class="callouts" aria-label="Key highlights">${calloutsHtml}</section>`
         : ""
     }

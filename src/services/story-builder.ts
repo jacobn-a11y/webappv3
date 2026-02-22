@@ -12,6 +12,16 @@ import OpenAI from "openai";
 import type { PrismaClient, FunnelStage } from "@prisma/client";
 import { TOPIC_LABELS, type TaxonomyTopic } from "../types/taxonomy.js";
 import { TranscriptMerger } from "./transcript-merger.js";
+import {
+  storyLengthWordTarget,
+  storyOutlineGuide,
+  storyTypeLabel,
+  type StoryContextSettings,
+  type StoryLength,
+  type StoryOutline,
+  type StoryPromptDefaults,
+  type StoryTypeInput,
+} from "../types/story-generation.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -24,6 +34,21 @@ export interface StoryBuilderOptions {
   filterTopics?: TaxonomyTopic[];
   /** Custom title override. Auto-generated if omitted. */
   title?: string;
+  /** Narrative format variation. */
+  format?:
+    | "before_after_transformation"
+    | "day_in_the_life"
+    | "by_the_numbers_snapshot"
+    | "video_testimonial_soundbite"
+    | "joint_webinar_presentation"
+    | "peer_reference_call_guide"
+    | "analyst_validated_study";
+  /** Target length band. */
+  storyLength?: StoryLength;
+  /** Target outline template. */
+  storyOutline?: StoryOutline;
+  /** Explicit story type selector (full journey or topic-driven type). */
+  storyType?: StoryTypeInput;
 }
 
 interface TranscriptSegment {
@@ -50,47 +75,24 @@ interface StoryResult {
   quotes: ExtractedQuote[];
 }
 
+interface EffectiveStoryGenerationSettings {
+  storyLength: StoryLength;
+  storyOutline: StoryOutline;
+  storyType: StoryTypeInput;
+  storyFormat?: StoryBuilderOptions["format"];
+}
+
 // ─── Prompts ─────────────────────────────────────────────────────────────────
 
-const JOURNEY_SUMMARY_PROMPT = `You are an expert B2B content strategist. Given a collection of transcript segments from calls with a customer account, produce a structured Markdown case study / account journey document.
+const JOURNEY_SUMMARY_PROMPT = `You are an expert B2B content strategist writing evidence-based customer stories for SaaS buyers.
 
-GUIDELINES:
-- Write in third person, professional tone
-- Organize chronologically with clear section headers
-- Highlight key milestones, decisions, and outcomes
-- Use bullet points for lists of benefits or features
-- Include a "Timeline" section showing the progression
-- Include a "Key Outcomes" section summarizing measurable results
-- Bold any quantified metrics (numbers, percentages, dollar amounts)
-- Keep it concise but comprehensive — aim for 800-1500 words
-- Do NOT fabricate information; only use what's in the transcripts
-
-OUTPUT FORMAT (Markdown):
-# [Account Name]: [Journey Title]
-
-## Executive Summary
-[2-3 sentence overview]
-
-## Timeline
-| Date | Milestone |
-|------|-----------|
-| ...  | ...       |
-
-## The Journey
-### [Phase 1 Title]
-[Narrative]
-
-### [Phase 2 Title]
-[Narrative]
-
-...
-
-## Key Outcomes
-- **[Metric]**: [Value and context]
-
-## Notable Quotes
-> "[Quote]" — [Speaker, Title]
-`;
+Rules:
+1. Use only facts from provided transcripts/context. Never invent.
+2. Prioritize quantified outcomes, timeline accuracy, and decision rationale.
+3. Keep writing in third person and business-professional tone.
+4. Use markdown headings/tables/lists for readability.
+5. Clearly separate factual evidence from inferred interpretation.
+6. Make the output useful for RevOps, Marketing, and Sales stakeholders.`;
 
 const QUOTE_EXTRACTION_PROMPT = `You are a precision extraction engine. Given transcript segments, extract ONLY direct quotes that contain quantified value — specific numbers, percentages, dollar amounts, time savings, or measurable outcomes.
 
@@ -130,9 +132,24 @@ export class StoryBuilder {
    *   3. Extract high-value quotes
    */
   async buildStory(options: StoryBuilderOptions): Promise<StoryResult> {
-    const account = await this.prisma.account.findUniqueOrThrow({
-      where: { id: options.accountId },
-    });
+    const [account, orgSettings] = await Promise.all([
+      this.prisma.account.findUniqueOrThrow({
+        where: { id: options.accountId },
+      }),
+      this.prisma.orgSettings.findUnique({
+        where: { organizationId: options.organizationId },
+        select: { storyContext: true, storyPromptDefaults: true },
+      }),
+    ]);
+
+    const savedContext = (orgSettings?.storyContext ?? {}) as StoryContextSettings;
+    const savedDefaults = (orgSettings?.storyPromptDefaults ?? {}) as StoryPromptDefaults;
+    const effectiveSettings: EffectiveStoryGenerationSettings = {
+      storyLength: options.storyLength ?? savedDefaults.storyLength ?? "MEDIUM",
+      storyOutline: options.storyOutline ?? savedDefaults.storyOutline ?? "CHRONOLOGICAL_JOURNEY",
+      storyType: options.storyType ?? savedDefaults.storyType ?? "FULL_ACCOUNT_JOURNEY",
+      storyFormat: options.format ?? savedDefaults.storyFormat,
+    };
 
     // ── Step 1: Merge all transcripts into a single markdown ─────────
     const mergeResult = await this.merger.mergeTranscripts({
@@ -158,7 +175,9 @@ export class StoryBuilder {
       mergeResult.markdown,
       mergeResult.includedCalls,
       mergeResult.truncated,
-      segments
+      segments,
+      savedContext,
+      effectiveSettings
     );
 
     // ── Step 4: Extract high-value quotes ────────────────────────────
@@ -174,9 +193,15 @@ export class StoryBuilder {
         accountId: options.accountId,
         title,
         markdownBody: markdown,
-        storyType: this.inferStoryType(options.filterTopics),
+        storyType: this.inferStoryType(options),
         funnelStages: options.funnelStages ?? [],
-        filterTags: options.filterTopics ?? [],
+        filterTags: [
+          ...(options.filterTopics ?? []),
+          `story_type:${effectiveSettings.storyType}`,
+          `story_length:${effectiveSettings.storyLength}`,
+          `story_outline:${effectiveSettings.storyOutline}`,
+          ...(effectiveSettings.storyFormat ? [`story_format:${effectiveSettings.storyFormat}`] : []),
+        ],
       },
     });
 
@@ -273,7 +298,9 @@ export class StoryBuilder {
     mergedMarkdown: string,
     callCount: number,
     wasTruncated: boolean,
-    segments: TranscriptSegment[]
+    segments: TranscriptSegment[],
+    context: StoryContextSettings,
+    settings: EffectiveStoryGenerationSettings
   ): Promise<string> {
     // Build topic summary from tagged segments for additional context
     const topicSummary = this.buildTopicSummary(segments);
@@ -287,15 +314,20 @@ export class StoryBuilder {
       temperature: 0.3,
       max_tokens: 4000,
       messages: [
-        { role: "system", content: JOURNEY_SUMMARY_PROMPT },
+        {
+          role: "system",
+          content: this.buildStorySystemPrompt(context, settings),
+        },
         {
           role: "user",
-          content: `Account Name: ${accountName}
-Number of calls: ${callCount}
-${topicSummary ? `\nKey Topics Identified: ${topicSummary}\n` : ""}${truncationNote}
-
-FULL MERGED TRANSCRIPT:
-${mergedMarkdown}`,
+          content: this.buildStoryUserPrompt({
+            accountName,
+            callCount,
+            topicSummary,
+            truncationNote,
+            mergedMarkdown,
+            settings,
+          }),
         },
       ],
     });
@@ -358,6 +390,80 @@ ${transcriptContext}`,
       .slice(0, 10)
       .map(([label]) => label)
       .join(", ");
+  }
+
+  private buildStorySystemPrompt(
+    context: StoryContextSettings,
+    settings: EffectiveStoryGenerationSettings
+  ): string {
+    const contextLines = [
+      context.companyOverview
+        ? `Company Context: ${context.companyOverview}`
+        : null,
+      context.products?.length
+        ? `Products: ${context.products.join(", ")}`
+        : null,
+      context.targetPersonas?.length
+        ? `Target Personas: ${context.targetPersonas.join(", ")}`
+        : null,
+      context.targetIndustries?.length
+        ? `Target Industries: ${context.targetIndustries.join(", ")}`
+        : null,
+      context.differentiators?.length
+        ? `Differentiators: ${context.differentiators.join(" | ")}`
+        : null,
+      context.proofPoints?.length
+        ? `Approved Proof Points: ${context.proofPoints.join(" | ")}`
+        : null,
+      context.bannedClaims?.length
+        ? `Never claim these unless explicit in transcript: ${context.bannedClaims.join(" | ")}`
+        : null,
+      context.approvedTerminology?.length
+        ? `Preferred Terminology: ${context.approvedTerminology.join(", ")}`
+        : null,
+      context.writingStyleGuide
+        ? `Writing Style Guide: ${context.writingStyleGuide}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return `${JOURNEY_SUMMARY_PROMPT}
+
+Output controls:
+- Story Type Focus: ${storyTypeLabel(settings.storyType)}
+- Target Length: ${settings.storyLength} (${storyLengthWordTarget(settings.storyLength)})
+- Outline Template: ${settings.storyOutline} (${storyOutlineGuide(settings.storyOutline)})
+- Format Angle: ${settings.storyFormat ?? "auto"}
+
+${contextLines ? `Organization Instructions:\n${contextLines}` : "No additional organization instructions provided."}
+`;
+  }
+
+  private buildStoryUserPrompt(input: {
+    accountName: string;
+    callCount: number;
+    topicSummary: string;
+    truncationNote: string;
+    mergedMarkdown: string;
+    settings: EffectiveStoryGenerationSettings;
+  }): string {
+    return `Account Name: ${input.accountName}
+Number of calls: ${input.callCount}
+Requested Story Type: ${storyTypeLabel(input.settings.storyType)}
+Requested Length: ${input.settings.storyLength}
+Requested Outline: ${input.settings.storyOutline}
+Requested Format: ${input.settings.storyFormat ?? "auto"}
+${input.topicSummary ? `\nKey Topics Identified: ${input.topicSummary}\n` : ""}${input.truncationNote}
+
+Instructions:
+- Center the narrative around the requested story type.
+- Use only transcript evidence for claims.
+- Surface explicit metrics in a dedicated outcomes section.
+- Include practical implications for RevOps, Marketing, and Sales.
+
+FULL MERGED TRANSCRIPT:
+${input.mergedMarkdown}`;
   }
 
   // ─── Step 3: Extract Quotes ───────────────────────────────────────
@@ -446,8 +552,16 @@ ${transcriptContext}`,
   }
 
   private inferStoryType(
-    topics?: TaxonomyTopic[]
+    options: StoryBuilderOptions
   ): "FULL_JOURNEY" | "ONBOARDING" | "ROI_ANALYSIS" | "COMPETITIVE_WIN" | "EXPANSION" | "CUSTOM" {
+    const explicitType = options.storyType;
+    if (explicitType === "FULL_ACCOUNT_JOURNEY") return "FULL_JOURNEY";
+    if (explicitType === "implementation_onboarding") return "ONBOARDING";
+    if (explicitType === "roi_financial_outcomes") return "ROI_ANALYSIS";
+    if (explicitType === "competitive_displacement") return "COMPETITIVE_WIN";
+    if (explicitType === "upsell_cross_sell_expansion") return "EXPANSION";
+
+    const topics = options.filterTopics;
     if (!topics || topics.length === 0) return "FULL_JOURNEY";
     if (topics.includes("implementation_onboarding")) return "ONBOARDING";
     if (topics.includes("roi_financial_outcomes")) return "ROI_ANALYSIS";

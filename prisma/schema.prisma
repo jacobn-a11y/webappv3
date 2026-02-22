@@ -45,8 +45,48 @@ model Organization {
   invites              OrgInvite[]
   setupWizard          SetupWizard?
   storyRegenLogs       StoryRegenLog[]
+  roleProfiles         RoleProfile[]
+  auditLogs            AuditLog[]
+  featureFlags         OrgFeatureFlag[]
 
   @@map("organizations")
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  actorUserId    String?
+  category       String
+  action         String
+  targetType     String?
+  targetId       String?
+  severity       String   @default("INFO")
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, category, createdAt])
+  @@map("audit_logs")
+}
+
+model OrgFeatureFlag {
+  id             String   @id @default(cuid())
+  organizationId String
+  key            String
+  enabled        Boolean  @default(false)
+  config         Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId, enabled])
+  @@map("org_feature_flags")
 }
 
 enum Plan {
@@ -87,6 +127,7 @@ model User {
   aiUsageNotifications AIUsageNotification[]
   aiAccess             UserAIAccess[]
   aiBalance            UserAIBalance[]
+  roleAssignment       UserRoleAssignment?
 
   @@index([organizationId])
   @@map("users")
@@ -97,6 +138,50 @@ enum UserRole {
   ADMIN
   MEMBER
   VIEWER
+}
+
+model RoleProfile {
+  id                          String           @id @default(cuid())
+  organizationId              String
+  key                         String
+  name                        String
+  description                 String?
+  isPreset                    Boolean          @default(false)
+  permissions                 PermissionType[] @default([])
+  canAccessAnonymousStories   Boolean          @default(true)
+  canGenerateAnonymousStories Boolean          @default(true)
+  canAccessNamedStories       Boolean          @default(false)
+  canGenerateNamedStories     Boolean          @default(false)
+  defaultAccountScopeType     AccountScopeType @default(ACCOUNT_LIST)
+  defaultAccountIds           String[]         @default([])
+  maxTokensPerDay             Int?
+  maxTokensPerMonth           Int?
+  maxRequestsPerDay           Int?
+  maxRequestsPerMonth         Int?
+  maxStoriesPerMonth          Int?
+  createdAt                   DateTime         @default(now())
+  updatedAt                   DateTime         @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments  UserRoleAssignment[]
+
+  @@unique([organizationId, key])
+  @@map("role_profiles")
+}
+
+model UserRoleAssignment {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  roleProfileId String
+  assignedById  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleProfile RoleProfile @relation(fields: [roleProfileId], references: [id], onDelete: Cascade)
+
+  @@index([roleProfileId])
+  @@map("user_role_assignments")
 }
 
 // ─── CRM Entities ────────────────────────────────────────────────────────────
@@ -472,6 +557,9 @@ model OrgSettings {
   anonymizationEnabled      Boolean                  @default(true)
   transcriptMergeMaxWords   Int                      @default(600000)
   transcriptTruncationMode  TranscriptTruncationMode @default(OLDEST_FIRST)
+  dataGovernancePolicy      Json?
+  storyContext              Json?
+  storyPromptDefaults       Json?
   createdAt                 DateTime                 @default(now())
   updatedAt                 DateTime                 @updatedAt
 

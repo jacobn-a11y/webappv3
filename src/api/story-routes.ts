@@ -6,9 +6,20 @@
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import type { StoryBuilder } from "../services/story-builder.js";
+import type { StoryBuilder, StoryBuilderOptions } from "../services/story-builder.js";
 import type { PrismaClient, TranscriptTruncationMode, HighValueQuote } from "@prisma/client";
 import { TranscriptMerger } from "../services/transcript-merger.js";
+import { AccountAccessService } from "../services/account-access.js";
+import { RoleProfileService } from "../services/role-profiles.js";
+import { STORY_FORMATS } from "../types/taxonomy.js";
+import {
+  STORY_LENGTHS,
+  STORY_OUTLINES,
+  STORY_TYPES,
+  type StoryLength,
+  type StoryOutline,
+  type StoryTypeInput,
+} from "../types/story-generation.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -17,6 +28,10 @@ const BuildStorySchema = z.object({
   funnel_stages: z.array(z.string()).optional(),
   filter_topics: z.array(z.string()).optional(),
   title: z.string().optional(),
+  format: z.enum(STORY_FORMATS as unknown as [string, ...string[]]).optional(),
+  story_length: z.enum(STORY_LENGTHS as unknown as [string, ...string[]]).optional(),
+  story_outline: z.enum(STORY_OUTLINES as unknown as [string, ...string[]]).optional(),
+  story_type: z.enum(STORY_TYPES as unknown as [string, ...string[]]).optional(),
 });
 
 const MergeTranscriptsSchema = z.object({
@@ -34,6 +49,8 @@ export function createStoryRoutes(
   prisma: PrismaClient
 ): Router {
   const router = Router();
+  const accessService = new AccountAccessService(prisma);
+  const roleProfiles = new RoleProfileService(prisma);
 
   /**
    * POST /api/stories/build
@@ -51,21 +68,67 @@ export function createStoryRoutes(
     }
 
     const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
+    const userId = (req as unknown as Record<string, unknown>).userId as string;
+    const userRole = (req as unknown as Record<string, unknown>).userRole as
+      | "OWNER"
+      | "ADMIN"
+      | "MEMBER"
+      | "VIEWER"
+      | undefined;
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
     }
 
-    const { account_id, funnel_stages, filter_topics, title } =
+    const {
+      account_id,
+      funnel_stages,
+      filter_topics,
+      title,
+      format,
+      story_length,
+      story_outline,
+      story_type,
+    } =
       parseResult.data;
 
     try {
+      const [policy, canAccessAccount] = await Promise.all([
+        roleProfiles.getEffectivePolicy(organizationId, userId, userRole),
+        accessService.canAccessAccount(
+          userId,
+          organizationId,
+          account_id,
+          userRole
+        ),
+      ]);
+
+      if (!policy.canGenerateAnonymousStories) {
+        res.status(403).json({
+          error: "permission_denied",
+          message: "Your role cannot generate stories.",
+        });
+        return;
+      }
+
+      if (!canAccessAccount) {
+        res.status(403).json({
+          error: "permission_denied",
+          message: "You do not have access to this account.",
+        });
+        return;
+      }
+
       const result = await storyBuilder.buildStory({
         accountId: account_id,
         organizationId,
         funnelStages: funnel_stages as never[],
         filterTopics: filter_topics as never[],
         title,
+        format: format as StoryBuilderOptions["format"] | undefined,
+        storyLength: story_length as StoryLength | undefined,
+        storyOutline: story_outline as StoryOutline | undefined,
+        storyType: story_type as StoryTypeInput | undefined,
       });
 
       res.json({
@@ -93,12 +156,45 @@ export function createStoryRoutes(
    */
   router.get("/:accountId", async (req: Request, res: Response) => {
     const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
+    const userId = (req as unknown as Record<string, unknown>).userId as string;
+    const userRole = (req as unknown as Record<string, unknown>).userRole as
+      | "OWNER"
+      | "ADMIN"
+      | "MEMBER"
+      | "VIEWER"
+      | undefined;
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
     }
 
     try {
+      const [policy, canAccessAccount] = await Promise.all([
+        roleProfiles.getEffectivePolicy(organizationId, userId, userRole),
+        accessService.canAccessAccount(
+          userId,
+          organizationId,
+          req.params.accountId as string,
+          userRole
+        ),
+      ]);
+
+      if (!policy.canAccessAnonymousStories) {
+        res.status(403).json({
+          error: "permission_denied",
+          message: "Your role cannot access stories.",
+        });
+        return;
+      }
+
+      if (!canAccessAccount) {
+        res.status(403).json({
+          error: "permission_denied",
+          message: "You do not have access to this account.",
+        });
+        return;
+      }
+
       const stories = await prisma.story.findMany({
         where: {
           accountId: req.params.accountId as string,
@@ -156,6 +252,13 @@ export function createStoryRoutes(
     }
 
     const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
+    const userId = (req as unknown as Record<string, unknown>).userId as string;
+    const userRole = (req as unknown as Record<string, unknown>).userRole as
+      | "OWNER"
+      | "ADMIN"
+      | "MEMBER"
+      | "VIEWER"
+      | undefined;
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
@@ -165,6 +268,32 @@ export function createStoryRoutes(
       parseResult.data;
 
     try {
+      const [policy, canAccessAccount] = await Promise.all([
+        roleProfiles.getEffectivePolicy(organizationId, userId, userRole),
+        accessService.canAccessAccount(
+          userId,
+          organizationId,
+          account_id,
+          userRole
+        ),
+      ]);
+
+      if (!policy.canGenerateAnonymousStories) {
+        res.status(403).json({
+          error: "permission_denied",
+          message: "Your role cannot generate stories.",
+        });
+        return;
+      }
+
+      if (!canAccessAccount) {
+        res.status(403).json({
+          error: "permission_denied",
+          message: "You do not have access to this account.",
+        });
+        return;
+      }
+
       const result = await merger.mergeTranscripts({
         accountId: account_id,
         organizationId,

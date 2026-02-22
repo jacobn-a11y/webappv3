@@ -60,7 +60,7 @@ const app = createApp({
   prisma,
   stripe,
   workos,
-  processingQueue: queues.processingQueue,
+  queues,
   services,
 });
 

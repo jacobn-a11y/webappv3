@@ -1718,6 +1718,215 @@ mark.transcript__highlight--active { background: #f59e0b; }
 .editor__modal-btn--primary { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
 .editor__modal-btn--primary:hover { background: var(--color-accent-hover); }
 .editor__modal-btn--primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ─── Admin Roles ────────────────────────────────────────────────────────── */
+
+.admin-roles__page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-roles__title {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.admin-roles__subtitle {
+  color: var(--color-text-secondary);
+  margin-top: -8px;
+}
+
+.admin-roles__error {
+  background: var(--color-error-light);
+  border: 1px solid #fecaca;
+  color: var(--color-error);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+
+.admin-roles__form,
+.admin-roles__section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+}
+
+.admin-roles__grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.admin-roles__grid label,
+.admin-roles__flags label,
+.admin-roles__permissions label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.admin-roles__flags {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+}
+
+.admin-roles__flags label,
+.admin-roles__permissions label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-roles__permissions {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+}
+
+.admin-roles__form input,
+.admin-roles__form select,
+.admin-roles__section select {
+  border: 1px solid var(--color-border);
+  background: #fff;
+  color: var(--color-text);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.admin-roles__wide {
+  grid-column: 1 / -1;
+}
+
+.admin-roles__form-actions,
+.admin-roles__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.admin-roles__form-actions {
+  margin-top: 12px;
+}
+
+.admin-roles__table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+}
+
+.admin-roles__table th,
+.admin-roles__table td {
+  text-align: left;
+  padding: 10px;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+  font-size: 12px;
+}
+
+/* ─── Admin Story Context ────────────────────────────────────────────────── */
+
+.admin-story-context__page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-story-context__title {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.admin-story-context__subtitle {
+  color: var(--color-text-secondary);
+}
+
+.admin-story-context__card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.admin-story-context__card label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.admin-story-context__card textarea,
+.admin-story-context__card input,
+.admin-story-context__card select {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  font-size: 13px;
+  color: var(--color-text);
+  background: #fff;
+}
+
+.admin-story-context__error {
+  background: var(--color-error-light);
+  border: 1px solid #fecaca;
+  color: var(--color-error);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+
+.admin-story-context__notice {
+  background: var(--color-success-light);
+  border: 1px solid #a7f3d0;
+  color: var(--color-success);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+
+/* ─── Admin Audit Logs ───────────────────────────────────────────────────── */
+
+.admin-audit__page { display: flex; flex-direction: column; gap: 12px; }
+.admin-audit__header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.admin-audit__title { font-size: 24px; font-weight: 700; }
+.admin-audit__filters { display: flex; gap: 8px; }
+.admin-audit__input {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  min-width: 280px;
+}
+.admin-audit__table-wrap {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: auto;
+}
+.admin-audit__table { width: 100%; border-collapse: collapse; }
+.admin-audit__table th,
+.admin-audit__table td {
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-border);
+  padding: 8px;
+  font-size: 12px;
+}
+.admin-audit__meta {
+  margin: 0;
+  max-width: 360px;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+}
 .editor__success-section { text-align: center; padding: 20px 0; }
 .editor__success-icon { font-size: 48px; margin-bottom: 12px; }
 .editor__success-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; }

@@ -3,6 +3,7 @@
  */
 
 import type { FunnelStage, TaxonomyTopic, StoryFormat } from "../types/taxonomy";
+import type { StoryLength, StoryOutline, StoryTypeInput } from "../types/taxonomy";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -12,6 +13,9 @@ export interface BuildStoryRequest {
   filter_topics?: TaxonomyTopic[];
   title?: string;
   format?: StoryFormat;
+  story_length?: StoryLength;
+  story_outline?: StoryOutline;
+  story_type?: StoryTypeInput;
 }
 
 export interface StoryQuote {
@@ -114,6 +118,88 @@ export interface PermissionAccessGrant {
   crmReportName: string | null;
   lastSyncedAt: string | null;
   createdAt: string;
+}
+
+// ─── Role Profiles ─────────────────────────────────────────────────────────
+
+export interface RoleProfile {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  isPreset: boolean;
+  permissions: string[];
+  canAccessAnonymousStories: boolean;
+  canGenerateAnonymousStories: boolean;
+  canAccessNamedStories: boolean;
+  canGenerateNamedStories: boolean;
+  defaultAccountScopeType: string;
+  defaultAccountIds: string[];
+  maxTokensPerDay: number | null;
+  maxTokensPerMonth: number | null;
+  maxRequestsPerDay: number | null;
+  maxRequestsPerMonth: number | null;
+  maxStoriesPerMonth: number | null;
+  assignments: Array<{
+    userId: string;
+    user: { name: string | null; email: string };
+  }>;
+}
+
+export interface RoleAssignableUser {
+  id: string;
+  name: string | null;
+  email: string;
+  base_role: string;
+  role_profile_id: string | null;
+}
+
+export interface UpsertRoleProfileRequest {
+  key: string;
+  name: string;
+  description?: string;
+  permissions: string[];
+  can_access_anonymous_stories: boolean;
+  can_generate_anonymous_stories: boolean;
+  can_access_named_stories: boolean;
+  can_generate_named_stories: boolean;
+  default_account_scope_type: string;
+  default_account_ids?: string[];
+  max_tokens_per_day?: number | null;
+  max_tokens_per_month?: number | null;
+  max_requests_per_day?: number | null;
+  max_requests_per_month?: number | null;
+  max_stories_per_month?: number | null;
+}
+
+export interface StoryContextSettings {
+  company_overview: string;
+  products: string[];
+  target_personas: string[];
+  target_industries: string[];
+  differentiators: string[];
+  proof_points: string[];
+  banned_claims: string[];
+  writing_style_guide: string;
+  approved_terminology: string[];
+  default_story_length: StoryLength;
+  default_story_outline: StoryOutline;
+  default_story_format: StoryFormat | null;
+  default_story_type: StoryTypeInput;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  created_at: string;
+  actor_user_id: string | null;
+  category: string;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  severity: string;
+  metadata: unknown;
+  ip_address: string | null;
+  user_agent: string | null;
 }
 
 // ─── Transcript Viewer ──────────────────────────────────────────────────────
@@ -400,6 +486,68 @@ export async function revokePermission(userId: string, permission: string): Prom
   return request<void>("/dashboard/permissions/revoke", {
     method: "POST",
     body: JSON.stringify({ user_id: userId, permission }),
+  });
+}
+
+export async function getStoryContextSettings(): Promise<StoryContextSettings> {
+  return request<StoryContextSettings>("/dashboard/story-context");
+}
+
+export async function updateStoryContextSettings(
+  body: StoryContextSettings
+): Promise<void> {
+  return request<void>("/dashboard/story-context", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getAuditLogs(params?: {
+  limit?: number;
+  category?: string;
+  actor_user_id?: string;
+}): Promise<{ logs: AuditLogEntry[] }> {
+  const qs = new URLSearchParams();
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.category) qs.set("category", params.category);
+  if (params?.actor_user_id) qs.set("actor_user_id", params.actor_user_id);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return request<{ logs: AuditLogEntry[] }>(`/dashboard/audit-logs${suffix}`);
+}
+
+export async function getRoleProfiles(): Promise<{
+  roles: RoleProfile[];
+  users: RoleAssignableUser[];
+}> {
+  return request<{ roles: RoleProfile[]; users: RoleAssignableUser[] }>("/dashboard/roles");
+}
+
+export async function createRoleProfile(body: UpsertRoleProfileRequest): Promise<RoleProfile> {
+  const res = await request<{ role: RoleProfile }>("/dashboard/roles", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return res.role;
+}
+
+export async function updateRoleProfile(roleId: string, body: UpsertRoleProfileRequest): Promise<RoleProfile> {
+  const res = await request<{ role: RoleProfile }>(`/dashboard/roles/${roleId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  return res.role;
+}
+
+export async function deleteRoleProfile(roleId: string): Promise<void> {
+  return request<void>(`/dashboard/roles/${roleId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function assignRoleProfile(userId: string, roleProfileId: string): Promise<void> {
+  return request<void>("/dashboard/roles/assign", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId, role_profile_id: roleProfileId }),
   });
 }
 

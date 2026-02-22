@@ -30,6 +30,29 @@ const SlackExportSchema = z.object({
 export function createExportRoutes(prisma: PrismaClient): Router {
   const router = Router();
   const exporter = new LandingPageExporter(prisma);
+  
+  const enforceExportPolicy = async (req: Request, res: Response): Promise<boolean> => {
+    const organizationId = (req as unknown as { organizationId?: string }).organizationId;
+    if (!organizationId) {
+      res.status(401).json({ error: "Authentication required" });
+      return false;
+    }
+
+    const settings = await prisma.orgSettings.findUnique({
+      where: { organizationId },
+      select: { dataGovernancePolicy: true } as unknown as Record<string, boolean>,
+    });
+    const settingsRecord = settings as unknown as { dataGovernancePolicy?: unknown } | null;
+    const policy = (settingsRecord?.dataGovernancePolicy ?? {}) as Record<string, unknown>;
+    if (policy.pii_export_enabled === false) {
+      res.status(403).json({
+        error: "policy_denied",
+        message: "Exports are disabled by your organization's data governance policy.",
+      });
+      return false;
+    }
+    return true;
+  };
 
   // All export routes require page owner or edit_any permission
   router.use("/:pageId/export", requirePageOwnerOrPermission(prisma));
@@ -44,6 +67,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
    */
   router.post("/:pageId/export/pdf", async (req: Request, res: Response) => {
     try {
+      if (!(await enforceExportPolicy(req, res))) return;
       const { buffer, filename } = await exporter.exportPdf(req.params.pageId as string);
 
       res.setHeader("Content-Type", "application/pdf");
@@ -86,6 +110,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
       }
 
       try {
+        if (!(await enforceExportPolicy(req, res))) return;
         const result = await exporter.exportGoogleDoc(
           req.params.pageId as string,
           parse.data.access_token
@@ -132,6 +157,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
       }
 
       try {
+        if (!(await enforceExportPolicy(req, res))) return;
         const result = await exporter.exportSlack(
           req.params.pageId as string,
           parse.data.webhook_url

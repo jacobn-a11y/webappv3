@@ -217,3 +217,35 @@ export const STORY_TYPE_LABELS: Record<string, string> = {
   EXPANSION: "Expansion",
   CUSTOM: "Custom",
 };
+
+export type StoryLength = "SHORT" | "MEDIUM" | "LONG" | "EXECUTIVE";
+export const STORY_LENGTH_LABELS: Record<StoryLength, string> = {
+  SHORT: "Short (500-800 words)",
+  MEDIUM: "Medium (900-1400 words)",
+  LONG: "Long (1500-2400 words)",
+  EXECUTIVE: "Executive Brief (350-600 words)",
+};
+
+export type StoryOutline =
+  | "CHRONOLOGICAL_JOURNEY"
+  | "PROBLEM_SOLUTION_IMPACT"
+  | "BY_THE_NUMBERS"
+  | "EXECUTIVE_BRIEF"
+  | "IMPLEMENTATION_PLAYBOOK"
+  | "DEAL_ANATOMY";
+
+export const STORY_OUTLINE_LABELS: Record<StoryOutline, string> = {
+  CHRONOLOGICAL_JOURNEY: "Chronological Journey",
+  PROBLEM_SOLUTION_IMPACT: "Problem → Solution → Impact",
+  BY_THE_NUMBERS: "By the Numbers",
+  EXECUTIVE_BRIEF: "Executive Brief",
+  IMPLEMENTATION_PLAYBOOK: "Implementation Playbook",
+  DEAL_ANATOMY: "Deal Anatomy",
+};
+
+export type StoryTypeInput = "FULL_ACCOUNT_JOURNEY" | TaxonomyTopic;
+
+export const STORY_TYPE_INPUT_LABELS: Record<StoryTypeInput, string> = {
+  FULL_ACCOUNT_JOURNEY: "Full Account Journey",
+  ...TOPIC_LABELS,
+};
