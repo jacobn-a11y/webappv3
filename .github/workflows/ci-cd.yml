@@ -46,6 +46,34 @@ jobs:
       - run: npx prisma generate
       - run: npx tsc --noEmit
 
+  migration_safety:
+    name: Migration Safety
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run migrate:safety
+
+  contracts_freeze:
+    name: Contracts Freeze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run contracts:check
+
   # ── Test ─────────────────────────────────────────────────────────────────────
   test:
     name: Test
@@ -95,11 +123,81 @@ jobs:
       - run: npx prisma migrate deploy
       - run: npm test
 
+  security_tests:
+    name: Security Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run test:security
+
+  reliability_tests:
+    name: Reliability Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run test:reliability
+
+  enterprise_e2e:
+    name: Enterprise E2E
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run test:e2e:enterprise
+
+  release_readiness:
+    name: Release Readiness
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run db:seed:volume:dry-run
+      - run: LAUNCH_GATE_DRY_RUN=true npm run launch:gate
+      - run: LAUNCH_GATE_DRY_RUN=true CI_RUN_URL=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} npm run launch:evidence
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence
+          path: docs/release-evidence/release-evidence-*.md
+
   # ── Build ────────────────────────────────────────────────────────────────────
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test]
+    needs: [lint, typecheck, test, security_tests, reliability_tests, enterprise_e2e, migration_safety, contracts_freeze]
     steps:
       - uses: actions/checkout@v4
 
@@ -111,12 +209,31 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
       - run: npm run build
+      - run: npm --prefix frontend ci
+      - run: npm --prefix frontend run build
+
+  perf_budget:
+    name: Perf Budget
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm --prefix frontend ci
+      - run: npm --prefix frontend run build
+      - run: npm run perf:budget
 
   # ── Deploy to Fly.io ────────────────────────────────────────────────────────
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [build, perf_budget, release_readiness]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     environment:
@@ -129,3 +246,13 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
       - run: flyctl deploy --remote-only
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run smoke:test
+        env:
+          SMOKE_BASE_URL: https://storyengine.fly.dev

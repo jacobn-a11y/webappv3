@@ -15,6 +15,7 @@
 
 import type { PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
+import { buildPublicAppUrl } from "../lib/public-app-url.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -379,8 +380,8 @@ export class PricingService {
       customer: customerId,
       mode: "subscription",
       line_items: lineItems,
-      success_url: `${process.env.APP_URL}/settings/billing?success=true`,
-      cancel_url: `${process.env.APP_URL}/settings/billing?canceled=true`,
+      success_url: buildPublicAppUrl("/admin/billing?success=true"),
+      cancel_url: buildPublicAppUrl("/admin/billing?canceled=true"),
       subscription_data: {
         metadata: { organizationId },
         trial_period_days:

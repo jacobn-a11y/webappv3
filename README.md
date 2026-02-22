@@ -261,12 +261,17 @@ PINECONE_INDEX=
 WORKOS_API_KEY=          # Auth (SSO/SAML)
 WORKOS_CLIENT_ID=
 WORKOS_REDIRECT_URI=
+BILLING_ENABLED=         # self-service default is "true"; set "false" only for internal/dev bypass
 STRIPE_SECRET_KEY=       # Billing
 STRIPE_WEBHOOK_SECRET=
-STRIPE_FREE_TRIAL_PRICE_ID=
+STRIPE_STARTER_PRICE_ID=
+STRIPE_PROFESSIONAL_PRICE_ID=
+STRIPE_ENTERPRISE_PRICE_ID=
 AI_KEY_ENCRYPTION_SECRET=  # AES-256-GCM key for encrypting API keys at rest
 PLATFORM_ADMIN_API_KEY=    # Auth for platform admin dashboard routes
 APP_URL=                 # Base URL for generated links
+FRONTEND_URL=            # Frontend URL for auth/invite/checkout redirects
+INVITE_FROM_EMAIL=       # Sender identity for org invite emails
 ```
 
 ## Getting Started

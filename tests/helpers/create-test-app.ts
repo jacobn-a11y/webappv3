@@ -12,7 +12,7 @@ import { createStoryRoutes } from "../../src/api/story-routes.js";
 import { createTrialGate } from "../../src/middleware/billing.js";
 import type { RAGEngine } from "../../src/services/rag-engine.js";
 import type { StoryBuilder } from "../../src/services/story-builder.js";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, UserRole } from "@prisma/client";
 import type Stripe from "stripe";
 
 export interface TestAppOptions {
@@ -27,6 +27,14 @@ export interface TestAppOptions {
    * Set to `null` to simulate an unauthenticated request.
    */
   organizationId?: string | null;
+  /**
+   * User ID to inject via fake auth middleware for authenticated requests.
+   */
+  userId?: string;
+  /**
+   * User role to inject via fake auth middleware for authenticated requests.
+   */
+  userRole?: UserRole;
 }
 
 /**
@@ -39,6 +47,8 @@ export function createTestApp(options: TestAppOptions) {
     ragEngine,
     storyBuilder,
     organizationId = "org-test-active",
+    userId = "user-test-1",
+    userRole = "OWNER",
   } = options;
 
   const app = express();
@@ -48,6 +58,8 @@ export function createTestApp(options: TestAppOptions) {
   app.use((req: Request, _res: Response, next: NextFunction) => {
     if (organizationId !== null) {
       (req as Record<string, unknown>).organizationId = organizationId;
+      (req as Record<string, unknown>).userId = userId;
+      (req as Record<string, unknown>).userRole = userRole;
     }
     next();
   });

@@ -12,6 +12,8 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
 import { generateApiKey, hashApiKey } from "../middleware/api-key-auth.js";
+import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.js";
+import { AuditLogService } from "../services/audit-log.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -48,6 +50,18 @@ const RotateKeySchema = z.object({
 
 export function createApiKeyRoutes(prisma: PrismaClient): Router {
   const router = Router();
+  const auditLogs = new AuditLogService(prisma);
+  const resolveOrgId = (req: Request, res: Response): string | null => {
+    try {
+      return getOrganizationIdOrThrow(req);
+    } catch (error) {
+      if (error instanceof TenantGuardError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return null;
+      }
+      throw error;
+    }
+  };
 
   /**
    * POST /api/keys
@@ -56,11 +70,8 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
    * Returns the raw key only once — it cannot be retrieved later.
    */
   router.post("/", async (req: AuthenticatedRequest, res: Response) => {
-    const orgId = req.organizationId;
-    if (!orgId) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
+    const orgId = resolveOrgId(req, res);
+    if (!orgId) return;
 
     const parseResult = CreateKeySchema.safeParse(req.body);
     if (!parseResult.success) {
@@ -89,6 +100,18 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
           expiresAt,
         },
       });
+      await auditLogs.record({
+        organizationId: orgId,
+        actorUserId: req.userId,
+        category: "ADMIN",
+        action: "API_KEY_CREATED",
+        targetType: "api_key",
+        targetId: apiKey.id,
+        severity: "CRITICAL",
+        metadata: { scopes: apiKey.scopes, expires_at: apiKey.expiresAt },
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
 
       res.status(201).json({
         id: apiKey.id,
@@ -111,11 +134,8 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
    * List all API keys for the organization. Does not return the raw key.
    */
   router.get("/", async (req: AuthenticatedRequest, res: Response) => {
-    const orgId = req.organizationId;
-    if (!orgId) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
+    const orgId = resolveOrgId(req, res);
+    if (!orgId) return;
 
     try {
       const keys = await prisma.apiKey.findMany({
@@ -171,11 +191,8 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
   router.post(
     "/:keyId/rotate",
     async (req: AuthenticatedRequest, res: Response) => {
-      const orgId = req.organizationId;
-      if (!orgId) {
-        res.status(401).json({ error: "Authentication required" });
-        return;
-      }
+      const orgId = resolveOrgId(req, res);
+      if (!orgId) return;
 
       const parseResult = RotateKeySchema.safeParse(req.body);
       if (!parseResult.success) {
@@ -225,8 +242,8 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
               expiresAt: existingKey.expiresAt,
             },
           }),
-          prisma.apiKey.update({
-            where: { id: keyId },
+          prisma.apiKey.updateMany({
+            where: { id: keyId, organizationId: orgId },
             data: {
               revokedAt: new Date(),
               gracePeriodEndsAt,
@@ -236,9 +253,24 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
         ]);
 
         // Link old key → new key
-        await prisma.apiKey.update({
-          where: { id: keyId },
+        await prisma.apiKey.updateMany({
+          where: { id: keyId, organizationId: orgId },
           data: { replacedByKeyId: newKey.id },
+        });
+        await auditLogs.record({
+          organizationId: orgId,
+          actorUserId: req.userId,
+          category: "ADMIN",
+          action: "API_KEY_ROTATED",
+          targetType: "api_key",
+          targetId: keyId,
+          severity: "CRITICAL",
+          metadata: {
+            new_key_id: newKey.id,
+            grace_period_ends_at: gracePeriodEndsAt,
+          },
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
         });
 
         res.status(201).json({
@@ -274,11 +306,8 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
   router.delete(
     "/:keyId",
     async (req: AuthenticatedRequest, res: Response) => {
-      const orgId = req.organizationId;
-      if (!orgId) {
-        res.status(401).json({ error: "Authentication required" });
-        return;
-      }
+      const orgId = resolveOrgId(req, res);
+      if (!orgId) return;
 
       const keyId = req.params.keyId as string;
 
@@ -297,9 +326,20 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
           return;
         }
 
-        await prisma.apiKey.update({
-          where: { id: keyId },
+        await prisma.apiKey.updateMany({
+          where: { id: keyId, organizationId: orgId },
           data: { revokedAt: new Date(), gracePeriodEndsAt: null },
+        });
+        await auditLogs.record({
+          organizationId: orgId,
+          actorUserId: req.userId,
+          category: "ADMIN",
+          action: "API_KEY_REVOKED",
+          targetType: "api_key",
+          targetId: keyId,
+          severity: "CRITICAL",
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
         });
 
         res.json({
@@ -322,11 +362,8 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
   router.get(
     "/:keyId/usage",
     async (req: AuthenticatedRequest, res: Response) => {
-      const orgId = req.organizationId;
-      if (!orgId) {
-        res.status(401).json({ error: "Authentication required" });
-        return;
-      }
+      const orgId = resolveOrgId(req, res);
+      if (!orgId) return;
 
       const keyId = req.params.keyId as string;
       const since = req.query.since
@@ -346,18 +383,27 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
 
         const [totalRequests, totalTokens, recentLogs] = await Promise.all([
           prisma.apiUsageLog.count({
-            where: { apiKeyId: keyId, createdAt: { gte: since } },
+            where: {
+              apiKeyId: keyId,
+              organizationId: orgId,
+              createdAt: { gte: since },
+            },
           }),
           prisma.apiUsageLog.aggregate({
             where: {
               apiKeyId: keyId,
+              organizationId: orgId,
               createdAt: { gte: since },
               tokensUsed: { not: null },
             },
             _sum: { tokensUsed: true },
           }),
           prisma.apiUsageLog.findMany({
-            where: { apiKeyId: keyId, createdAt: { gte: since } },
+            where: {
+              apiKeyId: keyId,
+              organizationId: orgId,
+              createdAt: { gte: since },
+            },
             orderBy: { createdAt: "desc" },
             take: 100,
             select: {

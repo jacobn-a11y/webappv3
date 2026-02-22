@@ -138,6 +138,14 @@ describe("requirePermission", () => {
 
   it("allows MEMBER with explicit permission", async () => {
     const prisma = {
+      orgSettings: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ dataGovernancePolicy: null, allowedPublishers: [] }),
+      },
+      userRoleAssignment: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
       userPermission: {
         findUnique: vi.fn().mockResolvedValue({ id: "perm-1" }),
       },
@@ -157,8 +165,13 @@ describe("requirePermission", () => {
       userPermission: {
         findUnique: vi.fn().mockResolvedValue(null),
       },
-      orgSettings: {
+      userRoleAssignment: {
         findUnique: vi.fn().mockResolvedValue(null),
+      },
+      orgSettings: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ dataGovernancePolicy: null, allowedPublishers: [] }),
       },
     } as never;
     const middleware = requirePermission(prisma, "create");
@@ -177,10 +190,16 @@ describe("requirePermission", () => {
       userPermission: {
         findUnique: vi.fn().mockResolvedValue(null),
       },
+      userRoleAssignment: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
       orgSettings: {
         findUnique: vi
           .fn()
-          .mockResolvedValue({ allowedPublishers: ["MEMBER"] }),
+          .mockResolvedValue({
+            dataGovernancePolicy: null,
+            allowedPublishers: ["MEMBER"],
+          }),
       },
     } as never;
     const middleware = requirePermission(prisma, "publish");
@@ -278,6 +297,9 @@ describe("requirePageOwnerOrPermission", () => {
           .fn()
           .mockResolvedValue({ createdById: "other-user" }),
       },
+      userRoleAssignment: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
       userPermission: {
         findUnique: vi.fn().mockResolvedValue({ id: "perm-1" }),
       },
@@ -301,6 +323,9 @@ describe("requirePageOwnerOrPermission", () => {
         findFirst: vi
           .fn()
           .mockResolvedValue({ createdById: "other-user" }),
+      },
+      userRoleAssignment: {
+        findUnique: vi.fn().mockResolvedValue(null),
       },
       userPermission: {
         findUnique: vi.fn().mockResolvedValue(null),

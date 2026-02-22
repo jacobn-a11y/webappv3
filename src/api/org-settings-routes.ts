@@ -12,7 +12,9 @@ import { Router, type Request, type Response } from "express";
 import crypto from "crypto";
 import { z } from "zod";
 import type { PrismaClient, UserRole } from "@prisma/client";
+import { Resend } from "resend";
 import { requirePermission } from "../middleware/permissions.js";
+import { buildPublicAppUrl } from "../lib/public-app-url.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -35,10 +37,41 @@ interface AuthReq extends Request {
   userRole?: UserRole;
 }
 
+function renderInviteEmailHtml(options: {
+  orgName: string;
+  role: UserRole;
+  inviteUrl: string;
+  inviterName: string | null;
+}): string {
+  const inviterText = options.inviterName
+    ? `${options.inviterName} invited you`
+    : "You were invited";
+
+  return `<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; background: #f8f9fb; color: #1a1a2e; padding: 24px;">
+  <div style="max-width: 560px; margin: 0 auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px;">
+    <h1 style="margin: 0 0 12px; font-size: 22px;">Join ${options.orgName} on StoryEngine</h1>
+    <p style="margin: 0 0 16px;">${inviterText} to join as <strong>${options.role}</strong>.</p>
+    <p style="margin: 0 0 20px;">Use the button below to set your password and activate your account.</p>
+    <a href="${options.inviteUrl}" style="display: inline-block; background: #4f46e5; color: #ffffff; text-decoration: none; padding: 10px 16px; border-radius: 8px; font-weight: 600;">Accept Invite</a>
+    <p style="margin: 20px 0 0; color: #555770; font-size: 13px;">If the button does not work, paste this link into your browser:</p>
+    <p style="margin: 6px 0 0; font-size: 13px; word-break: break-word;"><a href="${options.inviteUrl}">${options.inviteUrl}</a></p>
+  </div>
+</body>
+</html>`;
+}
+
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
 export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
   const router = Router();
+  const resendApiKey = process.env.RESEND_API_KEY ?? "";
+  const resend = resendApiKey ? new Resend(resendApiKey) : null;
+  const inviteFromAddress =
+    process.env.INVITE_FROM_EMAIL ??
+    process.env.STORY_REGEN_FROM_EMAIL ??
+    "StoryEngine <noreply@storyengine.io>";
 
   // ── Get Organization Details ─────────────────────────────────────────
 
@@ -413,8 +446,41 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
           },
         });
 
-        // In production: send invite email here via WorkOS or SendGrid
-        const inviteUrl = `${process.env.APP_URL}/invite/${token}`;
+        const inviteUrl = buildPublicAppUrl(`/invite/${token}`);
+        let emailSent = false;
+        let emailDeliveryError: string | null = null;
+
+        if (resend) {
+          try {
+            const [org, inviter] = await Promise.all([
+              prisma.organization.findUnique({
+                where: { id: req.organizationId! },
+                select: { name: true },
+              }),
+              prisma.user.findUnique({
+                where: { id: req.userId! },
+                select: { name: true, email: true },
+              }),
+            ]);
+
+            await resend.emails.send({
+              from: inviteFromAddress,
+              to: [invite.email],
+              subject: `You're invited to ${org?.name ?? "StoryEngine"}`,
+              html: renderInviteEmailHtml({
+                orgName: org?.name ?? "StoryEngine",
+                role: invite.role,
+                inviteUrl,
+                inviterName: inviter?.name ?? inviter?.email ?? null,
+              }),
+            });
+            emailSent = true;
+          } catch (sendErr) {
+            emailDeliveryError =
+              sendErr instanceof Error ? sendErr.message : "email_delivery_failed";
+            console.error("Invite email delivery error:", sendErr);
+          }
+        }
 
         res.status(201).json({
           invite: {
@@ -424,6 +490,8 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
             invite_url: inviteUrl,
             expires_at: invite.expiresAt,
           },
+          email_sent: emailSent,
+          email_delivery_error: emailDeliveryError,
         });
       } catch (err) {
         console.error("Create invite error:", err);

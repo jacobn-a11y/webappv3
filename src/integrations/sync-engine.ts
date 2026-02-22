@@ -16,7 +16,7 @@
  * Opportunity models for entity resolution.
  */
 
-import type { PrismaClient, IntegrationConfig } from "@prisma/client";
+import { Prisma, type PrismaClient, type IntegrationConfig } from "@prisma/client";
 import type { Queue } from "bullmq";
 import type { ProcessCallJob } from "../services/transcript-processor.js";
 import {
@@ -52,6 +52,136 @@ export class SyncEngine {
     this.registry = registry;
   }
 
+  private async withRetry<T>(
+    fn: () => Promise<T>,
+    opts?: { attempts?: number; baseDelayMs?: number }
+  ): Promise<T> {
+    const attempts = opts?.attempts ?? 3;
+    const baseDelayMs = opts?.baseDelayMs ?? 750;
+    let lastError: unknown;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastError = err;
+        if (i === attempts - 1) break;
+        const exp = baseDelayMs * 2 ** i;
+        const jitter = Math.floor(Math.random() * Math.max(100, exp * 0.25));
+        const waitMs = exp + jitter;
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Retry attempts exhausted");
+  }
+
+  private async queueMergeConflictReview(input: {
+    organizationId: string;
+    targetType: string;
+    targetId: string;
+    requestPayload: Record<string, unknown>;
+  }): Promise<void> {
+    const existing = await this.prisma.approvalRequest.findFirst({
+      where: {
+        organizationId: input.organizationId,
+        requestType: "DATA_MERGE_CONFLICT",
+        targetType: input.targetType,
+        targetId: input.targetId,
+        status: "PENDING",
+      },
+      select: { id: true },
+    });
+    if (existing) return;
+
+    const owner = await this.prisma.user.findFirst({
+      where: {
+        organizationId: input.organizationId,
+        role: { in: ["OWNER", "ADMIN"] },
+      },
+      select: { id: true },
+      orderBy: { createdAt: "asc" },
+    });
+    if (!owner) return;
+
+    await this.prisma.approvalRequest.create({
+      data: {
+        organizationId: input.organizationId,
+        requestType: "DATA_MERGE_CONFLICT",
+        targetType: input.targetType,
+        targetId: input.targetId,
+        requestedByUserId: owner.id,
+        status: "PENDING",
+        requestPayload: input.requestPayload as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  private async startIntegrationRun(input: {
+    config: IntegrationConfig;
+    runType: string;
+    idempotencyKey: string;
+  }) {
+    const existing = await this.prisma.integrationRun.findUnique({
+      where: {
+        organizationId_idempotencyKey: {
+          organizationId: input.config.organizationId,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
+    });
+    if (existing) {
+      if (existing.status === "COMPLETED" || existing.status === "RUNNING") {
+        return { run: existing, skipped: true };
+      }
+      const restarted = await this.prisma.integrationRun.update({
+        where: { id: existing.id },
+        data: {
+          status: "RUNNING",
+          startedAt: new Date(),
+          finishedAt: null,
+          errorMessage: null,
+          processedCount: 0,
+          successCount: 0,
+          failureCount: 0,
+        },
+      });
+      return { run: restarted, skipped: false };
+    }
+
+    const run = await this.prisma.integrationRun.create({
+      data: {
+        organizationId: input.config.organizationId,
+        integrationConfigId: input.config.id,
+        provider: input.config.provider,
+        runType: input.runType,
+        status: "RUNNING",
+        idempotencyKey: input.idempotencyKey,
+        metadata: { trigger: input.runType },
+      },
+    });
+    return { run, skipped: false };
+  }
+
+  private async finishIntegrationRun(input: {
+    runId: string;
+    status: "COMPLETED" | "FAILED";
+    processedCount: number;
+    successCount: number;
+    failureCount: number;
+    errorMessage?: string | null;
+  }) {
+    await this.prisma.integrationRun.update({
+      where: { id: input.runId },
+      data: {
+        status: input.status,
+        finishedAt: new Date(),
+        processedCount: input.processedCount,
+        successCount: input.successCount,
+        failureCount: input.failureCount,
+        errorMessage: input.errorMessage ?? null,
+      },
+    });
+  }
+
   /**
    * Run a full sync cycle for all enabled integrations across all orgs.
    * Called by the BullMQ repeatable job scheduler.
@@ -66,7 +196,11 @@ export class SyncEngine {
 
     for (const config of configs) {
       try {
-        await this.syncIntegration(config);
+        const hourBucket = new Date().toISOString().slice(0, 13);
+        await this.syncIntegration(config, {
+          runType: "SCHEDULED",
+          idempotencyKey: `scheduled:${config.id}:${hourBucket}`,
+        });
       } catch (err) {
         console.error(
           `Sync failed for ${config.provider} (org: ${config.organizationId}):`,
@@ -87,27 +221,95 @@ export class SyncEngine {
   /**
    * Sync a single integration config. Used for on-demand sync triggers.
    */
-  async syncIntegration(config: IntegrationConfig): Promise<void> {
+  async syncIntegration(
+    config: IntegrationConfig,
+    options?: {
+      runType?: "SCHEDULED" | "MANUAL" | "BACKFILL";
+      idempotencyKey?: string;
+      sinceOverride?: Date | null;
+      cursorOverride?: string | null;
+    }
+  ): Promise<string> {
+    const runType = options?.runType ?? "MANUAL";
+    const idempotencyKey =
+      options?.idempotencyKey ??
+      `${runType.toLowerCase()}:${config.id}:${Date.now()}`;
+    const started = await this.startIntegrationRun({
+      config,
+      runType,
+      idempotencyKey,
+    });
+    if (started.skipped) return started.run.id;
+
+    let processedCount = 0;
+    let successCount = 0;
+    let failureCount = 0;
     const credentials = config.credentials as unknown as ProviderCredentials;
 
-    // Route to the appropriate sync handler
-    const callProvider = this.registry.callRecording.get(config.provider);
-    if (callProvider) {
-      await this.syncCallRecordingProvider(
-        config,
-        callProvider,
-        credentials
-      );
-      return;
+    try {
+      // Route to the appropriate sync handler
+      const callProvider = this.registry.callRecording.get(config.provider);
+      if (callProvider) {
+        const synced = await this.syncCallRecordingProvider(
+          config,
+          callProvider,
+          credentials,
+          {
+            sinceOverride: options?.sinceOverride ?? null,
+            cursorOverride: options?.cursorOverride ?? null,
+          }
+        );
+        processedCount += synced;
+        successCount += synced;
+      } else {
+        const crmProvider = this.registry.crm.get(config.provider);
+        if (crmProvider) {
+          const synced = await this.syncCRMProvider(config, crmProvider, credentials);
+          processedCount += synced;
+          successCount += synced;
+        } else {
+          throw new Error(`No provider implementation registered for ${config.provider}`);
+        }
+      }
+
+      await this.finishIntegrationRun({
+        runId: started.run.id,
+        status: "COMPLETED",
+        processedCount,
+        successCount,
+        failureCount,
+      });
+      return started.run.id;
+    } catch (err) {
+      failureCount = Math.max(1, processedCount - successCount);
+      await this.finishIntegrationRun({
+        runId: started.run.id,
+        status: "FAILED",
+        processedCount,
+        successCount,
+        failureCount,
+        errorMessage: err instanceof Error ? err.message : "Unknown sync error",
+      });
+      throw err;
+    }
+  }
+
+  async replayFailedRun(runId: string, organizationId: string): Promise<void> {
+    const run = await this.prisma.integrationRun.findFirst({
+      where: {
+        id: runId,
+        organizationId,
+      },
+      include: { integrationConfig: true },
+    });
+    if (!run || !run.integrationConfig) {
+      throw new Error("Integration run not found for this organization.");
     }
 
-    const crmProvider = this.registry.crm.get(config.provider);
-    if (crmProvider) {
-      await this.syncCRMProvider(config, crmProvider, credentials);
-      return;
-    }
-
-    console.warn(`No provider implementation registered for ${config.provider}`);
+    await this.syncIntegration(run.integrationConfig, {
+      runType: "BACKFILL",
+      idempotencyKey: `replay:${run.id}:${Date.now()}`,
+    });
   }
 
   // ─── Call Recording Sync ──────────────────────────────────────────────────
@@ -115,18 +317,23 @@ export class SyncEngine {
   private async syncCallRecordingProvider(
     config: IntegrationConfig,
     provider: CallRecordingProvider,
-    credentials: ProviderCredentials
-  ): Promise<void> {
-    let cursor = config.syncCursor;
+    credentials: ProviderCredentials,
+    options?: { sinceOverride?: Date | null; cursorOverride?: string | null }
+  ): Promise<number> {
+    let cursor = options?.cursorOverride ?? config.syncCursor;
     let hasMore = true;
     let totalSynced = 0;
     const resolver = new EntityResolver(this.prisma);
 
     while (hasMore) {
-      const result = await provider.fetchCalls(
-        credentials,
-        cursor,
-        config.lastSyncAt
+      const result = await this.withRetry(
+        () =>
+          provider.fetchCalls(
+            credentials,
+            cursor,
+            options?.sinceOverride ?? config.lastSyncAt
+          ),
+        { attempts: 4, baseDelayMs: 1000 }
       );
 
       for (const normalizedCall of result.data) {
@@ -165,6 +372,7 @@ export class SyncEngine {
         `Synced ${totalSynced} calls from ${provider.name} for org ${config.organizationId}`
       );
     }
+    return totalSynced;
   }
 
   private async persistCall(
@@ -267,11 +475,11 @@ export class SyncEngine {
     config: IntegrationConfig,
     provider: CRMDataProvider,
     credentials: ProviderCredentials
-  ): Promise<void> {
+  ): Promise<number> {
     // Sync accounts first (contacts reference them)
-    await this.syncAccounts(config, provider, credentials);
-    await this.syncContacts(config, provider, credentials);
-    await this.syncOpportunities(config, provider, credentials);
+    const accountCount = await this.syncAccounts(config, provider, credentials);
+    const contactCount = await this.syncContacts(config, provider, credentials);
+    const opportunityCount = await this.syncOpportunities(config, provider, credentials);
 
     // Mark sync complete
     await this.prisma.integrationConfig.update({
@@ -283,30 +491,33 @@ export class SyncEngine {
         lastError: null,
       },
     });
+    return accountCount + contactCount + opportunityCount;
   }
 
   private async syncAccounts(
     config: IntegrationConfig,
     provider: CRMDataProvider,
     credentials: ProviderCredentials
-  ): Promise<void> {
+  ): Promise<number> {
     let cursor: string | null = null;
     let hasMore = true;
+    let total = 0;
 
     while (hasMore) {
-      const result = await provider.fetchAccounts(
-        credentials,
-        cursor,
-        config.lastSyncAt
+      const result = await this.withRetry(
+        () => provider.fetchAccounts(credentials, cursor, config.lastSyncAt),
+        { attempts: 4, baseDelayMs: 1000 }
       );
 
       for (const account of result.data) {
         await this.persistAccount(config.organizationId, account);
+        total++;
       }
 
       cursor = result.nextCursor;
       hasMore = result.hasMore && !!cursor;
     }
+    return total;
   }
 
   private async persistAccount(
@@ -314,16 +525,57 @@ export class SyncEngine {
     account: NormalizedAccount
   ): Promise<void> {
     const normalized = normalizeCompanyName(account.name);
+    const existingByExternal = await this.prisma.account.findFirst({
+      where: { organizationId, salesforceId: account.externalId },
+    });
 
-    // Upsert by salesforceId
-    await this.prisma.account.upsert({
-      where: {
-        organizationId_salesforceId: {
+    if (!existingByExternal) {
+      const potentialConflict = await this.prisma.account.findFirst({
+        where: {
           organizationId,
-          salesforceId: account.externalId,
+          OR: [
+            { normalizedName: normalized },
+            ...(account.domain ? [{ domain: account.domain }] : []),
+          ],
+          salesforceId: { not: account.externalId },
         },
-      },
-      create: {
+      });
+
+      if (potentialConflict) {
+        await this.queueMergeConflictReview({
+          organizationId,
+          targetType: "account",
+          targetId: potentialConflict.id,
+          requestPayload: {
+            conflict_type: "ACCOUNT_EXTERNAL_ID_COLLISION",
+            existing_account_id: potentialConflict.id,
+            existing_salesforce_id: potentialConflict.salesforceId,
+            incoming_external_id: account.externalId,
+            incoming_name: account.name,
+            incoming_domain: account.domain,
+          },
+        });
+        return;
+      }
+    }
+
+    if (existingByExternal) {
+      await this.prisma.account.update({
+        where: { id: existingByExternal.id },
+        data: {
+          name: account.name,
+          normalizedName: normalized,
+          domain: account.domain ?? undefined,
+          industry: account.industry ?? undefined,
+          employeeCount: account.employeeCount ?? undefined,
+          annualRevenue: account.annualRevenue ?? undefined,
+        },
+      });
+      return;
+    }
+
+    await this.prisma.account.create({
+      data: {
         organizationId,
         name: account.name,
         normalizedName: normalized,
@@ -333,14 +585,6 @@ export class SyncEngine {
         employeeCount: account.employeeCount,
         annualRevenue: account.annualRevenue,
       },
-      update: {
-        name: account.name,
-        normalizedName: normalized,
-        domain: account.domain ?? undefined,
-        industry: account.industry ?? undefined,
-        employeeCount: account.employeeCount ?? undefined,
-        annualRevenue: account.annualRevenue ?? undefined,
-      },
     });
   }
 
@@ -348,24 +592,26 @@ export class SyncEngine {
     config: IntegrationConfig,
     provider: CRMDataProvider,
     credentials: ProviderCredentials
-  ): Promise<void> {
+  ): Promise<number> {
     let cursor: string | null = null;
     let hasMore = true;
+    let total = 0;
 
     while (hasMore) {
-      const result = await provider.fetchContacts(
-        credentials,
-        cursor,
-        config.lastSyncAt
+      const result = await this.withRetry(
+        () => provider.fetchContacts(credentials, cursor, config.lastSyncAt),
+        { attempts: 4, baseDelayMs: 1000 }
       );
 
       for (const contact of result.data) {
         await this.persistContact(config.organizationId, contact);
+        total++;
       }
 
       cursor = result.nextCursor;
       hasMore = result.hasMore && !!cursor;
     }
+    return total;
   }
 
   private async persistContact(
@@ -393,6 +639,31 @@ export class SyncEngine {
     }
 
     if (!account) return; // Can't place this contact without an account
+
+    const existingByEmailAcrossOrg = await this.prisma.contact.findFirst({
+      where: {
+        email: contact.email.toLowerCase(),
+        account: { organizationId },
+        accountId: { not: account.id },
+      },
+      select: { id: true, accountId: true, salesforceId: true },
+    });
+    if (existingByEmailAcrossOrg) {
+      await this.queueMergeConflictReview({
+        organizationId,
+        targetType: "contact",
+        targetId: existingByEmailAcrossOrg.id,
+        requestPayload: {
+          conflict_type: "CONTACT_EMAIL_COLLISION",
+          existing_contact_id: existingByEmailAcrossOrg.id,
+          existing_account_id: existingByEmailAcrossOrg.accountId,
+          incoming_account_id: account.id,
+          incoming_external_id: contact.externalId,
+          email: contact.email.toLowerCase(),
+        },
+      });
+      return;
+    }
 
     await this.prisma.contact.upsert({
       where: {
@@ -423,24 +694,26 @@ export class SyncEngine {
     config: IntegrationConfig,
     provider: CRMDataProvider,
     credentials: ProviderCredentials
-  ): Promise<void> {
+  ): Promise<number> {
     let cursor: string | null = null;
     let hasMore = true;
+    let total = 0;
 
     while (hasMore) {
-      const result = await provider.fetchOpportunities(
-        credentials,
-        cursor,
-        config.lastSyncAt
+      const result = await this.withRetry(
+        () => provider.fetchOpportunities(credentials, cursor, config.lastSyncAt),
+        { attempts: 4, baseDelayMs: 1000 }
       );
 
       for (const opp of result.data) {
         await this.persistOpportunity(config.organizationId, opp);
+        total++;
       }
 
       cursor = result.nextCursor;
       hasMore = result.hasMore && !!cursor;
     }
+    return total;
   }
 
   private async persistOpportunity(
@@ -454,6 +727,28 @@ export class SyncEngine {
     });
 
     if (!account) return;
+
+    const existingOppElsewhere = await this.prisma.salesforceEvent.findFirst({
+      where: {
+        opportunityId: opp.externalId,
+        account: { organizationId, id: { not: account.id } },
+      },
+      select: { id: true, accountId: true },
+    });
+    if (existingOppElsewhere) {
+      await this.queueMergeConflictReview({
+        organizationId,
+        targetType: "opportunity",
+        targetId: existingOppElsewhere.id,
+        requestPayload: {
+          conflict_type: "OPPORTUNITY_ACCOUNT_COLLISION",
+          opportunity_id: opp.externalId,
+          existing_account_id: existingOppElsewhere.accountId,
+          incoming_account_id: account.id,
+        },
+      });
+      return;
+    }
 
     // Map normalized status to SalesforceEventType
     let eventType:

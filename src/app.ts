@@ -20,6 +20,7 @@ import { createGrainWebhookHandler } from "./webhooks/grain-webhook.js";
 
 // ─── API Routes ──────────────────────────────────────────────────────────────
 import { createAuthRoutes } from "./api/auth-routes.js";
+import { createScimRoutes } from "./api/scim-routes.js";
 import { createRAGRoutes } from "./api/rag-routes.js";
 import { createStoryRoutes } from "./api/story-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
@@ -41,7 +42,6 @@ import { createAdminAccountAccessPage } from "./api/admin-account-access-page.js
 import { createAdminPermissionsPage } from "./api/admin-permissions-page.js";
 import { createOrgSettingsRoutes } from "./api/org-settings-routes.js";
 import { createIntegrationsRoutes } from "./api/integrations-routes.js";
-import { createBillingRoutes } from "./api/billing-routes.js";
 import { createApiKeysRoutes } from "./api/api-keys-routes.js";
 import { createAccountsRoutes } from "./api/accounts-routes.js";
 import { createAccountJourneyRoutes } from "./api/account-journey-routes.js";
@@ -50,6 +50,7 @@ import { createChatbotConnectorRoutes } from "./api/chatbot-connector.js";
 import { createSetupRoutes } from "./api/setup-routes.js";
 import { createNotificationRoutes } from "./api/notification-routes.js";
 import { createAnalyticsRoutes } from "./api/analytics-routes.js";
+import { createStatusRoutes } from "./api/status-routes.js";
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 import { requireAuth } from "./middleware/auth.js";
@@ -63,6 +64,7 @@ import { requestIdMiddleware } from "./middleware/request-id.js";
 import { requestLoggingMiddleware } from "./middleware/request-logging.js";
 import { createApiKeyAuth, requireScope } from "./middleware/api-key-auth.js";
 import { createDevAuthBypass } from "./middleware/dev-auth.js";
+import { createSessionAuth } from "./middleware/session-auth.js";
 import {
   createRateLimiter,
   apiRateLimiter,
@@ -71,6 +73,7 @@ import {
 } from "./middleware/rate-limiter.js";
 import { createApiUsageLogger } from "./middleware/api-usage-logger.js";
 import { requirePermission } from "./middleware/permissions.js";
+import { requireOrgSecurityPolicy } from "./middleware/security-policy.js";
 
 // ─── Observability ───────────────────────────────────────────────────────────
 import { Sentry } from "./lib/sentry.js";
@@ -107,15 +110,28 @@ export function createApp(deps: AppDeps): express.Application {
   // Global middleware
   app.use(helmet());
 
-  const allowedOrigins = process.env.APP_URL
-    ? [process.env.APP_URL]
-    : ["http://localhost:3000"];
+  const allowedOrigins = Array.from(
+    new Set(
+      [
+        process.env.APP_URL,
+        process.env.FRONTEND_URL,
+        "http://localhost:3000",
+        "http://localhost:5173",
+      ].filter((origin): origin is string => !!origin)
+    )
+  );
   app.use(
     cors({
       origin: allowedOrigins,
       credentials: true,
       methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"],
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "x-session-token",
+        "x-mfa-verified",
+        "x-support-impersonation-token",
+      ],
     })
   );
 
@@ -141,6 +157,7 @@ export function createApp(deps: AppDeps): express.Application {
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", service: "storyengine", version: "1.0.0" });
   });
+  app.use("/api/status", createStatusRoutes(prisma));
 
   // Webhook endpoints (authenticated by signature, not user auth)
   app.post(
@@ -167,14 +184,6 @@ export function createApp(deps: AppDeps): express.Application {
   // Public landing pages — no auth, served at /s/:slug
   app.use("/s", passwordRateLimiter, createPublicPageRoutes(prisma));
 
-  // ─── Admin Metrics ─────────────────────────────────────────────────────
-  app.use("/api/admin/metrics", createAdminMetricsRoutes(prisma));
-  app.use(
-    "/api/admin/queues",
-    requirePermission(prisma, "manage_permissions"),
-    createQueueHealthRoutes(queues)
-  );
-
   // ─── Public API (API-key authenticated, for third-party consumers) ─────
 
   const apiKeyAuth = createApiKeyAuth(prisma);
@@ -198,9 +207,14 @@ export function createApp(deps: AppDeps): express.Application {
 
   // ─── Auth Routes (public — no JWT required) ────────────────────────────
   app.use("/api/auth", createAuthRoutes(prisma, workos));
+  // SCIM provisioning endpoints (bearer token authenticated per organization)
+  app.use("/api/scim/v2", createScimRoutes(prisma));
 
   // Local development convenience: inject seeded auth context when enabled.
   app.use(createDevAuthBypass(prisma));
+
+  // Resolve application session tokens into request auth context.
+  app.use(createSessionAuth(prisma));
 
   // ─── Setup Wizard (before auth — needed for first-run onboarding) ──────
   app.use("/api/setup", createSetupRoutes(prisma, stripe));
@@ -248,6 +262,11 @@ export function createApp(deps: AppDeps): express.Application {
   app.use(
     "/api/dashboard",
     trialGate,
+    requireOrgSecurityPolicy(prisma, {
+      requireMfaIfConfigured: true,
+      enforceIpAllowlistIfConfigured: true,
+      requireSessionIfConfigured: true,
+    }),
     apiRateLimiter,
     createDashboardRoutes(prisma)
   );
@@ -274,6 +293,12 @@ export function createApp(deps: AppDeps): express.Application {
   app.use(
     "/api/integrations",
     trialGate,
+    requireOrgSecurityPolicy(prisma, {
+      requireMfaIfConfigured: true,
+      enforceIpAllowlistIfConfigured: true,
+      requireSessionIfConfigured: true,
+      requireRecentAuthIfConfigured: true,
+    }),
     requirePermission(prisma, "manage_permissions"),
     createIntegrationRoutes(prisma, providerRegistry, syncEngine)
   );
@@ -295,28 +320,64 @@ export function createApp(deps: AppDeps): express.Application {
   // Analytics Dashboard
   app.use("/api/analytics", trialGate, createAnalyticsRoutes(prisma));
 
+  // Admin operational APIs (tenant scoped + privileged only)
+  app.use(
+    "/api/admin/metrics",
+    trialGate,
+    requireOrgSecurityPolicy(prisma, {
+      requireMfaIfConfigured: true,
+      enforceIpAllowlistIfConfigured: true,
+      requireSessionIfConfigured: true,
+      requireRecentAuthIfConfigured: true,
+    }),
+    requirePermission(prisma, "manage_permissions"),
+    createAdminMetricsRoutes(prisma)
+  );
+  app.use(
+    "/api/admin/queues",
+    trialGate,
+    requireOrgSecurityPolicy(prisma, {
+      requireMfaIfConfigured: true,
+      enforceIpAllowlistIfConfigured: true,
+      requireSessionIfConfigured: true,
+      requireRecentAuthIfConfigured: true,
+    }),
+    requirePermission(prisma, "manage_permissions"),
+    createQueueHealthRoutes(queues)
+  );
+
   // Admin Settings Pages
   app.use(
     "/api/settings/org",
     trialGate,
+    requireOrgSecurityPolicy(prisma, {
+      requireMfaIfConfigured: true,
+      enforceIpAllowlistIfConfigured: true,
+      requireSessionIfConfigured: true,
+      requireRecentAuthIfConfigured: true,
+    }),
     requirePermission(prisma, "manage_permissions"),
     createOrgSettingsRoutes(prisma)
   );
   app.use(
     "/api/settings/integrations",
     trialGate,
+    requireOrgSecurityPolicy(prisma, {
+      requireMfaIfConfigured: true,
+      enforceIpAllowlistIfConfigured: true,
+      requireSessionIfConfigured: true,
+      requireRecentAuthIfConfigured: true,
+    }),
     requirePermission(prisma, "manage_permissions"),
     createIntegrationsRoutes(prisma)
   );
   app.use(
-    "/api/settings/billing",
-    trialGate,
-    requirePermission(prisma, "manage_permissions"),
-    createBillingRoutes(prisma, stripe)
-  );
-  app.use(
     "/api/settings/api-keys",
     trialGate,
+    requireOrgSecurityPolicy(prisma, {
+      requireMfaIfConfigured: true,
+      enforceIpAllowlistIfConfigured: true,
+    }),
     requirePermission(prisma, "manage_permissions"),
     createApiKeysRoutes(prisma)
   );

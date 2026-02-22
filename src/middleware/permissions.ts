@@ -15,6 +15,7 @@
 import type { Request, Response, NextFunction } from "express";
 import type { PrismaClient, PermissionType, UserRole, TranscriptTruncationMode } from "@prisma/client";
 import { RoleProfileService } from "../services/role-profiles.js";
+import { PolicyService, legacyPermissionActionToPolicyAction } from "../services/policy-engine.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -28,18 +29,6 @@ interface AuthenticatedRequest extends Request {
 
 const ADMIN_ROLES: UserRole[] = ["OWNER", "ADMIN"];
 
-/**
- * Maps high-level actions to the PermissionType needed.
- */
-const ACTION_PERMISSION_MAP: Record<string, PermissionType> = {
-  create: "CREATE_LANDING_PAGE",
-  publish: "PUBLISH_LANDING_PAGE",
-  edit_any: "EDIT_ANY_LANDING_PAGE",
-  delete_any: "DELETE_ANY_LANDING_PAGE",
-  manage_permissions: "MANAGE_PERMISSIONS",
-  view_analytics: "VIEW_ANALYTICS",
-};
-
 // ─── Middleware Factories ────────────────────────────────────────────────────
 
 /**
@@ -52,27 +41,32 @@ export function requireLandingPagesEnabled(prisma: PrismaClient) {
     res: Response,
     next: NextFunction
   ) => {
-    const orgId = req.organizationId;
-    if (!orgId) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
+    try {
+      const orgId = req.organizationId;
+      if (!orgId) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
 
-    const settings = await prisma.orgSettings.findUnique({
-      where: { organizationId: orgId },
-    });
-
-    // Default to enabled if no settings exist yet
-    if (settings && !settings.landingPagesEnabled) {
-      res.status(403).json({
-        error: "feature_disabled",
-        message:
-          "Landing pages have been disabled by your organization admin.",
+      const settings = await prisma.orgSettings.findUnique({
+        where: { organizationId: orgId },
       });
-      return;
-    }
 
-    next();
+      // Default to enabled if no settings exist yet
+      if (settings && !settings.landingPagesEnabled) {
+        res.status(403).json({
+          error: "feature_disabled",
+          message:
+            "Landing pages have been disabled by your organization admin.",
+        });
+        return;
+      }
+
+      next();
+    } catch (err) {
+      console.error("Landing pages feature gate error:", err);
+      res.status(500).json({ error: "permission_check_failed" });
+    }
   };
 }
 
@@ -81,74 +75,78 @@ export function requireLandingPagesEnabled(prisma: PrismaClient) {
  * Admins always pass. For other roles, checks UserPermission table.
  */
 export function requirePermission(prisma: PrismaClient, action: string) {
-  const roleProfiles = new RoleProfileService(prisma);
+  const policyService = new PolicyService(prisma);
   return async (
     req: AuthenticatedRequest,
     res: Response,
     next: NextFunction
   ) => {
-    const { userId, userRole, organizationId } = req;
+    try {
+      const { userId, userRole, organizationId } = req;
 
-    if (!userId || !organizationId) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
+      if (!userId || !organizationId) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
 
-    // Admins/Owners always pass
-    if (userRole && ADMIN_ROLES.includes(userRole)) {
-      next();
-      return;
-    }
-
-    const permissionType = ACTION_PERMISSION_MAP[action];
-    if (!permissionType) {
-      res.status(500).json({ error: `Unknown permission action: ${action}` });
-      return;
-    }
-
-    // Check role-profile permission (team/custom role assignment)
-    const policy = await roleProfiles.getEffectivePolicy(
-      organizationId,
-      userId,
-      userRole
-    );
-    if (policy.permissions.includes(permissionType)) {
-      next();
-      return;
-    }
-
-    // Check user-level permission
-    const granted = await prisma.userPermission.findUnique({
-      where: {
-        userId_permission: {
-          userId,
-          permission: permissionType,
-        },
-      },
-    });
-
-    if (granted) {
-      next();
-      return;
-    }
-
-    // For publish action, also check org-level allowedPublishers
-    if (action === "publish" && userRole) {
-      const settings = await prisma.orgSettings.findUnique({
-        where: { organizationId },
-      });
-
-      if (settings?.allowedPublishers?.includes(userRole)) {
+      // Admins/Owners always pass
+      if (userRole && ADMIN_ROLES.includes(userRole)) {
         next();
         return;
       }
-    }
 
-    res.status(403).json({
-      error: "permission_denied",
-      message: `You don't have permission to ${action.replace("_", " ")} landing pages. Contact your admin.`,
-      required_permission: permissionType,
-    });
+      const policyAction = legacyPermissionActionToPolicyAction(action);
+      if (!policyAction) {
+        res.status(500).json({ error: `Unknown permission action: ${action}` });
+        return;
+      }
+
+      const settings = await prisma.orgSettings.findUnique({
+        where: { organizationId },
+        select: { dataGovernancePolicy: true, allowedPublishers: true },
+      });
+
+      const decision = await policyService.evaluate({
+        action: policyAction,
+        organizationId,
+        userId,
+        userRole,
+        orgDataGovernancePolicy:
+          (settings?.dataGovernancePolicy as Record<string, unknown> | null) ?? null,
+      });
+      if (decision.allowed) {
+        next();
+        return;
+      }
+
+      // For publish action, also check org-level allowedPublishers
+      if (action === "publish" && userRole) {
+        if (settings?.allowedPublishers?.includes(userRole)) {
+          next();
+          return;
+        }
+      }
+
+      policyService.emitDenyTelemetry(
+        {
+          action: policyAction,
+          organizationId,
+          userId,
+          userRole,
+        },
+        decision
+      );
+
+      res.status(403).json({
+        error: "permission_denied",
+        message: `You don't have permission to ${action.replace("_", " ")} landing pages. Contact your admin.`,
+        required_permission: decision.requiredPermission,
+        deny_reason: decision.reason,
+      });
+    } catch (err) {
+      console.error("Permission middleware error:", err);
+      res.status(500).json({ error: "permission_check_failed" });
+    }
   };
 }
 
@@ -162,65 +160,70 @@ export function requirePageOwnerOrPermission(prisma: PrismaClient) {
     res: Response,
     next: NextFunction
   ) => {
-    const { userId, userRole, organizationId } = req;
-    const pageId = (req.params.pageId ?? req.params.id) as string;
+    try {
+      const { userId, userRole, organizationId } = req;
+      const pageId = (req.params.pageId ?? req.params.id) as string;
 
-    if (!userId || !organizationId) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
+      if (!userId || !organizationId) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
 
-    // Admins pass
-    if (userRole && ADMIN_ROLES.includes(userRole)) {
-      next();
-      return;
-    }
+      // Admins pass
+      if (userRole && ADMIN_ROLES.includes(userRole)) {
+        next();
+        return;
+      }
 
-    // Check if user owns this page
-    const page = await prisma.landingPage.findFirst({
-      where: { id: pageId, organizationId },
-      select: { createdById: true },
-    });
+      // Check if user owns this page
+      const page = await prisma.landingPage.findFirst({
+        where: { id: pageId, organizationId },
+        select: { createdById: true },
+      });
 
-    if (!page) {
-      res.status(404).json({ error: "Landing page not found" });
-      return;
-    }
+      if (!page) {
+        res.status(404).json({ error: "Landing page not found" });
+        return;
+      }
 
-    if (page.createdById === userId) {
-      next();
-      return;
-    }
+      if (page.createdById === userId) {
+        next();
+        return;
+      }
 
-    const policy = await roleProfiles.getEffectivePolicy(
-      organizationId,
-      userId,
-      userRole
-    );
-    if (policy.permissions.includes("EDIT_ANY_LANDING_PAGE")) {
-      next();
-      return;
-    }
+      const policy = await roleProfiles.getEffectivePolicy(
+        organizationId,
+        userId,
+        userRole
+      );
+      if (policy.permissions.includes("EDIT_ANY_LANDING_PAGE")) {
+        next();
+        return;
+      }
 
-    // Check edit_any permission
-    const editAny = await prisma.userPermission.findUnique({
-      where: {
-        userId_permission: {
-          userId,
-          permission: "EDIT_ANY_LANDING_PAGE",
+      // Check edit_any permission
+      const editAny = await prisma.userPermission.findUnique({
+        where: {
+          userId_permission: {
+            userId,
+            permission: "EDIT_ANY_LANDING_PAGE",
+          },
         },
-      },
-    });
+      });
 
-    if (editAny) {
-      next();
-      return;
+      if (editAny) {
+        next();
+        return;
+      }
+
+      res.status(403).json({
+        error: "permission_denied",
+        message: "You can only edit landing pages you created, or need EDIT_ANY permission.",
+      });
+    } catch (err) {
+      console.error("Page permission middleware error:", err);
+      res.status(500).json({ error: "permission_check_failed" });
     }
-
-    res.status(403).json({
-      error: "permission_denied",
-      message: "You can only edit landing pages you created, or need EDIT_ANY permission.",
-    });
   };
 }
 

@@ -11,6 +11,7 @@
  */
 
 import crypto from "crypto";
+import { Prisma } from "@prisma/client";
 import type { PrismaClient, PageVisibility, PageStatus } from "@prisma/client";
 import { CompanyScrubber } from "./company-scrubber.js";
 
@@ -50,6 +51,23 @@ export interface PublishOptions {
   expiresAt?: Date;
   /** Set at creation time, not changeable during publish. */
   includeCompanyName?: boolean;
+  publishedByUserId?: string;
+  approvalRequestId?: string;
+  releaseNotes?: string;
+  provenance?: Record<string, unknown>;
+}
+
+export interface ArtifactVersionSummary {
+  id: string;
+  versionNumber: number;
+  status: string;
+  releaseNotes: string | null;
+  visibility: PageVisibility;
+  expiresAt: Date | null;
+  publishedAt: Date | null;
+  createdAt: Date;
+  createdBy: { id: string; name: string | null; email: string } | null;
+  provenance: Record<string, unknown> | null;
 }
 
 export interface LandingPageSummary {
@@ -232,6 +250,8 @@ export class LandingPageEditor {
       }
     }
 
+    const publishedAt = new Date();
+
     await this.prisma.landingPage.update({
       where: { id: pageId },
       data: {
@@ -246,9 +266,17 @@ export class LandingPageEditor {
         visibility: options.visibility,
         password: options.password ?? null,
         expiresAt: options.expiresAt ?? null,
-        publishedAt: new Date(),
+        publishedAt,
         noIndex: true, // always noindex
       },
+    });
+
+    await this.createArtifactVersion(page.id, {
+      releaseNotes: options.releaseNotes,
+      approvalRequestId: options.approvalRequestId,
+      publishedByUserId: options.publishedByUserId,
+      provenance: options.provenance,
+      publishedAt,
     });
 
     const baseUrl = process.env.APP_URL ?? "http://localhost:3000";
@@ -548,6 +576,126 @@ export class LandingPageEditor {
     };
   }
 
+  async listArtifactVersions(
+    pageId: string,
+    organizationId: string
+  ): Promise<ArtifactVersionSummary[]> {
+    const versions = await this.prisma.publishedArtifactVersion.findMany({
+      where: {
+        landingPageId: pageId,
+        organizationId,
+      },
+      orderBy: { versionNumber: "desc" },
+      include: {
+        publishedBy: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    return versions.map((v) => ({
+      id: v.id,
+      versionNumber: v.versionNumber,
+      status: v.status,
+      releaseNotes: v.releaseNotes,
+      visibility: v.visibilitySnapshot,
+      expiresAt: v.expiresAtSnapshot,
+      publishedAt: v.publishedAtSnapshot,
+      createdAt: v.createdAt,
+      createdBy: v.publishedBy
+        ? {
+            id: v.publishedBy.id,
+            name: v.publishedBy.name,
+            email: v.publishedBy.email,
+          }
+        : null,
+      provenance:
+        v.provenance && typeof v.provenance === "object" && !Array.isArray(v.provenance)
+          ? (v.provenance as Record<string, unknown>)
+          : null,
+    }));
+  }
+
+  async rollbackToVersion(
+    pageId: string,
+    versionId: string,
+    actorUserId: string
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const page = await tx.landingPage.findUniqueOrThrow({
+        where: { id: pageId },
+      });
+
+      const version = await tx.publishedArtifactVersion.findFirst({
+        where: {
+          id: versionId,
+          landingPageId: pageId,
+          organizationId: page.organizationId,
+        },
+      });
+      if (!version) {
+        throw new Error("Version not found for this landing page");
+      }
+
+      await tx.landingPage.update({
+        where: { id: pageId },
+        data: {
+          title: version.titleSnapshot,
+          subtitle: version.subtitleSnapshot,
+          editableBody: version.bodySnapshot,
+          calloutBoxes: version.calloutBoxesSnapshot as Prisma.InputJsonValue,
+          visibility: version.visibilitySnapshot,
+          expiresAt: version.expiresAtSnapshot,
+          status: "PUBLISHED",
+          publishedAt: new Date(),
+        },
+      });
+
+      await tx.publishedArtifactVersion.updateMany({
+        where: {
+          landingPageId: pageId,
+          organizationId: page.organizationId,
+          status: "ACTIVE",
+        },
+        data: { status: "ROLLED_BACK" },
+      });
+
+      const maxVersion = await tx.publishedArtifactVersion.aggregate({
+        where: {
+          landingPageId: pageId,
+          organizationId: page.organizationId,
+        },
+        _max: { versionNumber: true },
+      });
+
+      await tx.publishedArtifactVersion.create({
+        data: {
+          organizationId: page.organizationId,
+          landingPageId: pageId,
+          artifactType: "LANDING_PAGE",
+          versionNumber: (maxVersion._max.versionNumber ?? 0) + 1,
+          status: "ACTIVE",
+          releaseNotes: `Rollback to version ${version.versionNumber}`,
+          titleSnapshot: version.titleSnapshot,
+          subtitleSnapshot: version.subtitleSnapshot,
+          bodySnapshot: version.bodySnapshot,
+          calloutBoxesSnapshot: version.calloutBoxesSnapshot ?? Prisma.JsonNull,
+          visibilitySnapshot: version.visibilitySnapshot,
+          expiresAtSnapshot: version.expiresAtSnapshot,
+          publishedAtSnapshot: new Date(),
+          sourceEditId: version.sourceEditId,
+          publishedByUserId: actorUserId,
+          rolledBackFromVersionId: version.id,
+          provenance: {
+            action: "rollback",
+            source_version_id: version.id,
+            source_version_number: version.versionNumber,
+            rolled_back_at: new Date().toISOString(),
+            rolled_back_by_user_id: actorUserId,
+          },
+        },
+      });
+    });
+  }
+
   // ─── Private ──────────────────────────────────────────────────────
 
   /**
@@ -582,6 +730,77 @@ export class LandingPageEditor {
     }
 
     return slug;
+  }
+
+  private async createArtifactVersion(
+    pageId: string,
+    input: {
+      releaseNotes?: string;
+      approvalRequestId?: string;
+      publishedByUserId?: string;
+      provenance?: Record<string, unknown>;
+      publishedAt: Date;
+    }
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const page = await tx.landingPage.findUniqueOrThrow({
+        where: { id: pageId },
+        select: {
+          id: true,
+          organizationId: true,
+          title: true,
+          subtitle: true,
+          editableBody: true,
+          calloutBoxes: true,
+          visibility: true,
+          expiresAt: true,
+          edits: {
+            select: { id: true },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+      });
+
+      await tx.publishedArtifactVersion.updateMany({
+        where: {
+          landingPageId: page.id,
+          organizationId: page.organizationId,
+          status: "ACTIVE",
+        },
+        data: { status: "SUPERSEDED" },
+      });
+
+      const maxVersion = await tx.publishedArtifactVersion.aggregate({
+        where: {
+          landingPageId: page.id,
+          organizationId: page.organizationId,
+        },
+        _max: { versionNumber: true },
+      });
+
+      await tx.publishedArtifactVersion.create({
+        data: {
+          organizationId: page.organizationId,
+          landingPageId: page.id,
+          artifactType: "LANDING_PAGE",
+          versionNumber: (maxVersion._max.versionNumber ?? 0) + 1,
+          status: "ACTIVE",
+          releaseNotes: input.releaseNotes ?? null,
+          titleSnapshot: page.title,
+          subtitleSnapshot: page.subtitle,
+          bodySnapshot: page.editableBody,
+          calloutBoxesSnapshot: page.calloutBoxes ?? Prisma.JsonNull,
+          visibilitySnapshot: page.visibility,
+          expiresAtSnapshot: page.expiresAt,
+          publishedAtSnapshot: input.publishedAt,
+          sourceEditId: page.edits[0]?.id ?? null,
+          publishedByUserId: input.publishedByUserId ?? null,
+          approvalRequestId: input.approvalRequestId ?? null,
+          provenance: (input.provenance ?? {}) as Prisma.InputJsonValue,
+        },
+      });
+    });
   }
 }
 

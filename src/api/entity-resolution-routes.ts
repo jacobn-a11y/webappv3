@@ -19,6 +19,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import { EntityResolutionQueueService } from "../services/entity-resolution-queue.js";
+import { parseBoundedLimit, PAGINATION_LIMITS } from "../lib/pagination.js";
 import { requirePermission } from "../middleware/permissions.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -148,12 +149,15 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
 
       try {
         const query = (req.query.q as string) ?? "";
-        const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+        const limit = parseBoundedLimit(req.query.limit, {
+          fallback: PAGINATION_LIMITS.SEARCH_DEFAULT,
+          max: PAGINATION_LIMITS.SEARCH_MAX,
+        });
 
         const accounts = await queueService.searchAccounts(
           req.organizationId,
           query,
-          Math.min(limit, 50)
+          limit
         );
 
         res.json({ accounts });

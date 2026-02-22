@@ -1,0 +1,10 @@
+{
+  "frontend": {
+    "maxMainJsKb": 850,
+    "maxMainCssKb": 120
+  },
+  "apiLatency": {
+    "p95Ms": 750,
+    "p99Ms": 1500
+  }
+}

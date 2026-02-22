@@ -4,7 +4,7 @@
  * Defines the three billing tiers for StoryEngine:
  *  - Starter:      Usage-based at $0.05 per transcript minute
  *  - Professional: Usage-based at $0.03 per transcript minute (volume discount)
- *  - Enterprise:   Custom pricing, requires sales contact
+ *  - Enterprise:   Advanced controls with configurable pricing
  *
  * Each plan maps to a Stripe Price ID set via environment variables.
  * All paid plans use metered (usage-based) billing reported daily.
@@ -46,7 +46,7 @@ export const PLAN_CONFIGS: Record<Exclude<Plan, "FREE_TRIAL">, PlanConfig> = {
     name: "Enterprise",
     stripePriceEnvVar: "STRIPE_ENTERPRISE_PRICE_ID",
     pricePerMinute: null,
-    description: "Custom pricing with dedicated support",
+    description: "Advanced controls with configurable pricing",
     metered: true,
     contactSales: true,
   },

@@ -30,9 +30,25 @@ function validPayload(overrides: Record<string, unknown> = {}) {
 
 /** Creates a mock PrismaClient that returns the given org on findUnique */
 function mockPrisma(org: Record<string, unknown> | null = ACTIVE_ORG) {
+  const isPaidPlan =
+    !!org &&
+    typeof (org as { plan?: unknown }).plan === "string" &&
+    (org as { plan: string }).plan !== "FREE_TRIAL";
+
   return {
     organization: {
       findUnique: vi.fn().mockResolvedValue(org),
+    },
+    subscription: {
+      findFirst: vi.fn().mockResolvedValue(
+        isPaidPlan
+          ? {
+              id: "sub-test-active",
+              status: "ACTIVE",
+              currentPeriodEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            }
+          : null
+      ),
     },
   };
 }

@@ -12,11 +12,20 @@ function createMockPrisma() {
       findUnique: vi.fn().mockResolvedValue(null), // null = feature enabled by default
       upsert: vi.fn(),
     },
+    auditLog: {
+      create: vi.fn(),
+    },
+    artifactGovernancePolicy: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
     userPermission: {
       findUnique: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       upsert: vi.fn(),
       deleteMany: vi.fn(),
+    },
+    userRoleAssignment: {
+      findUnique: vi.fn().mockResolvedValue(null),
     },
     landingPage: {
       findFirst: vi.fn(),
@@ -31,6 +40,7 @@ function createMockPrisma() {
       groupBy: vi.fn().mockResolvedValue([]),
     },
     story: {
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn(),
     },
@@ -39,6 +49,18 @@ function createMockPrisma() {
     },
     account: {
       findMany: vi.fn().mockResolvedValue([]),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({
+        id: "account-1",
+        name: "Acme Corp",
+        normalizedName: "acme corp",
+        domain: "acme.com",
+        aliases: [],
+        domainAliases: [],
+        contacts: [],
+        organization: {
+          orgSettings: null,
+        },
+      }),
     },
     user: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -87,6 +109,11 @@ function createApp(prisma: MockPrisma, auth: AuthOverrides = {}) {
 
 /** Sets up mock returns so the full POST /api/pages create flow succeeds. */
 function seedCreateFlow(prisma: MockPrisma) {
+  prisma.story.findFirst.mockResolvedValue({
+    id: "story-1",
+    accountId: "account-1",
+  });
+
   prisma.story.findUniqueOrThrow.mockResolvedValue({
     id: "story-1",
     organizationId: "org-1",
@@ -97,6 +124,16 @@ function seedCreateFlow(prisma: MockPrisma) {
   });
 
   prisma.call.findMany.mockResolvedValue([{ duration: 3600 }]);
+  prisma.userAccountAccess.findMany.mockResolvedValue([
+    {
+      id: "grant-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      scopeType: "ALL_ACCOUNTS",
+      accountId: null,
+      cachedAccountIds: [],
+    },
+  ]);
 
   // generateUniqueSlug checks for collisions
   prisma.landingPage.findUnique.mockResolvedValue(null);
@@ -221,7 +258,7 @@ describe("Permissions Integration Tests", () => {
   // ── PUBLISH_NAMED_LANDING_PAGE gating ──────────────────────────────────
 
   describe("PUBLISH_NAMED_LANDING_PAGE gating", () => {
-    it("silently ignores include_company_name when MEMBER lacks PUBLISH_NAMED_LANDING_PAGE", async () => {
+    it("returns 403 when MEMBER tries include_company_name without named-story capability", async () => {
       const prisma = createMockPrisma();
       seedCreateFlow(prisma);
 
@@ -245,26 +282,19 @@ describe("Permissions Integration Tests", () => {
         .post("/api/pages")
         .send({ ...CREATE_BODY, include_company_name: true });
 
-      expect(res.status).toBe(201);
-
-      // Verify the page was created with includeCompanyName: false
-      expect(prisma.landingPage.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            includeCompanyName: false,
-          }),
-        })
-      );
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe("permission_denied");
+      expect(prisma.landingPage.create).not.toHaveBeenCalled();
     });
 
-    it("allows include_company_name when MEMBER has PUBLISH_NAMED_LANDING_PAGE", async () => {
+    it("allows include_company_name when MEMBER role profile can generate named stories", async () => {
       const prisma = createMockPrisma();
       seedCreateFlow(prisma);
 
-      // Grant both CREATE and PUBLISH_NAMED
+      // Grant CREATE route permission.
       prisma.userPermission.findUnique.mockImplementation(({ where }: any) => {
         const perm = where.userId_permission?.permission;
-        if (perm === "CREATE_LANDING_PAGE" || perm === "PUBLISH_NAMED_LANDING_PAGE") {
+        if (perm === "CREATE_LANDING_PAGE") {
           return Promise.resolve({
             id: "perm-1",
             userId: "user-1",
@@ -272,6 +302,27 @@ describe("Permissions Integration Tests", () => {
           });
         }
         return Promise.resolve(null);
+      });
+      prisma.userRoleAssignment.findUnique.mockResolvedValue({
+        userId: "user-1",
+        roleProfileId: "rp-1",
+        roleProfile: {
+          id: "rp-1",
+          organizationId: "org-1",
+          key: "SALES",
+          permissions: ["CREATE_LANDING_PAGE", "PUBLISH_NAMED_LANDING_PAGE"],
+          canAccessAnonymousStories: true,
+          canGenerateAnonymousStories: true,
+          canAccessNamedStories: true,
+          canGenerateNamedStories: true,
+          defaultAccountScopeType: "ALL_ACCOUNTS",
+          defaultAccountIds: [],
+          maxTokensPerDay: null,
+          maxTokensPerMonth: null,
+          maxRequestsPerDay: null,
+          maxRequestsPerMonth: null,
+          maxStoriesPerMonth: null,
+        },
       });
 
       const app = createApp(prisma, { userRole: "MEMBER" });

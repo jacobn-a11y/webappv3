@@ -14,6 +14,7 @@
  */
 
 import Fuse from "fuse.js";
+import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import { normalizeCompanyName } from "./entity-resolution.js";
 
@@ -73,6 +74,7 @@ export interface MergePreview {
 export interface MergeResult {
   primaryAccountId: string;
   deletedAccountId: string;
+  mergeRunId: string;
   contactsMoved: number;
   callsMoved: number;
   storiesMoved: number;
@@ -212,7 +214,9 @@ export class AccountMergeService {
   async executeMerge(
     organizationId: string,
     primaryAccountId: string,
-    secondaryAccountId: string
+    secondaryAccountId: string,
+    initiatedByUserId?: string,
+    notes?: string
   ): Promise<MergeResult> {
     // Validate both accounts belong to the same org
     const [primary, secondary] = await Promise.all([
@@ -236,6 +240,12 @@ export class AccountMergeService {
 
     // Run the merge inside a transaction for atomicity
     return this.prisma.$transaction(async (tx) => {
+      const mergePreview = await this.previewMerge(
+        organizationId,
+        primaryAccountId,
+        secondaryAccountId
+      );
+
       // ── 1. Move contacts ─────────────────────────────────────────
       // Find contacts on the secondary that already exist on the primary (by email)
       const primaryContacts = await tx.contact.findMany({
@@ -246,9 +256,11 @@ export class AccountMergeService {
 
       const secondaryContacts = await tx.contact.findMany({
         where: { accountId: secondaryAccountId },
+        select: { id: true, email: true },
       });
 
       let contactsMoved = 0;
+      const movedContactIds: string[] = [];
       for (const contact of secondaryContacts) {
         if (primaryEmails.has(contact.email)) {
           // Duplicate email — reassign any call participant links, then delete
@@ -263,10 +275,16 @@ export class AccountMergeService {
             data: { accountId: primaryAccountId },
           });
           contactsMoved++;
+          movedContactIds.push(contact.id);
         }
       }
 
       // ── 2. Move calls ────────────────────────────────────────────
+      const secondaryCalls = await tx.call.findMany({
+        where: { accountId: secondaryAccountId },
+        select: { id: true },
+      });
+      const movedCallIds = secondaryCalls.map((c) => c.id);
       const callUpdate = await tx.call.updateMany({
         where: { accountId: secondaryAccountId },
         data: { accountId: primaryAccountId },
@@ -274,6 +292,11 @@ export class AccountMergeService {
       const callsMoved = callUpdate.count;
 
       // ── 3. Move stories ──────────────────────────────────────────
+      const secondaryStories = await tx.story.findMany({
+        where: { accountId: secondaryAccountId },
+        select: { id: true },
+      });
+      const movedStoryIds = secondaryStories.map((s) => s.id);
       const storyUpdate = await tx.story.updateMany({
         where: { accountId: secondaryAccountId },
         data: { accountId: primaryAccountId },
@@ -284,13 +307,15 @@ export class AccountMergeService {
       // Landing pages reference storyId, not accountId directly.
       // However, they do have an organizationId. Stories were already moved.
       // Count the landing pages associated with the moved stories for reporting.
-      const movedStories = await tx.story.findMany({
-        where: { accountId: primaryAccountId },
-        select: { id: true, landingPages: { select: { id: true } } },
+      const secondaryLandingPages = await tx.landingPage.findMany({
+        where: {
+          organizationId,
+          storyId: { in: movedStoryIds },
+        },
+        select: { id: true },
       });
-      // We only count pages that belonged to the secondary's stories
-      // but since stories were already moved, we count based on the story update.
-      const landingPagesMoved = 0; // Landing pages follow their stories automatically
+      const movedLandingPageIds = secondaryLandingPages.map((p) => p.id);
+      const landingPagesMoved = movedLandingPageIds.length;
 
       // ── 5. Move SalesforceEvents ─────────────────────────────────
       await tx.salesforceEvent.updateMany({
@@ -388,9 +413,29 @@ export class AccountMergeService {
       // ── 9. Delete the secondary account ──────────────────────────
       await tx.account.delete({ where: { id: secondaryAccountId } });
 
+      const mergeRun = await tx.accountMergeRun.create({
+        data: {
+          organizationId,
+          primaryAccountId,
+          secondaryAccountId,
+          initiatedByUserId: initiatedByUserId ?? null,
+          status: "COMPLETED",
+          mergePreview: {
+            primary: mergePreview.primary,
+            secondary: mergePreview.secondary,
+          } as unknown as Prisma.InputJsonValue,
+          movedContactIds,
+          movedCallIds,
+          movedStoryIds,
+          movedLandingPageIds,
+          notes: notes ?? null,
+        },
+      });
+
       return {
         primaryAccountId,
         deletedAccountId: secondaryAccountId,
+        mergeRunId: mergeRun.id,
         contactsMoved,
         callsMoved,
         storiesMoved,
@@ -398,6 +443,139 @@ export class AccountMergeService {
         domainAliasesAdded,
       };
     });
+  }
+
+  async undoMerge(
+    organizationId: string,
+    mergeRunId: string,
+    undoneByUserId?: string
+  ): Promise<{
+    mergeRunId: string;
+    restoredSecondaryAccountId: string;
+    restoredContacts: number;
+    restoredCalls: number;
+    restoredStories: number;
+  }> {
+    return this.prisma.$transaction(async (tx) => {
+      const run = await tx.accountMergeRun.findFirst({
+        where: { id: mergeRunId, organizationId },
+      });
+      if (!run) {
+        throw new Error("Merge run not found");
+      }
+      if (run.status === "UNDONE") {
+        throw new Error("Merge run already undone");
+      }
+
+      const preview =
+        run.mergePreview && typeof run.mergePreview === "object"
+          ? (run.mergePreview as unknown as {
+              secondary?: {
+                id: string;
+                name: string;
+                domain: string | null;
+                industry: string | null;
+                employeeCount: number | null;
+                annualRevenue: number | null;
+              };
+            })
+          : {};
+      const secondary = preview.secondary;
+      if (!secondary) {
+        throw new Error("Merge run is missing secondary account snapshot");
+      }
+
+      const existingSecondary = await tx.account.findFirst({
+        where: { id: secondary.id, organizationId },
+      });
+      if (!existingSecondary) {
+        await tx.account.create({
+          data: {
+            id: secondary.id,
+            organizationId,
+            name: secondary.name,
+            normalizedName: normalizeCompanyName(secondary.name),
+            domain: secondary.domain ?? null,
+            industry: secondary.industry ?? null,
+            employeeCount: secondary.employeeCount ?? null,
+            annualRevenue: secondary.annualRevenue ?? null,
+          },
+        });
+      }
+
+      const restoredContacts = (
+        await tx.contact.updateMany({
+          where: { id: { in: run.movedContactIds }, accountId: run.primaryAccountId },
+          data: { accountId: run.secondaryAccountId },
+        })
+      ).count;
+      const restoredCalls = (
+        await tx.call.updateMany({
+          where: { id: { in: run.movedCallIds }, accountId: run.primaryAccountId },
+          data: { accountId: run.secondaryAccountId },
+        })
+      ).count;
+      const restoredStories = (
+        await tx.story.updateMany({
+          where: { id: { in: run.movedStoryIds }, accountId: run.primaryAccountId },
+          data: { accountId: run.secondaryAccountId },
+        })
+      ).count;
+
+      await tx.accountMergeRun.update({
+        where: { id: run.id },
+        data: {
+          status: "UNDONE",
+          undoneByUserId: undoneByUserId ?? null,
+          undoneAt: new Date(),
+        },
+      });
+
+      return {
+        mergeRunId: run.id,
+        restoredSecondaryAccountId: run.secondaryAccountId,
+        restoredContacts,
+        restoredCalls,
+        restoredStories,
+      };
+    });
+  }
+
+  async listMergeRuns(organizationId: string): Promise<
+    Array<{
+      id: string;
+      primaryAccountId: string;
+      secondaryAccountId: string;
+      status: string;
+      createdAt: Date;
+      undoneAt: Date | null;
+      movedCounts: {
+        contacts: number;
+        calls: number;
+        stories: number;
+        landingPages: number;
+      };
+    }>
+  > {
+    const runs = await this.prisma.accountMergeRun.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
+    return runs.map((run) => ({
+      id: run.id,
+      primaryAccountId: run.primaryAccountId,
+      secondaryAccountId: run.secondaryAccountId,
+      status: run.status,
+      createdAt: run.createdAt,
+      undoneAt: run.undoneAt ?? null,
+      movedCounts: {
+        contacts: run.movedContactIds.length,
+        calls: run.movedCallIds.length,
+        stories: run.movedStoryIds.length,
+        landingPages: run.movedLandingPageIds.length,
+      },
+    }));
   }
 
   // ─── Private ────────────────────────────────────────────────────────

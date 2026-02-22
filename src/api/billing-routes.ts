@@ -12,6 +12,7 @@ import Stripe from "stripe";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import { requirePermission } from "../middleware/permissions.js";
 import { isBillingEnabled } from "../middleware/billing.js";
+import { buildPublicAppUrl } from "../lib/public-app-url.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -208,10 +209,10 @@ export function createBillingRoutes(
 
         const session = await stripe.billingPortal.sessions.create({
           customer: customerId,
-          return_url: `${process.env.APP_URL}/settings/billing`,
+          return_url: buildPublicAppUrl("/admin/billing"),
         });
 
-        res.json({ portal_url: session.url });
+        res.json({ portalUrl: session.url });
       } catch (err) {
         console.error("Create portal session error:", err);
         res.status(500).json({ error: "Failed to create billing portal session" });

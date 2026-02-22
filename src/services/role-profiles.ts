@@ -5,7 +5,13 @@ import type {
   UserRole,
 } from "@prisma/client";
 
-type RolePresetKey = "SALES" | "CS" | "EXEC";
+type RolePresetKey =
+  | "SALES"
+  | "CS"
+  | "EXEC"
+  | "BILLING_ADMIN"
+  | "APPROVAL_ADMIN"
+  | "TEAM_APPROVAL_ADMIN";
 
 export interface EffectiveRolePolicy {
   permissions: PermissionType[];
@@ -90,6 +96,47 @@ const PRESETS: Record<RolePresetKey, RoleProfileInput> = {
     canAccessNamedStories: false,
     canGenerateNamedStories: false,
     defaultAccountScopeType: "ACCOUNT_LIST",
+    maxStoriesPerMonth: 0,
+  },
+  BILLING_ADMIN: {
+    key: "BILLING_ADMIN",
+    name: "Billing Admin",
+    description:
+      "Manages seats, billing readiness, and all approval workflows.",
+    isPreset: true,
+    permissions: ["MANAGE_PERMISSIONS", "VIEW_ANALYTICS", "PUBLISH_LANDING_PAGE"],
+    canAccessAnonymousStories: true,
+    canGenerateAnonymousStories: false,
+    canAccessNamedStories: true,
+    canGenerateNamedStories: false,
+    defaultAccountScopeType: "ALL_ACCOUNTS",
+    maxStoriesPerMonth: 0,
+  },
+  APPROVAL_ADMIN: {
+    key: "APPROVAL_ADMIN",
+    name: "Approval Admin",
+    description: "Can perform organization-wide review and approval actions.",
+    isPreset: true,
+    permissions: ["PUBLISH_LANDING_PAGE", "VIEW_ANALYTICS"],
+    canAccessAnonymousStories: true,
+    canGenerateAnonymousStories: false,
+    canAccessNamedStories: true,
+    canGenerateNamedStories: false,
+    defaultAccountScopeType: "ALL_ACCOUNTS",
+    maxStoriesPerMonth: 0,
+  },
+  TEAM_APPROVAL_ADMIN: {
+    key: "TEAM_APPROVAL_ADMIN",
+    name: "Team Approval Admin",
+    description:
+      "Can review approvals for assigned teams configured by billing admins.",
+    isPreset: true,
+    permissions: ["PUBLISH_LANDING_PAGE", "VIEW_ANALYTICS"],
+    canAccessAnonymousStories: true,
+    canGenerateAnonymousStories: false,
+    canAccessNamedStories: true,
+    canGenerateNamedStories: false,
+    defaultAccountScopeType: "ALL_ACCOUNTS",
     maxStoriesPerMonth: 0,
   },
 };
@@ -214,35 +261,7 @@ export class RoleProfileService {
       return fallbackPolicy(userRole);
     }
 
-    const userRoleAssignmentDelegate = (
-      this.prisma as unknown as {
-        userRoleAssignment?: {
-          findUnique: (args: unknown) => Promise<{
-            roleProfile: {
-              organizationId: string;
-              permissions: PermissionType[];
-              canAccessAnonymousStories: boolean;
-              canGenerateAnonymousStories: boolean;
-              canAccessNamedStories: boolean;
-              canGenerateNamedStories: boolean;
-              defaultAccountScopeType: AccountScopeType;
-              defaultAccountIds: string[];
-              maxTokensPerDay: number | null;
-              maxTokensPerMonth: number | null;
-              maxRequestsPerDay: number | null;
-              maxRequestsPerMonth: number | null;
-              maxStoriesPerMonth: number | null;
-            };
-          } | null>;
-        };
-      }
-    ).userRoleAssignment;
-
-    if (!userRoleAssignmentDelegate) {
-      return fallbackPolicy(userRole);
-    }
-
-    const assignment = await userRoleAssignmentDelegate.findUnique({
+    const assignment = await this.prisma.userRoleAssignment.findUnique({
       where: { userId },
       include: { roleProfile: true },
     });

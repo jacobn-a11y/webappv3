@@ -29,6 +29,13 @@ import type {
 export interface WizardStatus {
   currentStep: SetupWizardStep;
   completedAt: string | null;
+  completionScore: number;
+  missingPrompts: string[];
+  firstValue: {
+    storiesGenerated: number;
+    pagesPublished: number;
+    complete: boolean;
+  };
   steps: {
     recording_provider: {
       complete: boolean;
@@ -122,9 +129,79 @@ export class SetupWizardService {
     ];
     const currentIdx = stepOrder.indexOf(wizard.currentStep);
 
+    const [settings, rolePresetCount, storyCount, pageCount, integrationCount] =
+      await Promise.all([
+        this.prisma.orgSettings.findUnique({
+          where: { organizationId },
+          select: { storyContext: true, dataGovernancePolicy: true },
+        }),
+        this.prisma.roleProfile.count({
+          where: { organizationId, isPreset: true },
+        }),
+        this.prisma.story.count({ where: { organizationId } }),
+        this.prisma.landingPage.count({
+          where: { organizationId, status: "PUBLISHED" },
+        }),
+        this.prisma.integrationConfig.count({
+          where: { organizationId, enabled: true },
+        }),
+      ]);
+
+    const rawStoryContext = settings?.storyContext;
+    const storyContext =
+      rawStoryContext && typeof rawStoryContext === "object" && !Array.isArray(rawStoryContext)
+        ? (rawStoryContext as Record<string, unknown>)
+        : {};
+    const products =
+      Array.isArray(storyContext.products) && storyContext.products.length > 0;
+    const companyOverview =
+      typeof storyContext.companyOverview === "string" &&
+      storyContext.companyOverview.trim().length > 0;
+    const orgProfileComplete = companyOverview || products;
+
+    const governanceDefaultsComplete =
+      Boolean(settings?.dataGovernancePolicy) &&
+      typeof settings?.dataGovernancePolicy === "object";
+    const rolePresetsComplete = rolePresetCount >= 3;
+    const connectorsComplete = integrationCount >= 1;
+    const firstValueComplete = storyCount > 0 && pageCount > 0;
+
+    const checklist = [
+      orgProfileComplete,
+      connectorsComplete,
+      rolePresetsComplete,
+      governanceDefaultsComplete,
+      firstValueComplete,
+    ];
+    const completeCount = checklist.filter(Boolean).length;
+    const completionScore = Math.round((completeCount / checklist.length) * 100);
+    const missingPrompts: string[] = [];
+    if (!orgProfileComplete) {
+      missingPrompts.push("Add company and product context in setup org profile.");
+    }
+    if (!connectorsComplete) {
+      missingPrompts.push("Connect at least one integration to start data sync.");
+    }
+    if (!rolePresetsComplete) {
+      missingPrompts.push("Apply preset roles (Sales, CS, Exec) for team onboarding.");
+    }
+    if (!governanceDefaultsComplete) {
+      missingPrompts.push("Set governance defaults (retention, export rules, legal hold).");
+    }
+    if (!firstValueComplete) {
+      missingPrompts.push("Generate your first story and publish your first landing page.");
+    }
+
     return {
       currentStep: wizard.currentStep,
       completedAt: wizard.completedAt?.toISOString() ?? null,
+      completionScore,
+      missingPrompts,
+      firstValue: {
+        storiesGenerated: storyCount,
+        pagesPublished: pageCount,
+        complete: firstValueComplete,
+      },
       steps: {
         recording_provider: {
           complete: currentIdx > 0,
@@ -485,17 +562,17 @@ export class SetupWizardService {
       {
         id: "ENTERPRISE" as Plan,
         name: "Enterprise",
-        description: "For large organizations with custom requirements.",
-        price: null, // contact sales
+        description: "For organizations needing advanced controls at scale.",
+        price: null, // configure enterprise Stripe price ID to enable checkout
         features: [
           "Unlimited transcript minutes",
           "Unlimited landing pages",
           "Advanced entity resolution",
           "Full CRM integration suite",
           "RAG chatbot connector",
-          "Custom branding + SSO",
-          "Dedicated account manager",
-          "SLA guarantees",
+          "Custom branding + SSO controls",
+          "Advanced governance automation",
+          "Expanded API and policy controls",
         ],
       },
     ];
@@ -515,42 +592,41 @@ export class SetupWizardService {
       ) => Promise<string | null>;
     }
   ): Promise<{ checkoutUrl: string | null }> {
-    // Update org plan
-    const updateData: Record<string, unknown> = {};
-
-    if (plan === "FREE_TRIAL") {
-      updateData.plan = "FREE_TRIAL";
-      updateData.trialEndsAt = new Date(
-        Date.now() + 14 * 24 * 60 * 60 * 1000
-      );
-    } else {
-      // For paid plans, we don't update the plan until payment is confirmed
-      // via Stripe webhook. Just record the selection in the wizard.
-      updateData.plan = "FREE_TRIAL"; // stay on trial until payment
-      updateData.trialEndsAt = new Date(
-        Date.now() + 14 * 24 * 60 * 60 * 1000
-      );
-    }
+    const isFreeTrial = plan === "FREE_TRIAL";
+    const trialEndsAt = new Date(
+      Date.now() + 14 * 24 * 60 * 60 * 1000
+    );
 
     await this.prisma.organization.update({
       where: { id: organizationId },
-      data: updateData,
+      data: {
+        // For paid plans, keep org on FREE_TRIAL until Stripe confirms payment.
+        plan: "FREE_TRIAL",
+        trialEndsAt,
+      },
     });
+
+    // For paid plans, create a Stripe checkout session before advancing.
+    let checkoutUrl: string | null = null;
+    let nextStep: "PLAN" | "PERMISSIONS" = "PERMISSIONS";
+    if (!isFreeTrial) {
+      checkoutUrl = await stripe.createCheckoutSession(organizationId, plan);
+      if (!checkoutUrl) {
+        throw new Error(
+          "Selected plan is not configured for self-serve checkout."
+        );
+      }
+      nextStep = "PLAN";
+    }
 
     // Record selection in wizard
     await this.prisma.setupWizard.update({
       where: { organizationId },
       data: {
         selectedPlan: plan,
-        currentStep: "PERMISSIONS",
+        currentStep: nextStep,
       },
     });
-
-    // For paid plans, create a Stripe checkout session
-    let checkoutUrl: string | null = null;
-    if (plan !== "FREE_TRIAL" && plan !== "ENTERPRISE") {
-      checkoutUrl = await stripe.createCheckoutSession(organizationId, plan);
-    }
 
     return { checkoutUrl };
   }

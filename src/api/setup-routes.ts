@@ -22,7 +22,10 @@ import { z } from "zod";
 import type { PrismaClient, UserRole, CallProvider, CRMProvider, Plan } from "@prisma/client";
 import Stripe from "stripe";
 import { SetupWizardService } from "../services/setup-wizard.js";
+import { RoleProfileService } from "../services/role-profiles.js";
 import { isBillingEnabled } from "../middleware/billing.js";
+import { getStripePriceId } from "../config/stripe-plans.js";
+import { buildPublicAppUrl } from "../lib/public-app-url.js";
 
 // ─── Validation Schemas ──────────────────────────────────────────────────────
 
@@ -61,6 +64,24 @@ const PermissionsSchema = z.object({
   require_approval_to_publish: z.boolean(),
 });
 
+const OrgProfileSchema = z.object({
+  company_overview: z.string().max(5000).optional(),
+  products: z.array(z.string().min(1).max(200)).optional(),
+  target_personas: z.array(z.string().min(1).max(120)).optional(),
+  target_industries: z.array(z.string().min(1).max(120)).optional(),
+});
+
+const GovernanceDefaultsSchema = z.object({
+  retention_days: z.number().int().min(30).max(3650).optional(),
+  audit_log_retention_days: z.number().int().min(30).max(3650).optional(),
+  legal_hold_enabled: z.boolean().optional(),
+  pii_export_enabled: z.boolean().optional(),
+  deletion_requires_approval: z.boolean().optional(),
+  allow_named_story_exports: z.boolean().optional(),
+  rto_target_minutes: z.number().int().min(5).max(60 * 24 * 14).optional(),
+  rpo_target_minutes: z.number().int().min(5).max(60 * 24 * 14).optional(),
+});
+
 const SkipStepSchema = z.object({
   step: z.enum([
     "RECORDING_PROVIDER", "CRM", "ACCOUNT_SYNC", "PLAN", "PERMISSIONS",
@@ -83,6 +104,7 @@ export function createSetupRoutes(
 ): Router {
   const router = Router();
   const wizardService = new SetupWizardService(prisma);
+  const roleProfiles = new RoleProfileService(prisma);
 
   // ── GET /api/setup/status ─────────────────────────────────────────
 
@@ -343,7 +365,6 @@ export function createSetupRoutes(
    *
    * Selects a plan. For paid plans, returns a Stripe checkout URL.
    * For FREE_TRIAL, activates the 14-day trial immediately.
-   * For ENTERPRISE, the user is directed to contact sales.
    *
    * When BILLING_ENABLED is not "true", the step auto-completes as
    * FREE_TRIAL with no trial expiration (internal use mode).
@@ -399,7 +420,7 @@ export function createSetupRoutes(
         req.organizationId,
         parse.data.plan as Plan,
         {
-          createCheckoutSession: async (orgId: string, _plan: Plan) => {
+          createCheckoutSession: async (orgId: string, plan: Plan) => {
             const org = await prisma.organization.findUnique({
               where: { id: orgId },
             });
@@ -422,17 +443,18 @@ export function createSetupRoutes(
               });
             }
 
-            const priceId = process.env.STRIPE_FREE_TRIAL_PRICE_ID;
+            if (plan === "FREE_TRIAL") return null;
+            const priceId = getStripePriceId(plan);
             if (!priceId) return null;
 
             const session = await stripe.checkout.sessions.create({
               customer: customerId,
               mode: "subscription",
               line_items: [{ price: priceId }],
-              success_url: `${process.env.APP_URL}/setup?step=permissions&checkout=success`,
-              cancel_url: `${process.env.APP_URL}/setup?step=plan&checkout=canceled`,
+              success_url: buildPublicAppUrl("/admin/setup?checkout=success"),
+              cancel_url: buildPublicAppUrl("/admin/setup?checkout=canceled"),
               subscription_data: {
-                metadata: { organizationId: orgId },
+                metadata: { organizationId: orgId, plan },
               },
             });
 
@@ -449,7 +471,10 @@ export function createSetupRoutes(
       });
     } catch (err) {
       console.error("Plan selection error:", err);
-      res.status(500).json({ error: "Failed to complete plan selection" });
+      const message =
+        err instanceof Error ? err.message : "Failed to complete plan selection";
+      const statusCode = message.includes("not configured") ? 400 : 500;
+      res.status(statusCode).json({ error: message });
     }
   });
 
@@ -487,6 +512,176 @@ export function createSetupRoutes(
     } catch (err) {
       console.error("Permissions setup error:", err);
       res.status(500).json({ error: "Failed to configure permissions" });
+    }
+  });
+
+  // ── Step 6: Org Profile Context (Setup companion) ────────────────
+
+  router.post("/step/org-profile", async (req: AuthReq, res: Response) => {
+    if (!req.organizationId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+
+    const parse = OrgProfileSchema.safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({ error: "validation_error", details: parse.error.issues });
+      return;
+    }
+
+    try {
+      const d = parse.data;
+      await prisma.orgSettings.upsert({
+        where: { organizationId: req.organizationId },
+        create: {
+          organizationId: req.organizationId,
+          storyContext: {
+            companyOverview: d.company_overview ?? "",
+            products: d.products ?? [],
+            targetPersonas: d.target_personas ?? [],
+            targetIndustries: d.target_industries ?? [],
+          },
+        },
+        update: {
+          storyContext: {
+            companyOverview: d.company_overview ?? "",
+            products: d.products ?? [],
+            targetPersonas: d.target_personas ?? [],
+            targetIndustries: d.target_industries ?? [],
+          },
+        },
+      });
+      const status = await wizardService.getStatus(req.organizationId);
+      res.json({ updated: true, status });
+    } catch (err) {
+      console.error("Org profile setup error:", err);
+      res.status(500).json({ error: "Failed to save org profile setup" });
+    }
+  });
+
+  // ── Step 7: Governance Defaults (Setup companion) ────────────────
+
+  router.post("/step/governance-defaults", async (req: AuthReq, res: Response) => {
+    if (!req.organizationId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    const parse = GovernanceDefaultsSchema.safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({ error: "validation_error", details: parse.error.issues });
+      return;
+    }
+    try {
+      const d = parse.data;
+      await prisma.orgSettings.upsert({
+        where: { organizationId: req.organizationId },
+        create: {
+          organizationId: req.organizationId,
+          dataGovernancePolicy: {
+            retention_days: d.retention_days ?? 365,
+            audit_log_retention_days: d.audit_log_retention_days ?? 365,
+            legal_hold_enabled: d.legal_hold_enabled ?? false,
+            pii_export_enabled: d.pii_export_enabled ?? true,
+            deletion_requires_approval: d.deletion_requires_approval ?? true,
+            allow_named_story_exports: d.allow_named_story_exports ?? false,
+            rto_target_minutes: d.rto_target_minutes ?? 240,
+            rpo_target_minutes: d.rpo_target_minutes ?? 60,
+          },
+        },
+        update: {
+          dataGovernancePolicy: {
+            retention_days: d.retention_days ?? 365,
+            audit_log_retention_days: d.audit_log_retention_days ?? 365,
+            legal_hold_enabled: d.legal_hold_enabled ?? false,
+            pii_export_enabled: d.pii_export_enabled ?? true,
+            deletion_requires_approval: d.deletion_requires_approval ?? true,
+            allow_named_story_exports: d.allow_named_story_exports ?? false,
+            rto_target_minutes: d.rto_target_minutes ?? 240,
+            rpo_target_minutes: d.rpo_target_minutes ?? 60,
+          },
+        },
+      });
+      const status = await wizardService.getStatus(req.organizationId);
+      res.json({ updated: true, status });
+    } catch (err) {
+      console.error("Governance defaults setup error:", err);
+      res.status(500).json({ error: "Failed to save governance defaults" });
+    }
+  });
+
+  // ── Step 8: Role Presets (Setup companion) ────────────────────────
+
+  router.post("/step/role-presets", async (req: AuthReq, res: Response) => {
+    if (!req.organizationId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    try {
+      await roleProfiles.ensurePresetRoles(req.organizationId);
+      const status = await wizardService.getStatus(req.organizationId);
+      res.json({ updated: true, status });
+    } catch (err) {
+      console.error("Role presets setup error:", err);
+      res.status(500).json({ error: "Failed to apply role presets" });
+    }
+  });
+
+  // ── First-Value Workflow Companion ────────────────────────────────
+
+  router.get("/first-value/recommendations", async (req: AuthReq, res: Response) => {
+    if (!req.organizationId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    try {
+      const [storyCount, pageCount, account] = await Promise.all([
+        prisma.story.count({ where: { organizationId: req.organizationId } }),
+        prisma.landingPage.count({
+          where: { organizationId: req.organizationId, status: "PUBLISHED" },
+        }),
+        prisma.account.findFirst({
+          where: { organizationId: req.organizationId },
+          select: { id: true, name: true },
+          orderBy: { updatedAt: "desc" },
+        }),
+      ]);
+
+      const tasks: string[] = [];
+      if (storyCount === 0) tasks.push("Generate your first story from a high-signal account.");
+      if (pageCount === 0) tasks.push("Publish a landing page for sales enablement.");
+      if (!account) tasks.push("Sync CRM and map at least one account before generation.");
+
+      res.json({
+        starter_story_templates: [
+          {
+            id: "before_after_transformation",
+            label: "Before/After Transformation",
+            funnel_stage: "BOFU",
+          },
+          {
+            id: "roi_hard_outcomes",
+            label: "ROI and Hard Financial Outcomes",
+            funnel_stage: "BOFU",
+          },
+          {
+            id: "implementation_time_to_value",
+            label: "Implementation and Time-to-Value",
+            funnel_stage: "MOFU",
+          },
+        ],
+        suggested_account: account
+          ? { id: account.id, name: account.name }
+          : null,
+        completion: {
+          stories_generated: storyCount,
+          pages_published: pageCount,
+          first_value_complete: storyCount > 0 && pageCount > 0,
+        },
+        next_tasks: tasks,
+      });
+    } catch (err) {
+      console.error("First-value recommendation error:", err);
+      res.status(500).json({ error: "Failed to load first-value recommendations" });
     }
   });
 

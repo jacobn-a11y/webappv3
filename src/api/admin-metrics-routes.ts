@@ -19,6 +19,7 @@ import { Router, type Request, type Response } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { metrics } from "../lib/metrics.js";
 import logger from "../lib/logger.js";
+import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.js";
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
@@ -30,8 +31,10 @@ export function createAdminMetricsRoutes(prisma: PrismaClient): Router {
    *
    * Returns a combined view of database totals and in-process runtime metrics.
    */
-  router.get("/", async (_req: Request, res: Response) => {
+  router.get("/", async (req: Request, res: Response) => {
     try {
+      const organizationId = getOrganizationIdOrThrow(req);
+
       // Query database totals in parallel
       const [
         totalCalls,
@@ -40,12 +43,17 @@ export function createAdminMetricsRoutes(prisma: PrismaClient): Router {
         publishedPages,
         tagConfidenceByStage,
       ] = await Promise.all([
-        prisma.call.count(),
-        prisma.transcript.count(),
-        prisma.story.count(),
-        prisma.landingPage.count({ where: { status: "PUBLISHED" } }),
+        prisma.call.count({ where: { organizationId } }),
+        prisma.transcript.count({
+          where: { call: { organizationId } },
+        }),
+        prisma.story.count({ where: { organizationId } }),
+        prisma.landingPage.count({
+          where: { organizationId, status: "PUBLISHED" },
+        }),
         prisma.callTag.groupBy({
           by: ["funnelStage"],
+          where: { call: { organizationId } },
           _avg: { confidence: true },
           _count: true,
         }),
@@ -94,6 +102,10 @@ export function createAdminMetricsRoutes(prisma: PrismaClient): Router {
         },
       });
     } catch (err) {
+      if (err instanceof TenantGuardError) {
+        res.status(err.statusCode).json({ error: err.message });
+        return;
+      }
       logger.error("Failed to collect admin metrics", { error: err });
       res.status(500).json({ error: "Failed to collect metrics" });
     }

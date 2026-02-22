@@ -19,6 +19,7 @@ import {
   getStripePriceId,
   getPlanByPriceId,
 } from "../config/stripe-plans.js";
+import { buildPublicAppUrl } from "../lib/public-app-url.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -75,14 +76,52 @@ export function createTrialGate(prisma: PrismaClient, stripe: Stripe) {
       return;
     }
 
-    // Active paid plan — allow through
+    // Active paid plan — allow through only when subscription is healthy.
     if (org.plan !== "FREE_TRIAL") {
-      next();
+      if (org.billingChannel === "SALES_LED") {
+        next();
+        return;
+      }
+
+      const latestSubscription = await prisma.subscription.findFirst({
+        where: { organizationId: orgId },
+        orderBy: [{ currentPeriodEnd: "desc" }, { createdAt: "desc" }],
+        select: { status: true },
+      });
+
+      if (!latestSubscription) {
+        res.status(402).json({
+          error: "subscription_required",
+          message: "No active subscription found. Please subscribe to continue.",
+          upgradeUrl: "/api/billing/checkout",
+        });
+        return;
+      }
+
+      if (latestSubscription.status === "ACTIVE" || latestSubscription.status === "TRIALING") {
+        next();
+        return;
+      }
+
+      if (latestSubscription.status === "PAST_DUE") {
+        res.status(402).json({
+          error: "payment_past_due",
+          message: "Your subscription payment is past due. Update billing to continue.",
+          portalUrl: "/api/billing/portal",
+        });
+        return;
+      }
+
+      res.status(402).json({
+        error: "subscription_inactive",
+        message: "Your subscription is inactive. Please re-subscribe to continue.",
+        upgradeUrl: "/api/billing/checkout",
+      });
       return;
     }
 
-    // Check trial expiration
-    if (org.trialEndsAt && new Date() > org.trialEndsAt) {
+    // Check trial expiration. Null expiry is treated as expired when billing is enabled.
+    if (!org.trialEndsAt || new Date() > org.trialEndsAt) {
       res.status(402).json({
         error: "trial_expired",
         message: "Your free trial has expired. Please upgrade to continue.",
@@ -104,8 +143,7 @@ const checkoutSchema = z.object({
 
 /**
  * Creates a Stripe Checkout session for subscribing to a specific plan.
- * Enterprise plans with contactSales=true redirect to a sales contact page
- * unless an Enterprise price ID is configured (for custom-negotiated rates).
+ * Enterprise plans are allowed only when a direct self-serve price is configured.
  */
 export function createCheckoutHandler(prisma: PrismaClient, stripe: Stripe) {
   return async (req: AuthenticatedRequest, res: Response) => {
@@ -135,12 +173,12 @@ export function createCheckoutHandler(prisma: PrismaClient, stripe: Stripe) {
     const { plan } = parsed.data;
     const planConfig = PLAN_CONFIGS[plan];
 
-    // Enterprise without a configured price → direct to sales
+    // Self-service only: plans without a configured Stripe price are unavailable.
     if (planConfig.contactSales && !getStripePriceId(plan)) {
-      res.json({
-        contactSales: true,
-        message: "Enterprise plans require a custom agreement. Our team will reach out.",
-        calendlyUrl: `${process.env.APP_URL}/contact-sales`,
+      res.status(400).json({
+        error: "plan_not_self_serve",
+        message:
+          "This plan is not configured for self-serve checkout. Add a Stripe price to enable it.",
       });
       return;
     }
@@ -178,8 +216,8 @@ export function createCheckoutHandler(prisma: PrismaClient, stripe: Stripe) {
       customer: customerId,
       mode: "subscription",
       line_items: [{ price: priceId }],
-      success_url: `${process.env.APP_URL}/settings/billing?success=true&plan=${plan}`,
-      cancel_url: `${process.env.APP_URL}/settings/billing?canceled=true`,
+      success_url: buildPublicAppUrl(`/admin/billing?success=true&plan=${plan}`),
+      cancel_url: buildPublicAppUrl("/admin/billing?canceled=true"),
       subscription_data: {
         metadata: { organizationId: orgId, plan },
       },
@@ -230,7 +268,7 @@ export function createPortalHandler(prisma: PrismaClient, stripe: Stripe) {
 
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: org.stripeCustomerId,
-      return_url: `${process.env.APP_URL}/settings/billing`,
+      return_url: buildPublicAppUrl("/admin/billing"),
     });
 
     res.json({ portalUrl: portalSession.url });
@@ -526,11 +564,11 @@ export function createStripeWebhookHandler(
             },
           });
 
-          // Update org plan if subscription is active
-          if (status === "ACTIVE") {
+          // Keep org plan synced when subscription is in a usable state.
+          if (status === "ACTIVE" || status === "TRIALING") {
             await prisma.organization.update({
               where: { id: orgId },
-              data: { plan },
+              data: { plan, trialEndsAt: null },
             });
           }
 
@@ -573,7 +611,7 @@ export function createStripeWebhookHandler(
           if (!otherActive) {
             await prisma.organization.update({
               where: { id: orgId },
-              data: { plan: "FREE_TRIAL" },
+              data: { plan: "FREE_TRIAL", trialEndsAt: new Date() },
             });
           }
 
@@ -585,7 +623,8 @@ export function createStripeWebhookHandler(
       }
     } catch (err) {
       console.error(`Webhook handler error for ${event.type}:`, err);
-      // Return 200 to prevent Stripe from retrying on application errors
+      res.status(500).json({ error: "webhook_processing_failed" });
+      return;
     }
 
     res.json({ received: true });

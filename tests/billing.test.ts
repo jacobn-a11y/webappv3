@@ -60,10 +60,63 @@ describe("createTrialGate", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it("allows through when plan is not FREE_TRIAL", async () => {
+  it("allows through when paid plan has active subscription", async () => {
     const prisma = {
       organization: {
-        findUnique: vi.fn().mockResolvedValue({ plan: "STARTER" }),
+        findUnique: vi.fn().mockResolvedValue({
+          plan: "STARTER",
+          billingChannel: "SELF_SERVE",
+        }),
+      },
+      subscription: {
+        findFirst: vi.fn().mockResolvedValue({ status: "ACTIVE" }),
+      },
+    } as never;
+    const stripe = {} as never;
+    const middleware = createTrialGate(prisma, stripe);
+    const req = mockReq();
+    const res = mockRes();
+    const next = mockNext();
+
+    await middleware(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+  });
+
+  it("returns 402 when paid plan is past_due", async () => {
+    const prisma = {
+      organization: {
+        findUnique: vi.fn().mockResolvedValue({
+          plan: "STARTER",
+          billingChannel: "SELF_SERVE",
+        }),
+      },
+      subscription: {
+        findFirst: vi.fn().mockResolvedValue({ status: "PAST_DUE" }),
+      },
+    } as never;
+    const stripe = {} as never;
+    const middleware = createTrialGate(prisma, stripe);
+    const req = mockReq();
+    const res = mockRes();
+    const next = mockNext();
+
+    await middleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(402);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("allows through for sales-led paid organizations without stripe subscription", async () => {
+    const prisma = {
+      organization: {
+        findUnique: vi.fn().mockResolvedValue({
+          plan: "ENTERPRISE",
+          billingChannel: "SALES_LED",
+        }),
+      },
+      subscription: {
+        findFirst: vi.fn().mockResolvedValue(null),
       },
     } as never;
     const stripe = {} as never;
@@ -120,11 +173,12 @@ describe("createTrialGate", () => {
     expect(next).toHaveBeenCalled();
   });
 
-  it("allows through when trial has no expiry date", async () => {
+  it("returns 402 when trial has no expiry date", async () => {
     const prisma = {
       organization: {
         findUnique: vi.fn().mockResolvedValue({
           plan: "FREE_TRIAL",
+          billingChannel: "SELF_SERVE",
           trialEndsAt: null,
         }),
       },
@@ -137,7 +191,8 @@ describe("createTrialGate", () => {
 
     await middleware(req, res, next);
 
-    expect(next).toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(402);
+    expect(next).not.toHaveBeenCalled();
   });
 
   it("includes upgrade URL in 402 response", async () => {

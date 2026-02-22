@@ -14,6 +14,7 @@ import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
 import { LandingPageExporter } from "../services/landing-page-exports.js";
 import { requirePageOwnerOrPermission } from "../middleware/permissions.js";
+import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -25,31 +26,68 @@ const SlackExportSchema = z.object({
   webhook_url: z.string().url().optional(),
 });
 
+interface DataGovernancePolicy {
+  pii_export_enabled?: boolean;
+  allow_named_story_exports?: boolean;
+}
+
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
 export function createExportRoutes(prisma: PrismaClient): Router {
   const router = Router();
   const exporter = new LandingPageExporter(prisma);
-  
-  const enforceExportPolicy = async (req: Request, res: Response): Promise<boolean> => {
-    const organizationId = (req as unknown as { organizationId?: string }).organizationId;
-    if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
-      return false;
+  const resolveOrgId = (req: Request, res: Response): string | null => {
+    try {
+      return getOrganizationIdOrThrow(req);
+    } catch (error) {
+      if (error instanceof TenantGuardError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return null;
+      }
+      throw error;
     }
+  };
+  
+  const enforceExportPolicy = async (
+    req: Request,
+    res: Response
+  ): Promise<boolean> => {
+    const organizationId = resolveOrgId(req, res);
+    if (!organizationId) return false;
 
     const settings = await prisma.orgSettings.findUnique({
       where: { organizationId },
-      select: { dataGovernancePolicy: true } as unknown as Record<string, boolean>,
+      select: { dataGovernancePolicy: true },
     });
-    const settingsRecord = settings as unknown as { dataGovernancePolicy?: unknown } | null;
-    const policy = (settingsRecord?.dataGovernancePolicy ?? {}) as Record<string, unknown>;
+    const rawPolicy = settings?.dataGovernancePolicy;
+    const policy =
+      rawPolicy && typeof rawPolicy === "object" && !Array.isArray(rawPolicy)
+        ? (rawPolicy as DataGovernancePolicy)
+        : {};
     if (policy.pii_export_enabled === false) {
       res.status(403).json({
         error: "policy_denied",
         message: "Exports are disabled by your organization's data governance policy.",
       });
       return false;
+    }
+
+    if (policy.allow_named_story_exports === false) {
+      const pageId = String(req.params.pageId ?? "");
+      if (pageId) {
+        const page = await prisma.landingPage.findFirst({
+          where: { id: pageId, organizationId },
+          select: { includeCompanyName: true },
+        });
+        if (page?.includeCompanyName) {
+          res.status(403).json({
+            error: "policy_denied",
+            message:
+              "Named-story exports are disabled by your organization's data governance policy.",
+          });
+          return false;
+        }
+      }
     }
     return true;
   };

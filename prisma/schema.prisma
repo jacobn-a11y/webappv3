@@ -48,6 +48,27 @@ model Organization {
   roleProfiles         RoleProfile[]
   auditLogs            AuditLog[]
   featureFlags         OrgFeatureFlag[]
+  sessions             UserSession[]
+  ipAllowlistEntries   OrgIpAllowlistEntry[]
+  scimProvisioning     ScimProvisioning?
+  scimIdentities       ScimIdentity[]
+  approvalRequests     ApprovalRequest[]
+  integrationRuns      IntegrationRun[]
+  teamWorkspaces       TeamWorkspace[]
+  sharedAssets         SharedAsset[]
+  automationRules      AutomationRule[]
+  artifactGovernancePolicy ArtifactGovernancePolicy?
+  artifactApprovalSteps ArtifactApprovalStep[]
+  artifactVersions     PublishedArtifactVersion[]
+  approvalGroups       ApprovalGroup[]
+  approvalGroupMembers ApprovalGroupMember[]
+  teamApprovalAdminScopes TeamApprovalAdminScope[]
+  storyQualityFeedback StoryQualityFeedback[]
+  storyClaimLineage    StoryClaimLineage[]
+  accountMergeRuns     AccountMergeRun[]
+  supportImpersonationSessions SupportImpersonationSession[]
+  incidents           Incident[]
+  incidentUpdates     IncidentUpdate[]
 
   @@map("organizations")
 }
@@ -58,19 +79,61 @@ model AuditLog {
   actorUserId    String?
   category       String
   action         String
+  schemaVersion  Int      @default(1)
   targetType     String?
   targetId       String?
   severity       String   @default("INFO")
   metadata       Json?
   ipAddress      String?
   userAgent      String?
+  expiresAt      DateTime?
   createdAt      DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, createdAt])
   @@index([organizationId, category, createdAt])
+  @@index([organizationId, expiresAt])
   @@map("audit_logs")
+}
+
+model Incident {
+  id             String   @id @default(cuid())
+  organizationId String
+  title          String
+  summary        String
+  severity       String   @default("MEDIUM")
+  status         String   @default("OPEN")
+  startedAt      DateTime @default(now())
+  resolvedAt     DateTime?
+  createdByUserId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  updates      IncidentUpdate[]
+
+  @@index([organizationId, status, startedAt])
+  @@index([organizationId, severity, startedAt])
+  @@map("incidents")
+}
+
+model IncidentUpdate {
+  id             String   @id @default(cuid())
+  incidentId     String
+  organizationId String
+  message        String
+  status         String?
+  metadata       Json?
+  createdByUserId String?
+  createdAt      DateTime @default(now())
+
+  incident     Incident     @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([incidentId, createdAt])
+  @@map("incident_updates")
 }
 
 model OrgFeatureFlag {
@@ -87,6 +150,128 @@ model OrgFeatureFlag {
   @@unique([organizationId, key])
   @@index([organizationId, enabled])
   @@map("org_feature_flags")
+}
+
+model UserSession {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  sessionToken   String   @unique
+  deviceLabel    String?
+  ipAddress      String?
+  userAgent      String?
+  lastSeenAt     DateTime @default(now())
+  revokedAt      DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, userId, revokedAt])
+  @@index([organizationId, expiresAt])
+  @@map("user_sessions")
+}
+
+model OrgIpAllowlistEntry {
+  id             String   @id @default(cuid())
+  organizationId String
+  cidr           String
+  label          String?
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, cidr])
+  @@index([organizationId, enabled])
+  @@map("org_ip_allowlist_entries")
+}
+
+model ScimProvisioning {
+  id                 String   @id @default(cuid())
+  organizationId     String   @unique
+  enabled            Boolean  @default(false)
+  tokenHash          String?
+  endpointSecretHint String?
+  lastSyncAt         DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("scim_provisioning")
+}
+
+model ScimIdentity {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String   @unique
+  externalId     String
+  active         Boolean  @default(true)
+  lastSyncedAt   DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, externalId])
+  @@index([organizationId, active])
+  @@map("scim_identities")
+}
+
+model ApprovalRequest {
+  id                String   @id @default(cuid())
+  organizationId    String
+  requestType       String
+  targetType        String
+  targetId          String
+  requestedByUserId String
+  reviewerUserId    String?
+  status            String   @default("PENDING")
+  requestPayload    Json?
+  reviewNotes       String?
+  reviewedAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requestedBy  User         @relation("ApprovalRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Cascade)
+  reviewer     User?        @relation("ApprovalReviewedBy", fields: [reviewerUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, targetType, targetId])
+  @@map("approval_requests")
+}
+
+model IntegrationRun {
+  id                  String              @id @default(cuid())
+  organizationId      String
+  integrationConfigId String?
+  provider            IntegrationProvider
+  runType             String
+  status              String
+  idempotencyKey      String?
+  startedAt           DateTime            @default(now())
+  finishedAt          DateTime?
+  processedCount      Int                 @default(0)
+  successCount        Int                 @default(0)
+  failureCount        Int                 @default(0)
+  errorMessage        String?
+  metadata            Json?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  integrationConfig IntegrationConfig? @relation(fields: [integrationConfigId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, provider, startedAt])
+  @@index([organizationId, status, startedAt])
+  @@unique([organizationId, idempotencyKey])
+  @@map("integration_runs")
 }
 
 enum Plan {
@@ -128,6 +313,20 @@ model User {
   aiAccess             UserAIAccess[]
   aiBalance            UserAIBalance[]
   roleAssignment       UserRoleAssignment?
+  sessions             UserSession[]
+  scimIdentity         ScimIdentity?
+  approvalRequests     ApprovalRequest[] @relation("ApprovalRequestedBy")
+  approvalReviews      ApprovalRequest[] @relation("ApprovalReviewedBy")
+  ownedWorkspaces      TeamWorkspace[]   @relation("WorkspaceOwner")
+  ownedAssets          SharedAsset[]     @relation("AssetOwner")
+  publishedArtifactVersions PublishedArtifactVersion[]
+  approvalGroupsOwned  ApprovalGroup[] @relation("ApprovalGroupOwner")
+  approvalGroupMemberships ApprovalGroupMember[]
+  teamApprovalScopes   TeamApprovalAdminScope[] @relation("TeamApprovalScopeUser")
+  submittedStoryFeedback StoryQualityFeedback[] @relation("StoryFeedbackSubmittedBy")
+  supportImpersonationActorSessions SupportImpersonationSession[] @relation("SupportImpersonationActor")
+  supportImpersonationTargetSessions SupportImpersonationSession[] @relation("SupportImpersonationTarget")
+  supportImpersonationRevokedSessions SupportImpersonationSession[] @relation("SupportImpersonationRevokedBy")
 
   @@index([organizationId])
   @@map("users")
@@ -437,6 +636,8 @@ model Story {
   aiProvider     String?
   aiModel        String?
   generatedById  String?
+  confidenceScore Float         @default(0.5)
+  lineageSummary  Json?
   generatedAt    DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -444,6 +645,8 @@ model Story {
   account      Account        @relation(fields: [accountId], references: [id])
   quotes       HighValueQuote[]
   landingPages LandingPage[]
+  claimLineage StoryClaimLineage[]
+  qualityFeedback StoryQualityFeedback[]
 
   @@index([organizationId, accountId])
   @@index([organizationId, generatedById])
@@ -469,11 +672,60 @@ model HighValueQuote {
   metricValue String?
   callId      String?
   createdAt   DateTime @default(now())
+  confidenceScore Float @default(0.6)
+  lineageMetadata Json?
 
   story Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
 
   @@index([storyId])
   @@map("high_value_quotes")
+}
+
+model StoryClaimLineage {
+  id             String   @id @default(cuid())
+  organizationId String
+  storyId        String
+  claimType      String
+  claimText      String
+  sourceCallId   String?
+  sourceChunkId  String?
+  sourceTimestampMs Int?
+  confidenceScore Float  @default(0.5)
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  story        Story        @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, storyId, createdAt])
+  @@index([organizationId, sourceCallId])
+  @@map("story_claim_lineage")
+}
+
+model StoryQualityFeedback {
+  id             String   @id @default(cuid())
+  organizationId String
+  storyId        String
+  submittedByUserId String?
+  feedbackType   String
+  targetType     String
+  targetId       String?
+  originalValue  String?
+  correctedValue String?
+  notes          String?
+  applyToPromptTuning Boolean @default(false)
+  status         String   @default("OPEN")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  story        Story        @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  submittedBy  User?        @relation("StoryFeedbackSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, storyId, createdAt])
+  @@map("story_quality_feedback")
 }
 
 // ─── Landing Pages (Publishable Story Pages) ────────────────────────────────
@@ -510,10 +762,163 @@ model LandingPage {
   story        Story              @relation(fields: [storyId], references: [id])
   createdBy    User               @relation("CreatedBy", fields: [createdById], references: [id])
   edits        LandingPageEdit[]
+  artifactVersions PublishedArtifactVersion[]
 
   @@index([organizationId, status])
   @@index([slug])
   @@map("landing_pages")
+}
+
+enum ArtifactType {
+  LANDING_PAGE
+}
+
+model ArtifactGovernancePolicy {
+  id                   String       @id @default(cuid())
+  organizationId       String       @unique
+  artifactType         ArtifactType @default(LANDING_PAGE)
+  approvalChainEnabled Boolean      @default(false)
+  maxExpirationDays    Int?
+  requireProvenance    Boolean      @default(true)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  approvalSteps ArtifactApprovalStep[]
+
+  @@index([organizationId, artifactType])
+  @@map("artifact_governance_policies")
+}
+
+model ArtifactApprovalStep {
+  id                      String   @id @default(cuid())
+  governancePolicyId      String
+  organizationId          String
+  stepOrder               Int
+  minApprovals            Int      @default(1)
+  requiredRoleProfileKey  String?
+  requiredUserRole        UserRole?
+  approverScopeType       String   @default("ROLE_PROFILE")
+  approverScopeValue      String?
+  allowSelfApproval       Boolean  @default(false)
+  enabled                 Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  governancePolicy ArtifactGovernancePolicy @relation(fields: [governancePolicyId], references: [id], onDelete: Cascade)
+  organization     Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, stepOrder, enabled])
+  @@unique([governancePolicyId, stepOrder])
+  @@map("artifact_approval_steps")
+}
+
+model ApprovalGroup {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  ownerUserId    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner        User?        @relation("ApprovalGroupOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  members      ApprovalGroupMember[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, createdAt])
+  @@map("approval_groups")
+}
+
+model ApprovalGroupMember {
+  id             String   @id @default(cuid())
+  organizationId String
+  groupId        String
+  userId         String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  group        ApprovalGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([organizationId, userId])
+  @@map("approval_group_members")
+}
+
+model TeamApprovalAdminScope {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  teamKey        String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation("TeamApprovalScopeUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId, teamKey])
+  @@index([organizationId, teamKey])
+  @@map("team_approval_admin_scopes")
+}
+
+model AccountMergeRun {
+  id                 String   @id @default(cuid())
+  organizationId     String
+  primaryAccountId   String
+  secondaryAccountId String
+  status             String   @default("COMPLETED")
+  initiatedByUserId  String?
+  undoneByUserId     String?
+  mergePreview       Json?
+  movedContactIds    String[] @default([])
+  movedCallIds       String[] @default([])
+  movedStoryIds      String[] @default([])
+  movedLandingPageIds String[] @default([])
+  notes              String?
+  createdAt          DateTime @default(now())
+  undoneAt           DateTime?
+  updatedAt          DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, status, createdAt])
+  @@map("account_merge_runs")
+}
+
+model PublishedArtifactVersion {
+  id                      String       @id @default(cuid())
+  organizationId          String
+  artifactType            ArtifactType @default(LANDING_PAGE)
+  landingPageId           String
+  versionNumber           Int
+  status                  String       @default("ACTIVE")
+  releaseNotes            String?
+  titleSnapshot           String
+  subtitleSnapshot        String?
+  bodySnapshot            String
+  calloutBoxesSnapshot    Json?
+  visibilitySnapshot      PageVisibility
+  expiresAtSnapshot       DateTime?
+  publishedAtSnapshot     DateTime?
+  sourceEditId            String?
+  publishedByUserId       String?
+  approvalRequestId       String?
+  provenance              Json?
+  rolledBackFromVersionId String?
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  landingPage   LandingPage  @relation(fields: [landingPageId], references: [id], onDelete: Cascade)
+  publishedBy   User?        @relation(fields: [publishedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([landingPageId, versionNumber])
+  @@index([organizationId, artifactType, createdAt])
+  @@index([landingPageId, status, createdAt])
+  @@map("published_artifact_versions")
 }
 
 enum PageVisibility {
@@ -543,6 +948,114 @@ model LandingPageEdit {
   @@map("landing_page_edits")
 }
 
+model TeamWorkspace {
+  id                     String              @id @default(cuid())
+  organizationId         String
+  name                   String
+  description            String?
+  team                   WorkspaceTeam
+  visibility             WorkspaceVisibility @default(TEAM)
+  ownerUserId            String
+  savedViewConfig        Json?
+  allowedRoleProfileKeys String[]            @default([])
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner        User         @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  assets       SharedAsset[]
+
+  @@index([organizationId, team, visibility])
+  @@index([organizationId, ownerUserId])
+  @@map("team_workspaces")
+}
+
+model SharedAsset {
+  id               String    @id @default(cuid())
+  organizationId   String
+  workspaceId      String?
+  ownerUserId      String
+  assetType        AssetType
+  title            String
+  description      String?
+  sourceStoryId    String?
+  sourcePageId     String?
+  sourceAccountId  String?
+  visibility       WorkspaceVisibility @default(TEAM)
+  allowedRoleProfileKeys String[] @default([])
+  metadata         Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspace    TeamWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  owner        User          @relation("AssetOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, assetType, visibility])
+  @@index([organizationId, workspaceId])
+  @@map("shared_assets")
+}
+
+model AutomationRule {
+  id             String             @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  enabled        Boolean            @default(true)
+  triggerType    AutomationTriggerType
+  metric         String?
+  operator       String?
+  threshold      Float?
+  scheduleCron   String?
+  eventType      String?
+  deliveryType   AutomationDeliveryType
+  deliveryTarget String
+  payloadTemplate Json?
+  lastRunAt      DateTime?
+  lastRunStatus  String?
+  lastRunError   String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, enabled, triggerType])
+  @@map("automation_rules")
+}
+
+enum AutomationTriggerType {
+  THRESHOLD
+  SCHEDULE
+  EVENT
+}
+
+enum AutomationDeliveryType {
+  SLACK
+  EMAIL
+  WEBHOOK
+}
+
+enum WorkspaceTeam {
+  REVOPS
+  MARKETING
+  SALES
+  CS
+}
+
+enum WorkspaceVisibility {
+  PRIVATE
+  TEAM
+  ORG
+}
+
+enum AssetType {
+  STORY
+  PAGE
+  REPORT
+  PLAYBOOK
+  TEMPLATE
+}
+
 // ─── Permissions & Org Settings ──────────────────────────────────────────────
 
 model OrgSettings {
@@ -558,6 +1071,7 @@ model OrgSettings {
   transcriptMergeMaxWords   Int                      @default(600000)
   transcriptTruncationMode  TranscriptTruncationMode @default(OLDEST_FIRST)
   dataGovernancePolicy      Json?
+  securityPolicy            Json?
   storyContext              Json?
   storyPromptDefaults       Json?
   createdAt                 DateTime                 @default(now())
@@ -584,6 +1098,33 @@ model UserPermission {
 
   @@unique([userId, permission])
   @@map("user_permissions")
+}
+
+model SupportImpersonationSession {
+  id               String   @id @default(cuid())
+  organizationId   String
+  actorUserId      String
+  targetUserId     String
+  revokedByUserId  String?
+  sessionTokenHash String   @unique
+  reason           String
+  scope            Json?
+  lastUsedAt       DateTime?
+  startedAt        DateTime @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actorUser    User         @relation("SupportImpersonationActor", fields: [actorUserId], references: [id], onDelete: Cascade)
+  targetUser   User         @relation("SupportImpersonationTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+  revokedByUser User?       @relation("SupportImpersonationRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, actorUserId, revokedAt])
+  @@index([organizationId, targetUserId, revokedAt])
+  @@index([organizationId, expiresAt])
+  @@map("support_impersonation_sessions")
 }
 
 enum PermissionType {
@@ -798,6 +1339,7 @@ model IntegrationConfig {
   updatedAt      DateTime            @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
+  runs         IntegrationRun[]
 
   @@unique([organizationId, provider])
   @@map("integration_configs")
@@ -915,6 +1457,7 @@ enum NotificationType {
   PAGE_PUBLISHED
   PAGE_NEEDS_APPROVAL
   EXPORT_READY
+  SYSTEM_ALERT
 }
 
 // ─── Confidence Calibration ─────────────────────────────────────────────────

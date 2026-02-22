@@ -82,6 +82,8 @@ app.listen(PORT, () => {
 process.on("SIGTERM", async () => {
   logger.info("SIGTERM received, shutting down...");
   workers.usageCron.stop();
+  workers.auditRetentionCron.stop();
+  workers.dataRetentionCron.stop();
   services.mergeClient.stopPolling();
   await workers.callWorker.close();
   await workers.transcriptFetchWorker.close();

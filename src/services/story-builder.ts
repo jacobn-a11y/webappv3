@@ -53,8 +53,10 @@ export interface StoryBuilderOptions {
 
 interface TranscriptSegment {
   callId: string;
+  chunkId: string;
   callTitle: string | null;
   occurredAt: Date;
+  startMs: number | null;
   chunkText: string;
   speaker: string | null;
   tags: Array<{ funnelStage: FunnelStage; topic: string; confidence: number }>;
@@ -194,6 +196,14 @@ export class StoryBuilder {
         title,
         markdownBody: markdown,
         storyType: this.inferStoryType(options),
+        confidenceScore: this.computeStoryConfidence(segments, quotes),
+        lineageSummary: {
+          calls_considered: new Set(segments.map((s) => s.callId)).size,
+          segments_considered: segments.length,
+          quote_count: quotes.length,
+          model: this.model,
+          generated_at: new Date().toISOString(),
+        },
         funnelStages: options.funnelStages ?? [],
         filterTags: [
           ...(options.filterTopics ?? []),
@@ -207,6 +217,10 @@ export class StoryBuilder {
 
     // Persist quotes
     for (const q of quotes) {
+      const sourceSegment = segments.find((s) =>
+        s.chunkText.toLowerCase().includes(q.quoteText.slice(0, 24).toLowerCase())
+      );
+      const quoteConfidence = this.computeQuoteConfidence(sourceSegment);
       await this.prisma.highValueQuote.create({
         data: {
           storyId: story.id,
@@ -216,6 +230,34 @@ export class StoryBuilder {
           metricType: q.metricType,
           metricValue: q.metricValue,
           callId: q.callId,
+          confidenceScore: quoteConfidence,
+          lineageMetadata: sourceSegment
+            ? {
+                source_call_id: sourceSegment.callId,
+                source_chunk_id: sourceSegment.chunkId,
+                source_start_ms: sourceSegment.startMs,
+                topics: sourceSegment.tags.map((t) => t.topic),
+              }
+            : undefined,
+        },
+      });
+
+      await this.prisma.storyClaimLineage.create({
+        data: {
+          organizationId: options.organizationId,
+          storyId: story.id,
+          claimType: "QUOTE",
+          claimText: q.quoteText,
+          sourceCallId: sourceSegment?.callId ?? q.callId,
+          sourceChunkId: sourceSegment?.chunkId ?? null,
+          sourceTimestampMs: sourceSegment?.startMs ?? null,
+          confidenceScore: quoteConfidence,
+          metadata: {
+            speaker: q.speaker,
+            context: q.context,
+            metric_type: q.metricType,
+            metric_value: q.metricValue,
+          },
         },
       });
     }
@@ -270,8 +312,10 @@ export class StoryBuilder {
 
         segments.push({
           callId: call.id,
+          chunkId: chunk.id,
           callTitle: call.title,
           occurredAt: call.occurredAt,
+          startMs: chunk.startMs,
           chunkText: chunk.text,
           speaker: chunk.speaker,
           tags: chunk.tags.map((t) => ({
@@ -568,5 +612,28 @@ ${input.mergedMarkdown}`;
     if (topics.includes("competitive_displacement")) return "COMPETITIVE_WIN";
     if (topics.includes("upsell_cross_sell_expansion")) return "EXPANSION";
     return "CUSTOM";
+  }
+
+  private computeStoryConfidence(
+    segments: TranscriptSegment[],
+    quotes: ExtractedQuote[]
+  ): number {
+    if (segments.length === 0) return 0.25;
+    const tagConfidences = segments.flatMap((s) => s.tags.map((t) => t.confidence));
+    const avgTagConfidence =
+      tagConfidences.length > 0
+        ? tagConfidences.reduce((sum, value) => sum + value, 0) /
+          tagConfidences.length
+        : 0.55;
+    const evidenceBoost = Math.min(0.2, quotes.length * 0.02);
+    return Math.max(0, Math.min(1, avgTagConfidence * 0.8 + 0.2 + evidenceBoost));
+  }
+
+  private computeQuoteConfidence(segment?: TranscriptSegment): number {
+    if (!segment || segment.tags.length === 0) return 0.6;
+    const avg =
+      segment.tags.reduce((sum, tag) => sum + tag.confidence, 0) /
+      segment.tags.length;
+    return Math.max(0, Math.min(1, avg));
   }
 }

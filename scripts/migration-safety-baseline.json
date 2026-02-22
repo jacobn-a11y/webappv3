@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "generatedAt": "2026-02-22T16:34:20.074Z",
+  "entries": [
+    {
+      "key": "20260222024500_add_system_alert_notification_type:L2:\\bALTER\\s+TYPE\\b:3d6efded5434",
+      "migration": "20260222024500_add_system_alert_notification_type",
+      "line": 2,
+      "pattern": "\\bALTER\\s+TYPE\\b",
+      "hash": "3d6efded5434",
+      "statement": "ALTER TYPE \"NotificationType\" ADD VALUE IF NOT EXISTS 'SYSTEM_ALERT';"
+    }
+  ]
+}

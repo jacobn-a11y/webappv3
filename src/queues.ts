@@ -21,6 +21,8 @@ import {
   type WeeklyRegenJobData,
 } from "./services/weekly-story-regeneration.js";
 import { startUsageReportingCron } from "./services/usage-reporter.js";
+import { startAuditRetentionCron } from "./services/audit-retention.js";
+import { startDataRetentionCron } from "./services/data-retention.js";
 import logger, { jobStore } from "./lib/logger.js";
 import { Sentry } from "./lib/sentry.js";
 import type { Services } from "./services.js";
@@ -38,6 +40,8 @@ export interface Workers {
   syncWorker: Worker;
   storyRegenWorker: Worker<WeeklyRegenJobData>;
   usageCron: ReturnType<typeof startUsageReportingCron>;
+  auditRetentionCron: ReturnType<typeof startAuditRetentionCron>;
+  dataRetentionCron: ReturnType<typeof startDataRetentionCron>;
 }
 
 /**
@@ -225,6 +229,8 @@ export function createWorkers(
 
   // Usage reporting cron
   const usageCron = startUsageReportingCron(prisma, stripe);
+  const auditRetentionCron = startAuditRetentionCron(prisma);
+  const dataRetentionCron = startDataRetentionCron(prisma);
 
   return {
     callWorker,
@@ -232,5 +238,7 @@ export function createWorkers(
     syncWorker,
     storyRegenWorker,
     usageCron,
+    auditRetentionCron,
+    dataRetentionCron,
   };
 }
