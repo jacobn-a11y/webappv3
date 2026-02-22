@@ -5,7 +5,7 @@ import {
   normalizeCompanyName,
   EntityResolver,
 } from "./entity-resolution.js";
-import type { CallParticipantInput, ResolvedEntity } from "./entity-resolution.js";
+import type { ResolvedEntity } from "./entity-resolution.js";
 
 // ─── Prisma Mock ────────────────────────────────────────────────────────────
 
@@ -346,7 +346,7 @@ describe("EntityResolver.resolve — email domain matching", () => {
   });
 
   it("skips email matching when all participants have free-provider emails", async () => {
-    const result = await resolver.resolve(ORG_ID, [
+    await resolver.resolve(ORG_ID, [
       { email: "alice@gmail.com", name: "a" },
       { email: "bob@yahoo.com", name: "b" },
     ]);

@@ -8,8 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import request from "supertest";
-import { createTestApp } from "../helpers/create-test-app.js";
+import { createTestAppWithServer } from "../helpers/create-test-app.js";
 import {
   ACTIVE_ORG,
   EXPIRED_ORG,
@@ -64,20 +63,27 @@ function mockStoryBuilder() {
 // ─── Input Validation ───────────────────────────────────────────────────────
 
 describe("POST /api/rag/query — input validation", () => {
-  let app: ReturnType<typeof createTestApp>;
+  let req: Awaited<ReturnType<typeof createTestAppWithServer>>["request"];
+  let closeServer: () => void;
   let ragEngine: ReturnType<typeof mockRAGEngine>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ragEngine = mockRAGEngine();
-    app = createTestApp({
+    const s = await createTestAppWithServer({
       prisma: mockPrisma(),
       ragEngine,
       storyBuilder: mockStoryBuilder(),
     });
+    req = s.request;
+    closeServer = s.close;
+  });
+
+  afterEach(() => {
+    closeServer?.();
   });
 
   it("returns 400 when the body is empty", async () => {
-    const res = await request(app).post("/api/rag/query").send({});
+    const res = await req.post("/api/rag/query").send({});
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("validation_error");
@@ -86,7 +92,7 @@ describe("POST /api/rag/query — input validation", () => {
   });
 
   it("returns 400 when query is missing", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/rag/query")
       .send(validPayload({ query: undefined }));
 
@@ -100,7 +106,7 @@ describe("POST /api/rag/query — input validation", () => {
   });
 
   it("returns 400 when query is too short (< 3 chars)", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/rag/query")
       .send(validPayload({ query: "ab" }));
 
@@ -117,7 +123,7 @@ describe("POST /api/rag/query — input validation", () => {
   });
 
   it("returns 400 when query exceeds 1000 characters", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/rag/query")
       .send(validPayload({ query: "x".repeat(1001) }));
 
@@ -131,7 +137,7 @@ describe("POST /api/rag/query — input validation", () => {
   });
 
   it("returns 400 when account_id is missing", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/rag/query")
       .send(validPayload({ account_id: undefined }));
 
@@ -146,7 +152,7 @@ describe("POST /api/rag/query — input validation", () => {
   });
 
   it("returns 400 when organization_id is missing", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/rag/query")
       .send(validPayload({ organization_id: undefined }));
 
@@ -161,7 +167,7 @@ describe("POST /api/rag/query — input validation", () => {
   });
 
   it("returns 400 when top_k is not an integer", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/rag/query")
       .send(validPayload({ top_k: 3.5 }));
 
@@ -174,7 +180,7 @@ describe("POST /api/rag/query — input validation", () => {
   });
 
   it("returns 400 when top_k exceeds 20", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/rag/query")
       .send(validPayload({ top_k: 25 }));
 
@@ -187,7 +193,7 @@ describe("POST /api/rag/query — input validation", () => {
   });
 
   it("returns 400 when funnel_stages is not an array", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/rag/query")
       .send(validPayload({ funnel_stages: "BOFU" }));
 
@@ -200,7 +206,7 @@ describe("POST /api/rag/query — input validation", () => {
   });
 
   it("does not call the RAG engine when validation fails", async () => {
-    await request(app).post("/api/rag/query").send({});
+    await req.post("/api/rag/query").send({});
     expect(ragEngine.query).not.toHaveBeenCalled();
   });
 });
@@ -217,107 +223,129 @@ describe("POST /api/rag/query — trial gate", () => {
   });
 
   it("returns 402 when the org trial has expired", async () => {
-    const app = createTestApp({
+    const { request: req, close } = await createTestAppWithServer({
       prisma: mockPrisma(EXPIRED_ORG),
       ragEngine: mockRAGEngine(),
       storyBuilder: mockStoryBuilder(),
       organizationId: EXPIRED_ORG.id,
     });
+    try {
+      const res = await req
+        .post("/api/rag/query")
+        .send(validPayload());
 
-    const res = await request(app)
-      .post("/api/rag/query")
-      .send(validPayload());
-
-    expect(res.status).toBe(402);
-    expect(res.body.error).toBe("trial_expired");
-    expect(res.body.message).toMatch(/trial.*expired/i);
-    expect(res.body.upgradeUrl).toBeDefined();
+      expect(res.status).toBe(402);
+      expect(res.body.error).toBe("trial_expired");
+      expect(res.body.message).toMatch(/trial.*expired/i);
+      expect(res.body.upgradeUrl).toBeDefined();
+    } finally {
+      close();
+    }
   });
 
   it("passes through when the org trial is still active", async () => {
     const ragEngine = mockRAGEngine();
-    const app = createTestApp({
+    const { request: req, close } = await createTestAppWithServer({
       prisma: mockPrisma(ACTIVE_ORG),
       ragEngine,
       storyBuilder: mockStoryBuilder(),
       organizationId: ACTIVE_ORG.id,
     });
+    try {
+      const res = await req
+        .post("/api/rag/query")
+        .send(validPayload());
 
-    const res = await request(app)
-      .post("/api/rag/query")
-      .send(validPayload());
-
-    expect(res.status).toBe(200);
-    expect(ragEngine.query).toHaveBeenCalledTimes(1);
+      expect(res.status).toBe(200);
+      expect(ragEngine.query).toHaveBeenCalledTimes(1);
+    } finally {
+      close();
+    }
   });
 
   it("passes through when the org has a paid plan", async () => {
     const ragEngine = mockRAGEngine();
-    const app = createTestApp({
+    const { request: req, close } = await createTestAppWithServer({
       prisma: mockPrisma(PAID_ORG),
       ragEngine,
       storyBuilder: mockStoryBuilder(),
       organizationId: PAID_ORG.id,
     });
+    try {
+      const res = await req
+        .post("/api/rag/query")
+        .send(validPayload());
 
-    const res = await request(app)
-      .post("/api/rag/query")
-      .send(validPayload());
-
-    expect(res.status).toBe(200);
-    expect(ragEngine.query).toHaveBeenCalledTimes(1);
+      expect(res.status).toBe(200);
+      expect(ragEngine.query).toHaveBeenCalledTimes(1);
+    } finally {
+      close();
+    }
   });
 
   it("returns 401 when no auth token / organizationId is present", async () => {
-    const app = createTestApp({
+    const { request: req, close } = await createTestAppWithServer({
       prisma: mockPrisma(),
       ragEngine: mockRAGEngine(),
       storyBuilder: mockStoryBuilder(),
       organizationId: null,
     });
+    try {
+      const res = await req
+        .post("/api/rag/query")
+        .send(validPayload());
 
-    const res = await request(app)
-      .post("/api/rag/query")
-      .send(validPayload());
-
-    expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/auth/i);
+      expect(res.status).toBe(401);
+      expect(res.body.error).toMatch(/auth/i);
+    } finally {
+      close();
+    }
   });
 
   it("returns 404 when the organization does not exist", async () => {
-    const app = createTestApp({
+    const { request: req, close } = await createTestAppWithServer({
       prisma: mockPrisma(null),
       ragEngine: mockRAGEngine(),
       storyBuilder: mockStoryBuilder(),
       organizationId: "org-nonexistent",
     });
+    try {
+      const res = await req
+        .post("/api/rag/query")
+        .send(validPayload());
 
-    const res = await request(app)
-      .post("/api/rag/query")
-      .send(validPayload());
-
-    expect(res.status).toBe(404);
-    expect(res.body.error).toMatch(/not found/i);
+      expect(res.status).toBe(404);
+      expect(res.body.error).toMatch(/not found/i);
+    } finally {
+      close();
+    }
   });
 });
 
 // ─── Successful Queries ─────────────────────────────────────────────────────
 
 describe("POST /api/rag/query — successful queries", () => {
-  let app: ReturnType<typeof createTestApp>;
+  let req: Awaited<ReturnType<typeof createTestAppWithServer>>["request"];
+  let closeServer: () => void;
   let ragEngine: ReturnType<typeof mockRAGEngine>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ragEngine = mockRAGEngine();
-    app = createTestApp({
+    const s = await createTestAppWithServer({
       prisma: mockPrisma(),
       ragEngine,
       storyBuilder: mockStoryBuilder(),
     });
+    req = s.request;
+    closeServer = s.close;
+  });
+
+  afterEach(() => {
+    closeServer?.();
   });
 
   it("returns 200 with answer, sources, and tokens_used", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/rag/query")
       .send(validPayload());
 
@@ -330,7 +358,7 @@ describe("POST /api/rag/query — successful queries", () => {
   });
 
   it("answer contains [Source N] citation markers", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/rag/query")
       .send(validPayload());
 
@@ -338,7 +366,7 @@ describe("POST /api/rag/query — successful queries", () => {
   });
 
   it("sources array contains properly structured objects", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/rag/query")
       .send(validPayload());
 
@@ -364,7 +392,7 @@ describe("POST /api/rag/query — successful queries", () => {
   });
 
   it("sources are ordered by relevance score descending", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/rag/query")
       .send(validPayload());
 
@@ -377,7 +405,7 @@ describe("POST /api/rag/query — successful queries", () => {
   });
 
   it("forwards top_k and funnel_stages to the RAG engine", async () => {
-    await request(app)
+    await req
       .post("/api/rag/query")
       .send(validPayload({ top_k: 5, funnel_stages: ["BOFU", "POST_SALE"] }));
 
@@ -390,7 +418,7 @@ describe("POST /api/rag/query — successful queries", () => {
   });
 
   it("maps request field names to camelCase service parameters", async () => {
-    await request(app).post("/api/rag/query").send(validPayload());
+    await req.post("/api/rag/query").send(validPayload());
 
     expect(ragEngine.query).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -404,7 +432,7 @@ describe("POST /api/rag/query — successful queries", () => {
   it("returns 500 when the RAG engine throws", async () => {
     ragEngine.query.mockRejectedValueOnce(new Error("Pinecone timeout"));
 
-    const res = await request(app)
+    const res = await req
       .post("/api/rag/query")
       .send(validPayload());
 

@@ -821,7 +821,7 @@ function renderDashboardHtml(data: {
 function renderTableRow(
   page: LandingPageSummary,
   isAdmin: boolean,
-  currentUserId: string
+  _currentUserId: string
 ): string {
   const statusBadge = renderStatusBadge(page.status);
   const visibilityBadge = renderVisibilityBadge(page.visibility);
@@ -830,8 +830,8 @@ function renderTableRow(
     ? formatDate(page.publishedAt)
     : "&mdash;";
 
-  const isOwner = page.createdByName !== null; // all pages have a creator
-  const canManage = isAdmin || true; // page owner can manage their pages
+  const _isOwner = page.createdByName !== null; // all pages have a creator
+  const _canManage = isAdmin || true; // page owner can manage their pages
 
   // Build action buttons: edit is always available, view only if published
   const viewLink =

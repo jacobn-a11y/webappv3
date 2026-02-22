@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
-import request from "supertest";
+import { requestServer } from "../helpers/request-server.js";
 import { createDashboardRoutes } from "../../src/api/dashboard-routes.js";
 
 function createApp(
@@ -62,34 +62,44 @@ describe("support impersonation dashboard routes", () => {
     });
 
     const app = createApp(prisma, { userRole: "ADMIN" });
-    const res = await request(app)
-      .post("/api/dashboard/support/impersonation/start")
-      .send({
-        target_user_id: "target-1",
-        reason: "Troubleshoot dashboard issue",
-        ttl_minutes: 30,
-      });
+    const { request, close } = await requestServer(app);
+    try {
+      const res = await request
+        .post("/api/dashboard/support/impersonation/start")
+        .send({
+          target_user_id: "target-1",
+          reason: "Troubleshoot dashboard issue",
+          ttl_minutes: 30,
+        });
 
-    expect(res.status).toBe(201);
+      expect(res.status).toBe(201);
     expect(typeof res.body.support_impersonation_token).toBe("string");
-    expect(res.body.target_user_id).toBe("target-1");
-    expect(prisma.supportImpersonationSession.create).toHaveBeenCalled();
-    expect(prisma.auditLog.create).toHaveBeenCalled();
+      expect(res.body.target_user_id).toBe("target-1");
+      expect(prisma.supportImpersonationSession.create).toHaveBeenCalled();
+      expect(prisma.auditLog.create).toHaveBeenCalled();
+    } finally {
+      close();
+    }
   });
 
   it("denies start for non-admin without manage permission", async () => {
     prisma.userPermission.findUnique.mockResolvedValue(null);
 
     const app = createApp(prisma, { userRole: "MEMBER", userId: "user-1" });
-    const res = await request(app)
-      .post("/api/dashboard/support/impersonation/start")
-      .send({
-        target_user_id: "target-1",
-        reason: "Need temporary access for support",
-      });
+    const { request, close } = await requestServer(app);
+    try {
+      const res = await request
+        .post("/api/dashboard/support/impersonation/start")
+        .send({
+          target_user_id: "target-1",
+          reason: "Need temporary access for support",
+        });
 
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("permission_denied");
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe("permission_denied");
+    } finally {
+      close();
+    }
   });
 
   it("lists and revokes impersonation sessions", async () => {
@@ -118,18 +128,22 @@ describe("support impersonation dashboard routes", () => {
     prisma.supportImpersonationSession.update.mockResolvedValue({ id: "imp-1" });
 
     const app = createApp(prisma, { userRole: "ADMIN" });
+    const { request, close } = await requestServer(app);
+    try {
+      const listRes = await request.get(
+        "/api/dashboard/support/impersonation/sessions"
+      );
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.sessions).toHaveLength(1);
 
-    const listRes = await request(app).get(
-      "/api/dashboard/support/impersonation/sessions"
-    );
-    expect(listRes.status).toBe(200);
-    expect(listRes.body.sessions).toHaveLength(1);
-
-    const revokeRes = await request(app).post(
-      "/api/dashboard/support/impersonation/imp-1/revoke"
-    );
-    expect(revokeRes.status).toBe(200);
-    expect(revokeRes.body.revoked).toBe(true);
-    expect(prisma.supportImpersonationSession.update).toHaveBeenCalled();
+      const revokeRes = await request.post(
+        "/api/dashboard/support/impersonation/imp-1/revoke"
+      );
+      expect(revokeRes.status).toBe(200);
+      expect(revokeRes.body.revoked).toBe(true);
+      expect(prisma.supportImpersonationSession.update).toHaveBeenCalled();
+    } finally {
+      close();
+    }
   });
 });

@@ -250,7 +250,7 @@ export function createAnalyticsRoutes(prisma: PrismaClient): Router {
 
 // ─── HTML Dashboard Renderer ───────────────────────────────────────────────
 
-function escapeHtml(str: string): string {
+function _escapeHtml(str: string): string {
   return str
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

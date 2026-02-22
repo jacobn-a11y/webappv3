@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import express from "express";
-import request from "supertest";
+import { requestServer } from "../helpers/request-server.js";
 import { createAuthRoutes } from "../../src/api/auth-routes.js";
 import { createSessionAuth } from "../../src/middleware/session-auth.js";
 import { requireAuth } from "../../src/middleware/auth.js";
@@ -119,27 +119,32 @@ describe("self-service auth + session middleware", () => {
       });
     });
 
-    const signup = await request(app).post("/api/auth/signup").send({
-      email: "alice@example.com",
-      password: "secret123",
-      name: "Alice Walker",
-      organizationName: "Acme Cloud",
-    });
+    const { request, close } = await requestServer(app);
+    try {
+      const signup = await request.post("/api/auth/signup").send({
+        email: "alice@example.com",
+        password: "secret123",
+        name: "Alice Walker",
+        organizationName: "Acme Cloud",
+      });
 
-    expect(signup.status).toBe(201);
-    expect(signup.body.user.email).toBe("alice@example.com");
-    expect(signup.body.sessionToken).toBeTruthy();
-    expect(createdOrg?.id).toBe("org_1");
+      expect(signup.status).toBe(201);
+      expect(signup.body.user.email).toBe("alice@example.com");
+      expect(signup.body.sessionToken).toBeTruthy();
+      expect(createdOrg?.id).toBe("org_1");
 
-    const protectedRes = await request(app)
-      .get("/api/protected")
-      .set("x-session-token", signup.body.sessionToken as string);
+      const protectedRes = await request
+        .get("/api/protected")
+        .set("x-session-token", signup.body.sessionToken as string);
 
-    expect(protectedRes.status).toBe(200);
-    expect(protectedRes.body).toEqual({
-      organizationId: "org_1",
-      userId: "usr_1",
-    });
+      expect(protectedRes.status).toBe(200);
+      expect(protectedRes.body).toEqual({
+        organizationId: "org_1",
+        userId: "usr_1",
+      });
+    } finally {
+      close();
+    }
   });
 
   it("accepts invite token and creates an authenticated session", async () => {
@@ -268,21 +273,26 @@ describe("self-service auth + session middleware", () => {
       });
     });
 
-    const acceptRes = await request(app)
-      .post(`/api/auth/invites/${inviteRow.token}/accept`)
-      .send({ name: "Invitee User", password: "secret1234" });
+    const { request, close } = await requestServer(app);
+    try {
+      const acceptRes = await request
+        .post(`/api/auth/invites/${inviteRow.token}/accept`)
+        .send({ name: "Invitee User", password: "secret1234" });
 
-    expect(acceptRes.status).toBe(201);
-    expect(acceptRes.body.user.email).toBe("invitee@example.com");
-    expect(inviteRow.acceptedAt).toBeTruthy();
-    expect(acceptRes.body.sessionToken).toBeTruthy();
+      expect(acceptRes.status).toBe(201);
+      expect(acceptRes.body.user.email).toBe("invitee@example.com");
+      expect(inviteRow.acceptedAt).toBeTruthy();
+      expect(acceptRes.body.sessionToken).toBeTruthy();
 
-    const protectedRes = await request(app)
-      .get("/api/protected")
-      .set("x-session-token", acceptRes.body.sessionToken as string);
+      const protectedRes = await request
+        .get("/api/protected")
+        .set("x-session-token", acceptRes.body.sessionToken as string);
 
-    expect(protectedRes.status).toBe(200);
-    expect(protectedRes.body.organizationId).toBe("org_1");
-    expect(protectedRes.body.userId).toBe("usr_invited");
+      expect(protectedRes.status).toBe(200);
+      expect(protectedRes.body.organizationId).toBe("org_1");
+      expect(protectedRes.body.userId).toBe("usr_invited");
+    } finally {
+      close();
+    }
   });
 });

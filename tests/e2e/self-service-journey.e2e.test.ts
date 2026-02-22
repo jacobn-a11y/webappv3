@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
-import request from "supertest";
+import { requestServer } from "../helpers/request-server.js";
 import type { Plan, UserRole } from "@prisma/client";
 import { createAuthRoutes } from "../../src/api/auth-routes.js";
 import { createSessionAuth } from "../../src/middleware/session-auth.js";
@@ -571,64 +571,66 @@ describe("self-service user journey", () => {
       res.json({ ok: true });
     });
 
-    const signup = await request(app).post("/api/auth/signup").send({
+    const { request, close } = await requestServer(app);
+    try {
+      const signup = await request.post("/api/auth/signup").send({
       email: "owner@acme.com",
       password: "secret123",
       name: "Owner User",
       organizationName: "Acme Cloud",
     });
-    expect(signup.status).toBe(201);
-    expect(signup.body.user.role).toBe("OWNER");
-    expect(signup.body.sessionToken).toBeTruthy();
-    const ownerSessionToken = signup.body.sessionToken as string;
+      expect(signup.status).toBe(201);
+      expect(signup.body.user.role).toBe("OWNER");
+      expect(signup.body.sessionToken).toBeTruthy();
+      const ownerSessionToken = signup.body.sessionToken as string;
 
-    const me = await request(app)
-      .get("/api/auth/me")
-      .set("x-session-token", ownerSessionToken);
-    expect(me.status).toBe(200);
-    expect(me.body.user.email).toBe("owner@acme.com");
+      const me = await request
+        .get("/api/auth/me")
+        .set("x-session-token", ownerSessionToken);
+      expect(me.status).toBe(200);
+      expect(me.body.user.email).toBe("owner@acme.com");
 
-    const setupStatus = await request(app)
-      .get("/api/setup/status")
-      .set("x-session-token", ownerSessionToken);
-    expect(setupStatus.status).toBe(200);
+      const setupStatus = await request
+        .get("/api/setup/status")
+        .set("x-session-token", ownerSessionToken);
+      expect(setupStatus.status).toBe(200);
 
-    const setupPlan = await request(app)
-      .post("/api/setup/step/plan")
-      .set("x-session-token", ownerSessionToken)
-      .send({ plan: "STARTER" });
-    expect(setupPlan.status).toBe(200);
-    expect(setupPlan.body.checkoutUrl).toContain("https://checkout.example.com/session/");
+      const setupPlan = await request
+        .post("/api/setup/step/plan")
+        .set("x-session-token", ownerSessionToken)
+        .send({ plan: "STARTER" });
+      expect(setupPlan.status).toBe(200);
+      expect(setupPlan.body.checkoutUrl).toContain("https://checkout.example.com/session/");
 
-    const checkout = await request(app)
-      .post("/api/billing/checkout")
-      .set("x-session-token", ownerSessionToken)
-      .send({ plan: "STARTER" });
-    expect(checkout.status).toBe(200);
-    expect(checkout.body.checkoutUrl).toContain("https://checkout.example.com/session/");
+      const checkout = await request
+        .post("/api/billing/checkout")
+        .set("x-session-token", ownerSessionToken)
+        .send({ plan: "STARTER" });
+      expect(checkout.status).toBe(200);
+      expect(checkout.body.checkoutUrl).toContain("https://checkout.example.com/session/");
 
-    const portal = await request(app)
-      .post("/api/billing/portal")
-      .set("x-session-token", ownerSessionToken);
-    expect(portal.status).toBe(200);
-    expect(portal.body.portalUrl).toContain("https://billing.example.com/session/");
+      const portal = await request
+        .post("/api/billing/portal")
+        .set("x-session-token", ownerSessionToken);
+      expect(portal.status).toBe(200);
+      expect(portal.body.portalUrl).toContain("https://billing.example.com/session/");
 
-    const organizationId = signup.body.user.organizationId as string;
-    await prisma.organization.update({
-      where: { id: organizationId },
-      data: {
-        plan: "FREE_TRIAL",
-        trialEndsAt: new Date(Date.now() - 60_000),
-      },
-    });
+      const organizationId = signup.body.user.organizationId as string;
+      await prisma.organization.update({
+        where: { id: organizationId },
+        data: {
+          plan: "FREE_TRIAL",
+          trialEndsAt: new Date(Date.now() - 60_000),
+        },
+      });
 
-    const gatedBeforeWebhook = await request(app)
-      .get("/api/trial-gated")
-      .set("x-session-token", ownerSessionToken);
-    expect(gatedBeforeWebhook.status).toBe(402);
-    expect(gatedBeforeWebhook.body.error).toBe("trial_expired");
+      const gatedBeforeWebhook = await request
+        .get("/api/trial-gated")
+        .set("x-session-token", ownerSessionToken);
+      expect(gatedBeforeWebhook.status).toBe(402);
+      expect(gatedBeforeWebhook.body.error).toBe("trial_expired");
 
-    const stripeSubscriptionId = "sub_self_service_1";
+      const stripeSubscriptionId = "sub_self_service_1";
     stripe.__setSubscription(stripeSubscriptionId, {
       metadata: { organizationId },
       items: { data: [{ price: { id: "price_starter" } }] },
@@ -644,54 +646,57 @@ describe("self-service user journey", () => {
       },
     });
 
-    const webhook = await request(app)
-      .post("/api/webhooks/stripe")
-      .set("stripe-signature", "test_signature")
-      .set("content-type", "application/json")
-      .send("{}");
-    expect(webhook.status).toBe(200);
+      const webhook = await request
+        .post("/api/webhooks/stripe")
+        .set("stripe-signature", "test_signature")
+        .set("content-type", "application/json")
+        .send("{}");
+      expect(webhook.status).toBe(200);
 
-    const orgAfterWebhook = await prisma.organization.findUnique({
-      where: { id: organizationId },
-    });
-    expect(orgAfterWebhook?.plan).toBe("STARTER");
-    expect(orgAfterWebhook?.trialEndsAt).toBeNull();
+      const orgAfterWebhook = await prisma.organization.findUnique({
+        where: { id: organizationId },
+      });
+      expect(orgAfterWebhook?.plan).toBe("STARTER");
+      expect(orgAfterWebhook?.trialEndsAt).toBeNull();
 
-    const localSubscription = await prisma.subscription.findUnique({
-      where: { stripeSubscriptionId },
-    });
-    expect(localSubscription?.status).toBe("ACTIVE");
+      const localSubscription = await prisma.subscription.findUnique({
+        where: { stripeSubscriptionId },
+      });
+      expect(localSubscription?.status).toBe("ACTIVE");
 
-    const gatedAfterWebhook = await request(app)
-      .get("/api/trial-gated")
-      .set("x-session-token", ownerSessionToken);
-    expect(gatedAfterWebhook.status).toBe(200);
-    expect(gatedAfterWebhook.body.ok).toBe(true);
+      const gatedAfterWebhook = await request
+        .get("/api/trial-gated")
+        .set("x-session-token", ownerSessionToken);
+      expect(gatedAfterWebhook.status).toBe(200);
+      expect(gatedAfterWebhook.body.ok).toBe(true);
 
-    const invite = await request(app)
-      .post("/api/settings/org/invites")
-      .set("x-session-token", ownerSessionToken)
-      .send({ email: "new.user@acme.com", role: "MEMBER" });
-    expect(invite.status).toBe(201);
-    expect(invite.body.invite.invite_url).toContain("http://localhost:5173/invite/");
-    const inviteToken = (invite.body.invite.invite_url as string).split("/invite/")[1];
-    expect(inviteToken).toBeTruthy();
+      const invite = await request
+        .post("/api/settings/org/invites")
+        .set("x-session-token", ownerSessionToken)
+        .send({ email: "new.user@acme.com", role: "MEMBER" });
+      expect(invite.status).toBe(201);
+      expect(invite.body.invite.invite_url).toContain("http://localhost:5173/invite/");
+      const inviteToken = (invite.body.invite.invite_url as string).split("/invite/")[1];
+      expect(inviteToken).toBeTruthy();
 
-    const inviteDetails = await request(app).get(`/api/auth/invites/${inviteToken}`);
-    expect(inviteDetails.status).toBe(200);
-    expect(inviteDetails.body.invite.email).toBe("new.user@acme.com");
+      const inviteDetails = await request.get(`/api/auth/invites/${inviteToken}`);
+      expect(inviteDetails.status).toBe(200);
+      expect(inviteDetails.body.invite.email).toBe("new.user@acme.com");
 
-    const accept = await request(app)
-      .post(`/api/auth/invites/${inviteToken}/accept`)
-      .send({ password: "newuserpass", name: "New User" });
-    expect(accept.status).toBe(201);
-    expect(accept.body.user.organizationId).toBe(signup.body.user.organizationId);
-    expect(accept.body.sessionToken).toBeTruthy();
+      const accept = await request
+        .post(`/api/auth/invites/${inviteToken}/accept`)
+        .send({ password: "newuserpass", name: "New User" });
+      expect(accept.status).toBe(201);
+      expect(accept.body.user.organizationId).toBe(signup.body.user.organizationId);
+      expect(accept.body.sessionToken).toBeTruthy();
 
-    const invitedProtected = await request(app)
-      .get("/api/protected")
-      .set("x-session-token", accept.body.sessionToken as string);
-    expect(invitedProtected.status).toBe(200);
-    expect(invitedProtected.body.ok).toBe(true);
+      const invitedProtected = await request
+        .get("/api/protected")
+        .set("x-session-token", accept.body.sessionToken as string);
+      expect(invitedProtected.status).toBe(200);
+      expect(invitedProtected.body.ok).toBe(true);
+    } finally {
+      close();
+    }
   });
 });

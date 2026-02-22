@@ -9,8 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import request from "supertest";
-import { createTestApp } from "../helpers/create-test-app.js";
+import { createTestAppWithServer } from "../helpers/create-test-app.js";
 import {
   ACTIVE_ORG,
   EXPIRED_ORG,
@@ -70,20 +69,27 @@ function mockRAGEngine() {
 // ─── Input Validation ───────────────────────────────────────────────────────
 
 describe("POST /api/stories/build — input validation", () => {
-  let app: ReturnType<typeof createTestApp>;
+  let req: Awaited<ReturnType<typeof createTestAppWithServer>>["request"];
+  let closeServer: () => void;
   let storyBuilder: ReturnType<typeof mockStoryBuilder>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     storyBuilder = mockStoryBuilder();
-    app = createTestApp({
+    const s = await createTestAppWithServer({
       prisma: mockPrisma(),
       ragEngine: mockRAGEngine(),
       storyBuilder,
     });
+    req = s.request;
+    closeServer = s.close;
+  });
+
+  afterEach(() => {
+    closeServer?.();
   });
 
   it("returns 400 when the body is empty", async () => {
-    const res = await request(app).post("/api/stories/build").send({});
+    const res = await req.post("/api/stories/build").send({});
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("validation_error");
@@ -92,7 +98,7 @@ describe("POST /api/stories/build — input validation", () => {
   });
 
   it("returns 400 when account_id is missing", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/stories/build")
       .send(validPayload({ account_id: undefined }));
 
@@ -108,7 +114,7 @@ describe("POST /api/stories/build — input validation", () => {
   });
 
   it("returns 400 when account_id is an empty string", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/stories/build")
       .send(validPayload({ account_id: "" }));
 
@@ -122,7 +128,7 @@ describe("POST /api/stories/build — input validation", () => {
   });
 
   it("returns 400 when funnel_stages is not an array", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/stories/build")
       .send(validPayload({ funnel_stages: "BOFU" }));
 
@@ -135,7 +141,7 @@ describe("POST /api/stories/build — input validation", () => {
   });
 
   it("returns 400 when filter_topics is not an array", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/stories/build")
       .send(validPayload({ filter_topics: "roi_financial_outcomes" }));
 
@@ -149,7 +155,7 @@ describe("POST /api/stories/build — input validation", () => {
 
   it("Zod errors include path and message for each issue", async () => {
     // Send a payload missing account_id with bad funnel_stages
-    const res = await request(app)
+    const res = await req
       .post("/api/stories/build")
       .send({ funnel_stages: "not-an-array" });
 
@@ -162,7 +168,7 @@ describe("POST /api/stories/build — input validation", () => {
   });
 
   it("does not call the story builder when validation fails", async () => {
-    await request(app).post("/api/stories/build").send({});
+    await req.post("/api/stories/build").send({});
     expect(storyBuilder.buildStory).not.toHaveBeenCalled();
   });
 });
@@ -179,91 +185,110 @@ describe("POST /api/stories/build — trial gate", () => {
   });
 
   it("returns 402 when the org trial has expired", async () => {
-    const app = createTestApp({
+    const { request: req, close } = await createTestAppWithServer({
       prisma: mockPrisma(EXPIRED_ORG),
       ragEngine: mockRAGEngine(),
       storyBuilder: mockStoryBuilder(),
       organizationId: EXPIRED_ORG.id,
     });
-
-    const res = await request(app)
+    try {
+      const res = await req
       .post("/api/stories/build")
       .send(validPayload());
 
-    expect(res.status).toBe(402);
-    expect(res.body.error).toBe("trial_expired");
-    expect(res.body.message).toMatch(/trial.*expired/i);
-    expect(res.body.upgradeUrl).toBe("/api/billing/checkout");
+      expect(res.status).toBe(402);
+      expect(res.body.error).toBe("trial_expired");
+      expect(res.body.message).toMatch(/trial.*expired/i);
+      expect(res.body.upgradeUrl).toBe("/api/billing/checkout");
+    } finally {
+      close();
+    }
   });
 
   it("passes through when the org trial is still active", async () => {
     const storyBuilder = mockStoryBuilder();
-    const app = createTestApp({
+    const { request: req, close } = await createTestAppWithServer({
       prisma: mockPrisma(ACTIVE_ORG),
       ragEngine: mockRAGEngine(),
       storyBuilder,
       organizationId: ACTIVE_ORG.id,
     });
-
-    const res = await request(app)
+    try {
+      const res = await req
       .post("/api/stories/build")
       .send(validPayload());
 
-    expect(res.status).toBe(200);
-    expect(storyBuilder.buildStory).toHaveBeenCalledTimes(1);
+      expect(res.status).toBe(200);
+      expect(storyBuilder.buildStory).toHaveBeenCalledTimes(1);
+    } finally {
+      close();
+    }
   });
 
   it("passes through when the org has a paid plan", async () => {
     const storyBuilder = mockStoryBuilder();
-    const app = createTestApp({
+    const { request: req, close } = await createTestAppWithServer({
       prisma: mockPrisma(PAID_ORG),
       ragEngine: mockRAGEngine(),
       storyBuilder,
       organizationId: PAID_ORG.id,
     });
-
-    const res = await request(app)
+    try {
+      const res = await req
       .post("/api/stories/build")
       .send(validPayload());
 
-    expect(res.status).toBe(200);
-    expect(storyBuilder.buildStory).toHaveBeenCalledTimes(1);
+      expect(res.status).toBe(200);
+      expect(storyBuilder.buildStory).toHaveBeenCalledTimes(1);
+    } finally {
+      close();
+    }
   });
 
   it("returns 401 when no organizationId is present (unauthenticated)", async () => {
-    const app = createTestApp({
+    const { request: req, close } = await createTestAppWithServer({
       prisma: mockPrisma(),
       ragEngine: mockRAGEngine(),
       storyBuilder: mockStoryBuilder(),
       organizationId: null,
     });
-
-    const res = await request(app)
+    try {
+      const res = await req
       .post("/api/stories/build")
       .send(validPayload());
 
-    expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/auth/i);
+      expect(res.status).toBe(401);
+      expect(res.body.error).toMatch(/auth/i);
+    } finally {
+      close();
+    }
   });
 });
 
 // ─── Successful Story Builds ────────────────────────────────────────────────
 
 describe("POST /api/stories/build — successful builds", () => {
-  let app: ReturnType<typeof createTestApp>;
+  let req: Awaited<ReturnType<typeof createTestAppWithServer>>["request"];
+  let closeServer: () => void;
   let storyBuilder: ReturnType<typeof mockStoryBuilder>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     storyBuilder = mockStoryBuilder();
-    app = createTestApp({
+    const s = await createTestAppWithServer({
       prisma: mockPrisma(),
       ragEngine: mockRAGEngine(),
       storyBuilder,
     });
+    req = s.request;
+    closeServer = s.close;
+  });
+
+  afterEach(() => {
+    closeServer?.();
   });
 
   it("returns 200 with title, markdown, and quotes", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/stories/build")
       .send(validPayload());
 
@@ -277,7 +302,7 @@ describe("POST /api/stories/build — successful builds", () => {
   });
 
   it("markdown body contains expected Markdown structure", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/stories/build")
       .send(validPayload());
 
@@ -296,7 +321,7 @@ describe("POST /api/stories/build — successful builds", () => {
   });
 
   it("markdown is between 800 and 5000 characters", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/stories/build")
       .send(validPayload());
 
@@ -306,7 +331,7 @@ describe("POST /api/stories/build — successful builds", () => {
   });
 
   it("quotes array contains properly structured objects", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/stories/build")
       .send(validPayload());
 
@@ -334,7 +359,7 @@ describe("POST /api/stories/build — successful builds", () => {
   });
 
   it("quotes include metric_type and metric_value", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/stories/build")
       .send(validPayload());
 
@@ -350,7 +375,7 @@ describe("POST /api/stories/build — successful builds", () => {
   });
 
   it("forwards filter_topics and funnel_stages to the story builder", async () => {
-    await request(app)
+    await req
       .post("/api/stories/build")
       .send(
         validPayload({
@@ -371,7 +396,7 @@ describe("POST /api/stories/build — successful builds", () => {
   });
 
   it("forwards account_id and organizationId to the story builder", async () => {
-    await request(app)
+    await req
       .post("/api/stories/build")
       .send(validPayload());
 
@@ -384,7 +409,7 @@ describe("POST /api/stories/build — successful builds", () => {
   });
 
   it("optional fields (funnel_stages, filter_topics, title) can be omitted", async () => {
-    const res = await request(app)
+    const res = await req
       .post("/api/stories/build")
       .send({ account_id: "acct-test-001" });
 
@@ -401,7 +426,7 @@ describe("POST /api/stories/build — successful builds", () => {
       new Error("OpenAI rate limit")
     );
 
-    const res = await request(app)
+    const res = await req
       .post("/api/stories/build")
       .send(validPayload());
 

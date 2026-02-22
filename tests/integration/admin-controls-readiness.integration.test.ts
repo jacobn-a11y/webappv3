@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
-import request from "supertest";
+import { requestServer } from "../helpers/request-server.js";
 import { createDashboardRoutes } from "../../src/api/dashboard-routes.js";
 import { RoleProfileService } from "../../src/services/role-profiles.js";
 import { AccountAccessService } from "../../src/services/account-access.js";
@@ -66,11 +66,15 @@ describe("admin controls readiness", () => {
   it("denies session inventory to member without manage permission", async () => {
     prisma.userPermission.findUnique.mockResolvedValue(null);
     const app = createApp(prisma, { userRole: "MEMBER" });
+    const { request, close } = await requestServer(app);
+    try {
+      const res = await request.get("/api/dashboard/security/sessions");
 
-    const res = await request(app).get("/api/dashboard/security/sessions");
-
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("permission_denied");
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe("permission_denied");
+    } finally {
+      close();
+    }
   });
 
   it("allows session inventory to admin", async () => {
@@ -90,22 +94,32 @@ describe("admin controls readiness", () => {
     ]);
 
     const app = createApp(prisma, { userRole: "ADMIN" });
-    const res = await request(app).get("/api/dashboard/security/sessions");
+    const { request, close } = await requestServer(app);
+    try {
+      const res = await request.get("/api/dashboard/security/sessions");
 
-    expect(res.status).toBe(200);
-    expect(res.body.sessions).toHaveLength(1);
-    expect(res.body.sessions[0].user_email).toBe("user2@example.com");
+      expect(res.status).toBe(200);
+      expect(res.body.sessions).toHaveLength(1);
+      expect(res.body.sessions[0].user_email).toBe("user2@example.com");
+    } finally {
+      close();
+    }
   });
 
   it("denies support impersonation session list to non-admin without permission", async () => {
     prisma.userPermission.findUnique.mockResolvedValue(null);
 
     const app = createApp(prisma, { userRole: "MEMBER", userId: "user-3" });
-    const res = await request(app).get(
-      "/api/dashboard/support/impersonation/sessions"
-    );
+    const { request, close } = await requestServer(app);
+    try {
+      const res = await request.get(
+        "/api/dashboard/support/impersonation/sessions"
+      );
 
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("permission_denied");
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe("permission_denied");
+    } finally {
+      close();
+    }
   });
 });

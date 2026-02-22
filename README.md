@@ -274,7 +274,37 @@ FRONTEND_URL=            # Frontend URL for auth/invite/checkout redirects
 INVITE_FROM_EMAIL=       # Sender identity for org invite emails
 ```
 
-## Getting Started
+## Quick Start
+
+Minimal setup for local development:
+
+```bash
+npm install
+cp .env.example .env     # fill in at least DATABASE_URL and REDIS_URL
+npx prisma generate      # required before build/test
+npx prisma migrate dev
+npm run dev
+```
+
+**Required env vars:** `DATABASE_URL` (PostgreSQL), `REDIS_URL` (BullMQ). The app will exit with a clear error if these are missing.
+
+## Running Tests
+
+- **Unit tests:** `npm test` (excludes DB-dependent tests when `TEST_DATABASE_URL` is unset)
+- **Integration tests** (landing-page-lifecycle, etc.) require:
+  - `TEST_DATABASE_URL` — PostgreSQL test database (default: `postgresql://user:password@localhost:5432/storyengine_test`)
+  - Postgres and Redis running (e.g. `docker compose up -d`)
+
+## Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| `missing required environment variables` | Set `DATABASE_URL` and `REDIS_URL` in `.env` |
+| `prisma generate` errors | Run `npx prisma generate` after schema changes |
+| Tests fail with "port" null | Ensure tests use `requestServer(app)` — see `tests/helpers/request-server.ts` |
+| Landing-page-lifecycle tests skipped | Start Postgres + Redis, set `TEST_DATABASE_URL` |
+
+## Getting Started (full)
 
 ```bash
 npm install

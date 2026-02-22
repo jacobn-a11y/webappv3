@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
-import request from "supertest";
 import { createIntegrationRoutes } from "../src/api/integration-routes.js";
 import { createApiKeyRoutes } from "../src/api/api-key-routes.js";
+import { requestServer } from "./helpers/request-server.js";
 
 function createIntegrationApp(prisma: any, organizationId = "org-a") {
   const app = express();
@@ -73,21 +73,26 @@ describe("Tenant isolation on critical routes", () => {
     });
 
     const app = createIntegrationApp(prisma, "org-a");
-    const res = await request(app)
-      .patch("/api/integrations/gong")
-      .send({ enabled: true });
+    const { request, close } = await requestServer(app);
+    try {
+      const res = await request
+        .patch("/api/integrations/gong")
+        .send({ enabled: true });
 
-    expect(res.status).toBe(200);
-    expect(prisma.integrationConfig.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          organizationId_provider: {
-            organizationId: "org-a",
-            provider: "GONG",
+      expect(res.status).toBe(200);
+      expect(prisma.integrationConfig.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            organizationId_provider: {
+              organizationId: "org-a",
+              provider: "GONG",
+            },
           },
-        },
-      })
-    );
+        })
+      );
+    } finally {
+      close();
+    }
   });
 
   it("scopes API key revoke updates by organization + key id", async () => {
@@ -99,13 +104,18 @@ describe("Tenant isolation on critical routes", () => {
     prisma.apiKey.updateMany.mockResolvedValue({ count: 1 });
 
     const app = createApiKeysApp(prisma, "org-a");
-    const res = await request(app).delete("/api/keys/key-1");
+    const { request, close } = await requestServer(app);
+    try {
+      const res = await request.delete("/api/keys/key-1");
 
-    expect(res.status).toBe(200);
-    expect(prisma.apiKey.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "key-1", organizationId: "org-a" },
-      })
-    );
+      expect(res.status).toBe(200);
+      expect(prisma.apiKey.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "key-1", organizationId: "org-a" },
+        })
+      );
+    } finally {
+      close();
+    }
   });
 });

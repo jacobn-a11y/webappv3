@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { CompanyScrubber, type ScrubConfig } from "./company-scrubber.js";
+import { describe, it, expect, vi } from "vitest";
+import { CompanyScrubber } from "./company-scrubber.js";
 
 // ─── Mock Prisma Factory ─────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
-import request from "supertest";
+import { requestServer } from "../helpers/request-server.js";
 import { createDashboardRoutes } from "../../src/api/dashboard-routes.js";
 
 function createApp(prisma: any) {
@@ -85,26 +85,34 @@ describe("customer success dashboard routes", () => {
 
   it("returns customer success health summary", async () => {
     const app = createApp(prisma);
+    const { request, close } = await requestServer(app);
+    try {
+      const res = await request.get("/api/dashboard/customer-success/health");
 
-    const res = await request(app).get("/api/dashboard/customer-success/health");
-
-    expect(res.status).toBe(200);
-    expect(res.body.overall_score).toBeTypeOf("number");
-    expect(res.body.adoption_rate_pct).toBe(15);
-    expect(res.body.teams).toEqual(expect.any(Array));
-    expect(res.body.risk_indicators).toEqual(expect.any(Array));
+      expect(res.status).toBe(200);
+      expect(res.body.overall_score).toBeTypeOf("number");
+      expect(res.body.adoption_rate_pct).toBe(15);
+      expect(res.body.teams).toEqual(expect.any(Array));
+      expect(res.body.risk_indicators).toEqual(expect.any(Array));
+    } finally {
+      close();
+    }
   });
 
   it("returns renewal value report", async () => {
     const app = createApp(prisma);
+    const { request, close } = await requestServer(app);
+    try {
+      const res = await request.get(
+        "/api/dashboard/customer-success/renewal-value-report"
+      );
 
-    const res = await request(app).get(
-      "/api/dashboard/customer-success/renewal-value-report"
-    );
-
-    expect(res.status).toBe(200);
-    expect(res.body.renewal_health).toMatch(/STRONG|WATCH|AT_RISK/);
-    expect(res.body.outcomes.stories_generated_90d).toBe(40);
-    expect(res.body.roi_narrative).toContain("90 days");
+      expect(res.status).toBe(200);
+      expect(res.body.renewal_health).toMatch(/STRONG|WATCH|AT_RISK/);
+      expect(res.body.outcomes.stories_generated_90d).toBe(40);
+      expect(res.body.roi_narrative).toContain("90 days");
+    } finally {
+      close();
+    }
   });
 });

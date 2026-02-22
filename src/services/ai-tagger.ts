@@ -17,8 +17,8 @@ import type { PrismaClient } from "@prisma/client";
 import {
   FunnelStage,
   ALL_TOPICS,
-  STAGE_TOPICS,
-  TOPIC_LABELS,
+  STAGE_TOPICS as _STAGE_TOPICS,
+  TOPIC_LABELS as _TOPIC_LABELS,
   type TaxonomyTopic,
 } from "../types/taxonomy.js";
 import { RateLimiter } from "./rate-limiter.js";
@@ -322,7 +322,7 @@ ${chunkText}
     const observations: Array<{ rawConfidence: number; isCorrect: boolean }> = [];
 
     // Temporarily disable calibration so we get raw scores
-    const wasCalibrated = this.calibrator.calibrated;
+    const _wasCalibrated = this.calibrator.calibrated;
     const savedCalibrator = this.calibrator;
     this.calibrator = null;
 

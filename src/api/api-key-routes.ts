@@ -11,7 +11,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
-import { generateApiKey, hashApiKey } from "../middleware/api-key-auth.js";
+import { generateApiKey, hashApiKey as _hashApiKey } from "../middleware/api-key-auth.js";
 import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.js";
 import { AuditLogService } from "../services/audit-log.js";
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import request from "supertest";
 import express, { type Request, type NextFunction, type Response } from "express";
+import { requestServer } from "../helpers/request-server.js";
 import { createLandingPageRoutes } from "../../src/api/landing-page-routes.js";
 import { AccountAccessService } from "../../src/services/account-access.js";
 
@@ -105,6 +105,11 @@ function createApp(prisma: MockPrisma, auth: AuthOverrides = {}) {
   return app;
 }
 
+async function createAppWithServer(prisma: MockPrisma, auth: AuthOverrides = {}) {
+  const app = createApp(prisma, auth);
+  return requestServer(app);
+}
+
 // ─── Seed Helpers ───────────────────────────────────────────────────────────
 
 /** Sets up mock returns so the full POST /api/pages create flow succeeds. */
@@ -187,15 +192,18 @@ describe("Permissions Integration Tests", () => {
       // userPermission.findUnique returns null → no permission
       prisma.userPermission.findUnique.mockResolvedValue(null);
 
-      const app = createApp(prisma, { userRole: "MEMBER" });
+      const { request, close } = await createAppWithServer(prisma, { userRole: "MEMBER" });
+      try {
+        const res = await request
+          .post("/api/pages")
+          .send(CREATE_BODY);
 
-      const res = await request(app)
-        .post("/api/pages")
-        .send(CREATE_BODY);
-
-      expect(res.status).toBe(403);
-      expect(res.body.error).toBe("permission_denied");
-      expect(res.body.required_permission).toBe("CREATE_LANDING_PAGE");
+        expect(res.status).toBe(403);
+        expect(res.body.error).toBe("permission_denied");
+        expect(res.body.required_permission).toBe("CREATE_LANDING_PAGE");
+      } finally {
+        close();
+      }
     });
 
     it("returns 201 when MEMBER user has CREATE_LANDING_PAGE permission", async () => {
@@ -209,9 +217,9 @@ describe("Permissions Integration Tests", () => {
         permission: "CREATE_LANDING_PAGE",
       });
 
-      const app = createApp(prisma, { userRole: "MEMBER" });
-
-      const res = await request(app)
+      const { request, close } = await createAppWithServer(prisma, { userRole: "MEMBER" });
+      try {
+        const res = await request
         .post("/api/pages")
         .send(CREATE_BODY);
 
@@ -219,20 +227,26 @@ describe("Permissions Integration Tests", () => {
       expect(res.body).toHaveProperty("id", "page-1");
       expect(res.body).toHaveProperty("slug");
       expect(res.body).toHaveProperty("status", "DRAFT");
+      } finally {
+        close();
+      }
     });
 
     it("returns 403 when VIEWER user lacks CREATE_LANDING_PAGE permission", async () => {
       const prisma = createMockPrisma();
       prisma.userPermission.findUnique.mockResolvedValue(null);
 
-      const app = createApp(prisma, { userRole: "VIEWER" });
-
-      const res = await request(app)
+      const { request, close } = await createAppWithServer(prisma, { userRole: "VIEWER" });
+      try {
+        const res = await request
         .post("/api/pages")
         .send(CREATE_BODY);
 
       expect(res.status).toBe(403);
       expect(res.body.error).toBe("permission_denied");
+      } finally {
+        close();
+      }
     });
 
     it("returns 403 when landing pages feature is disabled", async () => {
@@ -244,14 +258,17 @@ describe("Permissions Integration Tests", () => {
         landingPagesEnabled: false,
       });
 
-      const app = createApp(prisma, { userRole: "MEMBER" });
-
-      const res = await request(app)
+      const { request, close } = await createAppWithServer(prisma, { userRole: "MEMBER" });
+      try {
+        const res = await request
         .post("/api/pages")
         .send(CREATE_BODY);
 
       expect(res.status).toBe(403);
       expect(res.body.error).toBe("feature_disabled");
+      } finally {
+        close();
+      }
     });
   });
 
@@ -276,15 +293,18 @@ describe("Permissions Integration Tests", () => {
         return Promise.resolve(null);
       });
 
-      const app = createApp(prisma, { userRole: "MEMBER" });
-
-      const res = await request(app)
+      const { request, close } = await createAppWithServer(prisma, { userRole: "MEMBER" });
+      try {
+        const res = await request
         .post("/api/pages")
         .send({ ...CREATE_BODY, include_company_name: true });
 
       expect(res.status).toBe(403);
       expect(res.body.error).toBe("permission_denied");
       expect(prisma.landingPage.create).not.toHaveBeenCalled();
+      } finally {
+        close();
+      }
     });
 
     it("allows include_company_name when MEMBER role profile can generate named stories", async () => {
@@ -325,9 +345,9 @@ describe("Permissions Integration Tests", () => {
         },
       });
 
-      const app = createApp(prisma, { userRole: "MEMBER" });
-
-      const res = await request(app)
+      const { request, close } = await createAppWithServer(prisma, { userRole: "MEMBER" });
+      try {
+        const res = await request
         .post("/api/pages")
         .send({ ...CREATE_BODY, include_company_name: true });
 
@@ -341,6 +361,9 @@ describe("Permissions Integration Tests", () => {
           }),
         })
       );
+      } finally {
+        close();
+      }
     });
 
     it("allows include_company_name for ADMIN without explicit permission", async () => {
@@ -348,9 +371,9 @@ describe("Permissions Integration Tests", () => {
       seedCreateFlow(prisma);
 
       // ADMIN never needs explicit permission grants
-      const app = createApp(prisma, { userRole: "ADMIN" });
-
-      const res = await request(app)
+      const { request, close } = await createAppWithServer(prisma, { userRole: "ADMIN" });
+      try {
+        const res = await request
         .post("/api/pages")
         .send({ ...CREATE_BODY, include_company_name: true });
 
@@ -364,6 +387,9 @@ describe("Permissions Integration Tests", () => {
           }),
         })
       );
+      } finally {
+        close();
+      }
     });
   });
 
@@ -509,9 +535,9 @@ describe("Permissions Integration Tests", () => {
       seedCreateFlow(prisma);
 
       // No explicit permissions granted — OWNER doesn't need them
-      const app = createApp(prisma, { userRole: "OWNER" });
-
-      const res = await request(app)
+      const { request, close } = await createAppWithServer(prisma, { userRole: "OWNER" });
+      try {
+        const res = await request
         .post("/api/pages")
         .send(CREATE_BODY);
 
@@ -520,21 +546,27 @@ describe("Permissions Integration Tests", () => {
 
       // userPermission.findUnique should NOT have been called (admin bypass short-circuits)
       expect(prisma.userPermission.findUnique).not.toHaveBeenCalled();
+      } finally {
+        close();
+      }
     });
 
     it("ADMIN bypasses CREATE_LANDING_PAGE permission check", async () => {
       const prisma = createMockPrisma();
       seedCreateFlow(prisma);
 
-      const app = createApp(prisma, { userRole: "ADMIN" });
-
-      const res = await request(app)
+      const { request, close } = await createAppWithServer(prisma, { userRole: "ADMIN" });
+      try {
+        const res = await request
         .post("/api/pages")
         .send(CREATE_BODY);
 
       expect(res.status).toBe(201);
       expect(res.body).toHaveProperty("id", "page-1");
       expect(prisma.userPermission.findUnique).not.toHaveBeenCalled();
+      } finally {
+        close();
+      }
     });
 
     it("OWNER bypasses DELETE_ANY_LANDING_PAGE permission check", async () => {
@@ -542,14 +574,17 @@ describe("Permissions Integration Tests", () => {
       prisma.landingPage.findFirst.mockResolvedValue({ id: "page-1", organizationId: "org-1" });
       prisma.landingPage.delete.mockResolvedValue({ id: "page-1" });
 
-      const app = createApp(prisma, { userRole: "OWNER" });
-
-      const res = await request(app)
+      const { request, close } = await createAppWithServer(prisma, { userRole: "OWNER" });
+      try {
+        const res = await request
         .delete("/api/pages/page-1");
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ deleted: true });
       expect(prisma.userPermission.findUnique).not.toHaveBeenCalled();
+      } finally {
+        close();
+      }
     });
 
     it("ADMIN bypasses DELETE_ANY_LANDING_PAGE permission check", async () => {
@@ -557,26 +592,32 @@ describe("Permissions Integration Tests", () => {
       prisma.landingPage.findFirst.mockResolvedValue({ id: "page-1", organizationId: "org-1" });
       prisma.landingPage.delete.mockResolvedValue({ id: "page-1" });
 
-      const app = createApp(prisma, { userRole: "ADMIN" });
-
-      const res = await request(app)
+      const { request, close } = await createAppWithServer(prisma, { userRole: "ADMIN" });
+      try {
+        const res = await request
         .delete("/api/pages/page-1");
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ deleted: true });
+      } finally {
+        close();
+      }
     });
 
     it("MEMBER without DELETE_ANY_LANDING_PAGE gets 403 on delete", async () => {
       const prisma = createMockPrisma();
       prisma.userPermission.findUnique.mockResolvedValue(null);
 
-      const app = createApp(prisma, { userRole: "MEMBER" });
-
-      const res = await request(app)
+      const { request, close } = await createAppWithServer(prisma, { userRole: "MEMBER" });
+      try {
+        const res = await request
         .delete("/api/pages/page-1");
 
       expect(res.status).toBe(403);
       expect(res.body.error).toBe("permission_denied");
+      } finally {
+        close();
+      }
     });
 
     it("OWNER always has full account access", async () => {
@@ -645,15 +686,18 @@ describe("Permissions Integration Tests", () => {
         allowedPublishers: ["OWNER", "ADMIN"],
       });
 
-      const app = createApp(prisma, { userRole: "MEMBER" });
-
-      const res = await request(app)
+      const { request, close } = await createAppWithServer(prisma, { userRole: "MEMBER" });
+      try {
+        const res = await request
         .post("/api/pages/page-1/publish")
         .send({ visibility: "SHARED_WITH_LINK" });
 
       expect(res.status).toBe(403);
       expect(res.body.error).toBe("permission_denied");
       expect(res.body.required_permission).toBe("PUBLISH_LANDING_PAGE");
+      } finally {
+        close();
+      }
     });
 
     it("allows MEMBER when role is in allowedPublishers", async () => {
@@ -687,14 +731,17 @@ describe("Permissions Integration Tests", () => {
       prisma.account.findMany.mockResolvedValue([]);
       prisma.landingPage.update.mockResolvedValue({});
 
-      const app = createApp(prisma, { userRole: "MEMBER" });
-
-      const res = await request(app)
+      const { request, close } = await createAppWithServer(prisma, { userRole: "MEMBER" });
+      try {
+        const res = await request
         .post("/api/pages/page-1/publish")
         .send({ visibility: "SHARED_WITH_LINK" });
 
       // May get 200 or 500 depending on scrubber internals, but NOT 403
       expect(res.status).not.toBe(403);
+      } finally {
+        close();
+      }
     });
   });
 
@@ -734,12 +781,15 @@ describe("Permissions Integration Tests", () => {
         edits: [],
       });
 
-      const app = createApp(prisma, { userId: "user-1", userRole: "MEMBER" });
-
-      const res = await request(app).get("/api/pages/page-1");
+      const { request, close } = await createAppWithServer(prisma, { userId: "user-1", userRole: "MEMBER" });
+      try {
+        const res = await request.get("/api/pages/page-1");
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("id", "page-1");
+      } finally {
+        close();
+      }
     });
 
     it("non-owner without EDIT_ANY_LANDING_PAGE gets 403", async () => {
@@ -753,12 +803,15 @@ describe("Permissions Integration Tests", () => {
       // No EDIT_ANY permission
       prisma.userPermission.findUnique.mockResolvedValue(null);
 
-      const app = createApp(prisma, { userId: "user-1", userRole: "MEMBER" });
-
-      const res = await request(app).get("/api/pages/page-1");
+      const { request, close } = await createAppWithServer(prisma, { userId: "user-1", userRole: "MEMBER" });
+      try {
+        const res = await request.get("/api/pages/page-1");
 
       expect(res.status).toBe(403);
       expect(res.body.error).toBe("permission_denied");
+      } finally {
+        close();
+      }
     });
 
     it("non-owner WITH EDIT_ANY_LANDING_PAGE can access the page", async () => {
@@ -800,12 +853,15 @@ describe("Permissions Integration Tests", () => {
         edits: [],
       });
 
-      const app = createApp(prisma, { userId: "user-1", userRole: "MEMBER" });
-
-      const res = await request(app).get("/api/pages/page-1");
+      const { request, close } = await createAppWithServer(prisma, { userId: "user-1", userRole: "MEMBER" });
+      try {
+        const res = await request.get("/api/pages/page-1");
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("id", "page-1");
+      } finally {
+        close();
+      }
     });
   });
 
@@ -820,12 +876,17 @@ describe("Permissions Integration Tests", () => {
       // No auth middleware — organizationId/userId will be undefined
       app.use("/api/pages", createLandingPageRoutes(prisma as any));
 
-      const res = await request(app)
-        .post("/api/pages")
-        .send(CREATE_BODY);
+      const { request, close } = await requestServer(app);
+      try {
+        const res = await request
+          .post("/api/pages")
+          .send(CREATE_BODY);
 
-      expect(res.status).toBe(401);
-      expect(res.body.error).toBe("Authentication required");
+        expect(res.status).toBe(401);
+        expect(res.body.error).toBe("Authentication required");
+      } finally {
+        close();
+      }
     });
   });
 });

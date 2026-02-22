@@ -7,6 +7,7 @@
  */
 
 import express, { type Request, type Response, type NextFunction } from "express";
+import { requestServer } from "./request-server.js";
 import { createRAGRoutes } from "../../src/api/rag-routes.js";
 import { createStoryRoutes } from "../../src/api/story-routes.js";
 import { createTrialGate } from "../../src/middleware/billing.js";
@@ -79,4 +80,13 @@ export function createTestApp(options: TestAppOptions) {
   );
 
   return app;
+}
+
+/**
+ * Creates a test app and starts a server for supertest. Use this instead of
+ * createTestApp + request(app) to avoid the "port" null bug in supertest v7.
+ */
+export async function createTestAppWithServer(options: TestAppOptions) {
+  const app = createTestApp(options);
+  return requestServer(app);
 }

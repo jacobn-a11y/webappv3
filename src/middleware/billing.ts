@@ -49,7 +49,7 @@ export function isBillingEnabled(): boolean {
  * When BILLING_ENABLED is not "true", this middleware is a no-op — all
  * requests pass through without billing checks.
  */
-export function createTrialGate(prisma: PrismaClient, stripe: Stripe) {
+export function createTrialGate(prisma: PrismaClient, _stripe: Stripe) {
   return async (
     req: AuthenticatedRequest,
     res: Response,
@@ -368,7 +368,7 @@ export function createStripeWebhookHandler(
     let event: Stripe.Event;
     try {
       event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-    } catch (err) {
+    } catch {
       res.status(400).json({ error: "Invalid webhook signature" });
       return;
     }

@@ -11,6 +11,18 @@ import { initOtel, shutdownOtel } from "./lib/otel.js";
 // can patch modules (http, express, prisma) before they are loaded.
 initOtel();
 
+// ─── Environment validation (fail fast) ───────────────────────────────────────
+
+const requiredEnv = ["DATABASE_URL", "REDIS_URL"] as const;
+const missing = requiredEnv.filter((k) => !process.env[k]?.trim());
+if (missing.length > 0) {
+  console.error(
+    `StoryEngine startup failed: missing required environment variables: ${missing.join(", ")}. ` +
+      "Set them in .env or your environment. See README for details."
+  );
+  process.exit(1);
+}
+
 import { PrismaClient } from "@prisma/client";
 import Stripe from "stripe";
 import { WorkOS } from "@workos-inc/node";

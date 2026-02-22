@@ -246,7 +246,7 @@ export class PricingService {
     organizationId: string,
     metric: "TRANSCRIPT_MINUTES" | "STORIES_GENERATED" | "PAGES_PUBLISHED" | "CALLS_PROCESSED",
     quantity: number,
-    metadata?: Record<string, unknown>
+    _metadata?: Record<string, unknown>
   ): Promise<void> {
     const now = new Date();
     const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);

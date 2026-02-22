@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
-import request from "supertest";
+import { requestServer } from "../helpers/request-server.js";
 import { createDashboardRoutes } from "../../src/api/dashboard-routes.js";
 import { createStatusRoutes } from "../../src/api/status-routes.js";
 
@@ -57,15 +57,20 @@ describe("incident/status routes", () => {
     });
 
     const app = createDashboardApp(prisma);
-    const res = await request(app).post("/api/dashboard/ops/incidents").send({
-      title: "API latency spike",
-      summary: "P95 elevated across customer dashboard endpoints.",
-      severity: "HIGH",
-    });
+    const { request, close } = await requestServer(app);
+    try {
+      const res = await request.post("/api/dashboard/ops/incidents").send({
+        title: "API latency spike",
+        summary: "P95 elevated across customer dashboard endpoints.",
+        severity: "HIGH",
+      });
 
-    expect(res.status).toBe(201);
-    expect(res.body.id).toBe("inc-1");
-    expect(prisma.auditLog.create).toHaveBeenCalled();
+      expect(res.status).toBe(201);
+      expect(res.body.id).toBe("inc-1");
+      expect(prisma.auditLog.create).toHaveBeenCalled();
+    } finally {
+      close();
+    }
   });
 
   it("adds update and transitions status", async () => {
@@ -85,15 +90,20 @@ describe("incident/status routes", () => {
     });
 
     const app = createDashboardApp(prisma);
-    const res = await request(app)
-      .post("/api/dashboard/ops/incidents/inc-1/updates")
-      .send({
-        message: "Mitigation applied, monitoring impact.",
-        status: "MONITORING",
-      });
+    const { request, close } = await requestServer(app);
+    try {
+      const res = await request
+        .post("/api/dashboard/ops/incidents/inc-1/updates")
+        .send({
+          message: "Mitigation applied, monitoring impact.",
+          status: "MONITORING",
+        });
 
-    expect(res.status).toBe(201);
-    expect(res.body.status).toBe("MONITORING");
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe("MONITORING");
+    } finally {
+      close();
+    }
   });
 
   it("returns public status incidents for org", async () => {
@@ -120,10 +130,15 @@ describe("incident/status routes", () => {
     ]);
 
     const app = createPublicStatusApp(prisma);
-    const res = await request(app).get("/api/status/incidents?organization_id=org-1");
+    const { request, close } = await requestServer(app);
+    try {
+      const res = await request.get("/api/status/incidents?organization_id=org-1");
 
-    expect(res.status).toBe(200);
-    expect(res.body.incidents).toHaveLength(1);
-    expect(res.body.incidents[0].title).toBe("Queue delay");
+      expect(res.status).toBe(200);
+      expect(res.body.incidents).toHaveLength(1);
+      expect(res.body.incidents[0].title).toBe("Queue delay");
+    } finally {
+      close();
+    }
   });
 });

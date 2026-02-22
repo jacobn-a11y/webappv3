@@ -40,7 +40,7 @@ interface AccountRecord {
   domain: string | null;
 }
 
-interface DomainRecord {
+interface _DomainRecord {
   domain: string;
   accountId: string;
 }

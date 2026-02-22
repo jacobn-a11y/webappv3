@@ -135,7 +135,7 @@ export class TranscriptProcessor {
     // ── Step 4: Resolve AI client for this org ───────────────────────
     // Use OWNER role to bypass user-level access checks for background jobs.
     // If a specific user triggered this, we could use their context instead.
-    const aiClient = await this.resolveOrgAIClient(
+    const _aiClient = await this.resolveOrgAIClient(
       organizationId,
       job.userId
     );
