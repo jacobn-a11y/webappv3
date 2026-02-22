@@ -1,7 +1,31 @@
 {
   "version": 1,
-  "generatedAt": "2026-02-22T16:34:20.074Z",
+  "generatedAt": "2026-02-22T20:53:20.734Z",
   "entries": [
+    {
+      "key": "20260217000000_backfill_missing_foundation_objects:L40:\\bALTER\\s+TYPE\\b:0d6d03a47457",
+      "migration": "20260217000000_backfill_missing_foundation_objects",
+      "line": 40,
+      "pattern": "\\bALTER\\s+TYPE\\b",
+      "hash": "0d6d03a47457",
+      "statement": "ALTER TYPE \"CallProvider\" ADD VALUE IF NOT EXISTS 'GRAIN';"
+    },
+    {
+      "key": "20260217000000_backfill_missing_foundation_objects:L41:\\bALTER\\s+TYPE\\b:abb70c27f23f",
+      "migration": "20260217000000_backfill_missing_foundation_objects",
+      "line": 41,
+      "pattern": "\\bALTER\\s+TYPE\\b",
+      "hash": "abb70c27f23f",
+      "statement": "ALTER TYPE \"PermissionType\" ADD VALUE IF NOT EXISTS 'MANAGE_ENTITY_RESOLUTION';"
+    },
+    {
+      "key": "20260217000000_backfill_missing_foundation_objects:L42:\\bALTER\\s+TYPE\\b:4601520bb620",
+      "migration": "20260217000000_backfill_missing_foundation_objects",
+      "line": 42,
+      "pattern": "\\bALTER\\s+TYPE\\b",
+      "hash": "4601520bb620",
+      "statement": "ALTER TYPE \"PermissionType\" ADD VALUE IF NOT EXISTS 'MANAGE_AI_SETTINGS';"
+    },
     {
       "key": "20260222024500_add_system_alert_notification_type:L2:\\bALTER\\s+TYPE\\b:3d6efded5434",
       "migration": "20260222024500_add_system_alert_notification_type",
