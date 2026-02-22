@@ -136,10 +136,21 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
       req.userId,
       req.userRole as UserRole | undefined
     );
-    return (
+    if (
       policy.canAccessNamedStories ||
       policy.permissions.includes("PUBLISH_NAMED_LANDING_PAGE")
-    );
+    ) {
+      return true;
+    }
+    const userPerm = await prisma.userPermission.findUnique({
+      where: {
+        userId_permission: {
+          userId: req.userId,
+          permission: "PUBLISH_NAMED_LANDING_PAGE",
+        },
+      },
+    });
+    return !!userPerm;
   }
 
   async function canGenerateNamedStories(req: AuthReq): Promise<boolean> {
@@ -154,10 +165,21 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
       req.userId,
       req.userRole as UserRole | undefined
     );
-    return (
+    if (
       policy.canGenerateNamedStories ||
       policy.permissions.includes("PUBLISH_NAMED_LANDING_PAGE")
-    );
+    ) {
+      return true;
+    }
+    const userPerm = await prisma.userPermission.findUnique({
+      where: {
+        userId_permission: {
+          userId: req.userId,
+          permission: "PUBLISH_NAMED_LANDING_PAGE",
+        },
+      },
+    });
+    return !!userPerm;
   }
 
   async function getArtifactPublishGovernance(organizationId: string): Promise<{
