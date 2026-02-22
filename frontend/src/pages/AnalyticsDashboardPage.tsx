@@ -107,8 +107,8 @@ export function AnalyticsDashboardPage() {
 
   if (loading) {
     return (
-      <div className="analytics__loading">
-        <div className="analytics__spinner" />
+      <div className="analytics__loading" role="status" aria-live="polite">
+        <div className="analytics__spinner" aria-hidden="true" />
         <p>Loading analytics data...</p>
       </div>
     );
@@ -116,7 +116,7 @@ export function AnalyticsDashboardPage() {
 
   if (error || !data) {
     return (
-      <div className="analytics__error">
+      <div className="analytics__error" role="alert">
         <p>Error: {error ?? "No data available"}</p>
       </div>
     );
@@ -138,7 +138,7 @@ export function AnalyticsDashboardPage() {
           title="Total Calls"
           value={formatNumber(data.summary.totalCalls)}
           icon={
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2" aria-hidden="true">
               <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" />
             </svg>
           }
@@ -147,7 +147,7 @@ export function AnalyticsDashboardPage() {
           title="Accounts"
           value={formatNumber(data.summary.totalAccounts)}
           icon={
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" aria-hidden="true">
               <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
               <circle cx="9" cy="7" r="4" />
               <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
@@ -158,7 +158,7 @@ export function AnalyticsDashboardPage() {
           title="Transcript Hours"
           value={formatHours(data.summary.totalTranscriptHours)}
           icon={
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2" aria-hidden="true">
               <circle cx="12" cy="12" r="10" />
               <path d="M12 6v6l4 2" />
             </svg>
@@ -168,7 +168,7 @@ export function AnalyticsDashboardPage() {
           title="Resolution Rate"
           value={formatPercent(data.summary.overallResolutionRate)}
           icon={
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2" aria-hidden="true">
               <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
               <path d="M22 4L12 14.01l-3-3" />
             </svg>
@@ -178,7 +178,7 @@ export function AnalyticsDashboardPage() {
           title="Quantified Quotes"
           value={formatNumber(data.summary.totalQuotes)}
           icon={
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" aria-hidden="true">
               <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
             </svg>
           }
@@ -187,7 +187,7 @@ export function AnalyticsDashboardPage() {
           title="Page Views"
           value={formatNumber(data.summary.totalPageViews)}
           icon={
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" aria-hidden="true">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
               <circle cx="12" cy="12" r="3" />
             </svg>

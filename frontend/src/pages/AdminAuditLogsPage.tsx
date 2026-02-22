@@ -109,36 +109,42 @@ export function AdminAuditLogsPage() {
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             placeholder="Category"
+            aria-label="Filter by category"
           />
           <input
             className="admin-audit__input"
             value={action}
             onChange={(e) => setAction(e.target.value)}
             placeholder="Action"
+            aria-label="Filter by action"
           />
           <input
             className="admin-audit__input"
             value={severity}
             onChange={(e) => setSeverity(e.target.value)}
             placeholder="Severity"
+            aria-label="Filter by severity"
           />
           <input
             className="admin-audit__input"
             value={actorUserId}
             onChange={(e) => setActorUserId(e.target.value)}
             placeholder="Actor User ID"
+            aria-label="Filter by actor user ID"
           />
           <input
             className="admin-audit__input"
             value={targetType}
             onChange={(e) => setTargetType(e.target.value)}
             placeholder="Target Type"
+            aria-label="Filter by target type"
           />
           <input
             className="admin-audit__input"
             value={targetId}
             onChange={(e) => setTargetId(e.target.value)}
             placeholder="Target ID"
+            aria-label="Filter by target ID"
           />
           <button className="btn btn--secondary" onClick={runSearch}>
             Apply
@@ -152,8 +158,8 @@ export function AdminAuditLogsPage() {
         </div>
       </header>
 
-      {loading && <div>Loading audit logs...</div>}
-      {error && <div className="admin-story-context__error">{error}</div>}
+      {loading && <div role="status" aria-live="polite">Loading audit logs...</div>}
+      {error && <div className="admin-story-context__error" role="alert">{error}</div>}
 
       {!loading && !error && (
         <div className="admin-audit__table-wrap">

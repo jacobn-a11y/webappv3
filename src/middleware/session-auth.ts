@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import { hashSessionToken } from "../lib/session-token.js";
+import logger from "../lib/logger.js";
 
 interface SessionAuthRequest extends Request {
   organizationId?: string;
@@ -97,13 +98,13 @@ export function createSessionAuth(prisma: PrismaClient) {
           where: { id: session.id },
           data: { lastSeenAt: now },
         })
-        .catch(() => {
-          // lastSeenAt updates are non-critical
+        .catch((err) => {
+          logger.warn("Failed to update session lastSeenAt", { error: err });
         });
 
       next();
     } catch (error) {
-      console.error("Session auth middleware error:", error);
+      logger.error("Session auth middleware error", { error });
       next();
     }
   };

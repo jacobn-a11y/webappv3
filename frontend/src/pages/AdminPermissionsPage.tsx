@@ -167,8 +167,8 @@ export function AdminPermissionsPage() {
             Manage user permissions for your organization.
           </p>
         </header>
-        <div className="admin-perms__loading">
-          <div className="loading-state__spinner loading-state__spinner--sm" />
+        <div className="admin-perms__loading" role="status" aria-live="polite">
+          <div className="loading-state__spinner loading-state__spinner--sm" aria-hidden="true" />
           <span>Loading permissions...</span>
         </div>
       </div>
@@ -183,7 +183,7 @@ export function AdminPermissionsPage() {
         <header className="admin-perms__header">
           <h1 className="admin-perms__title">Permissions</h1>
         </header>
-        <div className="admin-perms__error">
+        <div className="admin-perms__error" role="alert">
           <p>{error}</p>
           <button
             type="button"
@@ -233,6 +233,7 @@ export function AdminPermissionsPage() {
                           fill="none"
                           stroke="currentColor"
                           strokeWidth="2.5"
+                          aria-hidden="true"
                         >
                           <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                         </svg>
@@ -267,6 +268,8 @@ export function AdminPermissionsPage() {
           (toast ? " admin-perms__toast--visible" : "") +
           (toast?.isError ? " admin-perms__toast--error" : "")
         }
+        role="status"
+        aria-live="polite"
       >
         {toast?.message}
       </div>
@@ -359,6 +362,7 @@ function UserRow({
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="2.5"
+                aria-hidden="true"
               >
                 <polyline points="6,9 12,15 18,9" />
               </svg>

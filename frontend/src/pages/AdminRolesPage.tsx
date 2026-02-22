@@ -185,7 +185,7 @@ export function AdminRolesPage() {
   };
 
   if (loading) {
-    return <div className="admin-roles__page">Loading roles...</div>;
+    return <div className="admin-roles__page" role="status" aria-live="polite">Loading roles...</div>;
   }
 
   return (
@@ -195,7 +195,7 @@ export function AdminRolesPage() {
         Configure preset and custom team roles, usage limits, account scope, and named/anonymous story permissions.
       </p>
 
-      {error && <div className="admin-roles__error">{error}</div>}
+      {error && <div className="admin-roles__error" role="alert">{error}</div>}
 
       <form className="admin-roles__form" onSubmit={onSubmit}>
         <h2>{editingRoleId ? "Edit Role" : "Create Custom Role"}</h2>

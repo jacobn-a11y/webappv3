@@ -37,7 +37,7 @@ export function AccountDetailPage() {
   };
 
   if (!accountId) {
-    return <div className="page-error">No account ID provided.</div>;
+    return <div className="page-error" role="alert">No account ID provided.</div>;
   }
 
   return (
@@ -53,7 +53,7 @@ export function AccountDetailPage() {
           className="btn btn--primary btn--lg"
           onClick={() => setShowModal(true)}
         >
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <path d="M9 2v14M2 9h14" />
           </svg>
           Generate Story
@@ -65,8 +65,8 @@ export function AccountDetailPage() {
         <h2 className="section-title">Generated Stories</h2>
 
         {loading && (
-          <div className="stories-loading">
-            <div className="loading-state__spinner loading-state__spinner--sm" />
+          <div className="stories-loading" role="status" aria-live="polite">
+            <div className="loading-state__spinner loading-state__spinner--sm" aria-hidden="true" />
             <span>Loading stories...</span>
           </div>
         )}
@@ -74,7 +74,7 @@ export function AccountDetailPage() {
         {!loading && stories.length === 0 && (
           <div className="stories-empty">
             <div className="stories-empty__icon">
-              <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
                 <rect x="8" y="6" width="32" height="36" rx="3" />
                 <path d="M16 14h16M16 20h16M16 26h10" />
               </svg>

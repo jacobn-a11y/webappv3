@@ -88,7 +88,7 @@ export function AdminSecurityPolicyPage() {
     }
   };
 
-  if (loading) return <div className="admin-security__page">Loading security policy...</div>;
+  if (loading) return <div className="admin-security__page" role="status" aria-live="polite">Loading security policy...</div>;
 
   const addIpEntry = async () => {
     if (!newCidr.trim()) return;
@@ -119,8 +119,8 @@ export function AdminSecurityPolicyPage() {
   return (
     <div className="admin-security__page">
       <h1 className="admin-security__title">Security Policy</h1>
-      {error && <div className="admin-story-context__error">{error}</div>}
-      {notice && <div className="admin-story-context__notice">{notice}</div>}
+      {error && <div className="admin-story-context__error" role="alert">{error}</div>}
+      {notice && <div className="admin-story-context__notice" role="status" aria-live="polite">{notice}</div>}
 
       <section className="admin-security__card">
         <label className="admin-security__row">
