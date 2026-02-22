@@ -197,10 +197,10 @@ export class LandingPageEditor {
   }
 
   /**
-   * Publishes a landing page. Always scrubs and stores anonymized versions
-   * in dedicated fields (scrubbedBody, scrubbedTitle, etc.) while preserving
-   * the originals (editableBody, title, calloutBoxes). This allows the admin
-   * to toggle anonymization on/off at the org level without re-publishing.
+   * Publishes a landing page. For named pages (includeCompanyName=true),
+   * scrubbing is skipped — the company name is preserved in all fields.
+   * For anonymous pages, scrubs and stores anonymized versions in dedicated
+   * fields (scrubbedBody, scrubbedTitle, etc.) while preserving the originals.
    */
   async publish(
     pageId: string,
@@ -211,42 +211,54 @@ export class LandingPageEditor {
       include: { story: { select: { accountId: true } } },
     });
 
-    // Always scrub so both versions are stored for reversible anonymization
-    const scrubResult = await this.scrubber.scrubForAccount(
-      page.story.accountId,
-      page.editableBody
-    );
-
-    const titleScrub = await this.scrubber.scrubForAccount(
-      page.story.accountId,
-      page.title
-    );
-    const subtitleScrub = page.subtitle
-      ? await this.scrubber.scrubForAccount(
-          page.story.accountId,
-          page.subtitle
-        )
-      : null;
-
-    // Scrub callout boxes into a separate field (originals stay intact)
+    let scrubbedBody: string;
+    let scrubbedTitle: string;
+    let scrubbedSubtitle: string | null;
     let scrubbedCallouts: CalloutBox[] | null = null;
-    if (page.calloutBoxes && Array.isArray(page.calloutBoxes)) {
-      const callouts = page.calloutBoxes as unknown as CalloutBox[];
-      scrubbedCallouts = [];
-      for (const box of callouts) {
-        const bodyScrub = await this.scrubber.scrubForAccount(
-          page.story.accountId,
-          box.body
-        );
-        const boxTitleScrub = await this.scrubber.scrubForAccount(
-          page.story.accountId,
-          box.title
-        );
-        scrubbedCallouts.push({
-          ...box,
-          title: boxTitleScrub.scrubbedText,
-          body: bodyScrub.scrubbedText,
-        });
+
+    if (page.includeCompanyName) {
+      scrubbedBody = page.editableBody;
+      scrubbedTitle = page.title;
+      scrubbedSubtitle = page.subtitle;
+    } else {
+      const scrubResult = await this.scrubber.scrubForAccount(
+        page.story.accountId,
+        page.editableBody
+      );
+      scrubbedBody = scrubResult.scrubbedText;
+
+      const titleScrub = await this.scrubber.scrubForAccount(
+        page.story.accountId,
+        page.title
+      );
+      scrubbedTitle = titleScrub.scrubbedText;
+
+      const subtitleScrub = page.subtitle
+        ? await this.scrubber.scrubForAccount(
+            page.story.accountId,
+            page.subtitle
+          )
+        : null;
+      scrubbedSubtitle = subtitleScrub?.scrubbedText ?? null;
+
+      if (page.calloutBoxes && Array.isArray(page.calloutBoxes)) {
+        const callouts = page.calloutBoxes as unknown as CalloutBox[];
+        scrubbedCallouts = [];
+        for (const box of callouts) {
+          const bodyScrub = await this.scrubber.scrubForAccount(
+            page.story.accountId,
+            box.body
+          );
+          const boxTitleScrub = await this.scrubber.scrubForAccount(
+            page.story.accountId,
+            box.title
+          );
+          scrubbedCallouts.push({
+            ...box,
+            title: boxTitleScrub.scrubbedText,
+            body: bodyScrub.scrubbedText,
+          });
+        }
       }
     }
 
@@ -255,19 +267,18 @@ export class LandingPageEditor {
     await this.prisma.landingPage.update({
       where: { id: pageId },
       data: {
-        scrubbedBody: scrubResult.scrubbedText,
-        scrubbedTitle: titleScrub.scrubbedText,
-        scrubbedSubtitle: subtitleScrub?.scrubbedText ?? null,
+        scrubbedBody,
+        scrubbedTitle,
+        scrubbedSubtitle,
         scrubbedCalloutBoxes: scrubbedCallouts
           ? (scrubbedCallouts as unknown as object[])
           : undefined,
-        // calloutBoxes is NOT overwritten — originals are preserved
         status: "PUBLISHED",
         visibility: options.visibility,
         password: options.password ?? null,
         expiresAt: options.expiresAt ?? null,
         publishedAt,
-        noIndex: true, // always noindex
+        noIndex: true,
       },
     });
 

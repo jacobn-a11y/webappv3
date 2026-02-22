@@ -331,13 +331,6 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
       let namedPageAllowed = false;
       if (include_company_name === true) {
         namedPageAllowed = await canGenerateNamedStories(req);
-        if (!namedPageAllowed) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "Your role cannot generate named stories.",
-          });
-          return;
-        }
       }
 
       try {

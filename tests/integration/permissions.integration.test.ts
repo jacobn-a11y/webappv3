@@ -275,7 +275,7 @@ describe("Permissions Integration Tests", () => {
   // ── PUBLISH_NAMED_LANDING_PAGE gating ──────────────────────────────────
 
   describe("PUBLISH_NAMED_LANDING_PAGE gating", () => {
-    it("returns 403 when MEMBER tries include_company_name without named-story capability", async () => {
+    it("silently ignores include_company_name when MEMBER lacks named-story capability", async () => {
       const prisma = createMockPrisma();
       seedCreateFlow(prisma);
 
@@ -299,9 +299,12 @@ describe("Permissions Integration Tests", () => {
         .post("/api/pages")
         .send({ ...CREATE_BODY, include_company_name: true });
 
-      expect(res.status).toBe(403);
-      expect(res.body.error).toBe("permission_denied");
-      expect(prisma.landingPage.create).not.toHaveBeenCalled();
+      expect(res.status).toBe(201);
+      expect(prisma.landingPage.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ includeCompanyName: false }),
+        })
+      );
       } finally {
         close();
       }

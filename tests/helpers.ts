@@ -115,6 +115,15 @@ export async function seedTestData(): Promise<SeedResult> {
     },
   });
 
+  // Give member user access to all accounts so they can create pages
+  await prisma.userAccountAccess.create({
+    data: {
+      userId: memberUser.id,
+      organizationId: org.id,
+      scopeType: "ALL_ACCOUNTS",
+    },
+  });
+
   // Domain alias
   await prisma.accountDomain.create({
     data: { accountId: account.id, domain: "acmecorp.io" },
