@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-02-22T19:16:00.560Z",
+  "generatedAt": "2026-02-22T23:38:30.369Z",
   "files": [
     {
       "file": "prisma/schema.prisma",
@@ -12,7 +12,7 @@
     },
     {
       "file": "src/api/landing-page-routes.ts",
-      "sha256": "b64ad64f95b4ebc407fa05442abf7b3282850178ad5029d88ca8fdfc4b908738"
+      "sha256": "aab178e1dce666e98a45ad287db175349317ff0563a74e46740f52129aa96f2b"
     },
     {
       "file": "src/api/integration-routes.ts",
