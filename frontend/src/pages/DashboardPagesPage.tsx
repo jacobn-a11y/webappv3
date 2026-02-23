@@ -297,18 +297,26 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
     }
   };
 
-  // Sort arrow renderer
+  // Sort arrow renderer – uses SVG chevrons instead of Unicode triangles
   const renderSortArrow = (field: SortField) => {
     const isActive = sortBy === field;
     if (isActive) {
       return (
         <span className="dash-pages__sort-icon dash-pages__sort-icon--active">
-          {sortDir === "asc" ? "\u25B2" : "\u25BC"}
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            {sortDir === "asc"
+              ? <path d="M3 8l3-4 3 4" />
+              : <path d="M3 4l3 4 3-4" />}
+          </svg>
         </span>
       );
     }
     return (
-      <span className="dash-pages__sort-icon">{"\u25B2\u25BC"}</span>
+      <span className="dash-pages__sort-icon">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+          <path d="M3 4.5l3-3 3 3" /><path d="M3 7.5l3 3 3-3" />
+        </svg>
+      </span>
     );
   };
 
@@ -654,7 +662,24 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
             {filteredPages.length === 0 ? (
               <tr>
                 <td colSpan={8} className="dash-pages__empty-state">
-                  No landing pages found matching your filters.
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", padding: "40px 20px" }}>
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-border)" strokeWidth="1.5" aria-hidden="true">
+                      <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    <span style={{ fontSize: "15px", fontWeight: 300, color: "var(--white)" }}>
+                      {hasActiveFilters ? "No pages match your filters" : "No landing pages yet"}
+                    </span>
+                    <span style={{ fontSize: "13px", color: "var(--color-text-secondary)", maxWidth: 360, textAlign: "center" }}>
+                      {hasActiveFilters
+                        ? "Try adjusting your search or filter criteria."
+                        : "Create your first landing page to get started."}
+                    </span>
+                    {hasActiveFilters && (
+                      <button type="button" className="btn btn--ghost btn--sm" onClick={clearFilters}>
+                        Clear all filters
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ) : (

@@ -155,7 +155,13 @@ export function AutomationsPage({ userRole }: { userRole?: string }) {
             </thead>
             <tbody>
               {rules.length === 0 ? (
-                <tr><td colSpan={6} className="data-table__empty">No automation rules configured</td></tr>
+                <tr><td colSpan={6} className="data-table__empty">
+                  <div className="state-view" style={{ minHeight: 120 }}>
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-border)" strokeWidth="1.5" aria-hidden="true"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10 13,2" /></svg>
+                    <div className="state-view__title">No automation rules configured</div>
+                    <div className="state-view__message">Create rules to automatically trigger actions based on story events.</div>
+                  </div>
+                </td></tr>
               ) : (
                 rules.map((r) => (
                   <tr key={r.id}>

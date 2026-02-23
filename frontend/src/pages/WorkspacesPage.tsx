@@ -106,7 +106,7 @@ export function WorkspacesPage({ userRole }: { userRole?: string }) {
 
       {/* Create Workspace */}
       {!isViewer && (
-        <div className="card card--elevated">
+        <div className="card card--elevated form-container--wide">
           <div className="card__header">
             <div className="card__title">Create Workspace</div>
           </div>
@@ -160,7 +160,13 @@ export function WorkspacesPage({ userRole }: { userRole?: string }) {
               </thead>
               <tbody>
                 {workspaces.length === 0 ? (
-                  <tr><td colSpan={5} className="data-table__empty">No workspaces yet</td></tr>
+                  <tr><td colSpan={5} className="data-table__empty">
+                    <div className="state-view" style={{ minHeight: 120 }}>
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-border)" strokeWidth="1.5" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
+                      <div className="state-view__title">No workspaces yet</div>
+                      <div className="state-view__message">Create a workspace above to get started organizing your team's content.</div>
+                    </div>
+                  </td></tr>
                 ) : (
                   workspaces.map((w) => (
                     <tr key={w.id}>
@@ -230,7 +236,13 @@ export function WorkspacesPage({ userRole }: { userRole?: string }) {
             </thead>
             <tbody>
               {assets.length === 0 ? (
-                <tr><td colSpan={5} className="data-table__empty">No shared assets yet</td></tr>
+                <tr><td colSpan={5} className="data-table__empty">
+                  <div className="state-view" style={{ minHeight: 120 }}>
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-border)" strokeWidth="1.5" aria-hidden="true"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14,2 14,8 20,8" /></svg>
+                    <div className="state-view__title">No shared assets yet</div>
+                    <div className="state-view__message">Add stories, pages, and reports to your shared library for team collaboration.</div>
+                  </div>
+                </td></tr>
               ) : (
                 assets.map((a) => (
                   <tr key={a.id}>

@@ -524,7 +524,7 @@ export interface SetupPlanCatalog {
     id: "FREE_TRIAL" | "STARTER" | "PROFESSIONAL" | "ENTERPRISE";
     name: string;
     description: string;
-    price: number | null;
+    price: number | { amount: number; currency: string; interval: string } | null;
     features: string[];
   }>;
 }

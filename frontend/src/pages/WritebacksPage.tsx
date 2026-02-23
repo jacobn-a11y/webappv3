@@ -158,7 +158,13 @@ export function WritebacksPage({ userRole }: { userRole?: string }) {
             </thead>
             <tbody>
               {writebacks.length === 0 ? (
-                <tr><td colSpan={4} className="data-table__empty">No writebacks yet</td></tr>
+                <tr><td colSpan={4} className="data-table__empty">
+                  <div className="state-view" style={{ minHeight: 120 }}>
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-border)" strokeWidth="1.5" aria-hidden="true"><polyline points="23,4 23,10 17,10" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg>
+                    <div className="state-view__title">No writebacks yet</div>
+                    <div className="state-view__message">Writebacks will appear here when data is synced back to your CRM.</div>
+                  </div>
+                </td></tr>
               ) : (
                 writebacks.map((w) => (
                   <tr key={w.id}>

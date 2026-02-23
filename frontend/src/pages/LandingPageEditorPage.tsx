@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import {
   getEditorPageData,
   getPageVersions,
@@ -179,6 +179,11 @@ export function LandingPageEditorPage() {
     loadVersions();
   }, [loadVersions]);
 
+  // Track whether content has unsaved changes
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleSaveDraft = useCallback(async () => {
     if (!pageId) return;
     setSaving(true);
@@ -186,6 +191,8 @@ export function LandingPageEditorPage() {
     try {
       await savePageDraft(pageId, body);
       setSaveMessage("Draft saved");
+      setHasUnsavedChanges(false);
+      setLastSavedAt(new Date());
       setTimeout(() => setSaveMessage(null), 2000);
     } catch {
       setSaveMessage("Save failed");
@@ -194,6 +201,32 @@ export function LandingPageEditorPage() {
       setSaving(false);
     }
   }, [pageId, body]);
+
+  // Autosave after 30s of inactivity
+  const handleBodyChange = useCallback((newBody: string) => {
+    setBody(newBody);
+    setHasUnsavedChanges(true);
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(() => {
+      if (pageId && newBody) {
+        savePageDraft(pageId, newBody)
+          .then(() => {
+            setSaveMessage("Autosaved");
+            setHasUnsavedChanges(false);
+            setLastSavedAt(new Date());
+            setTimeout(() => setSaveMessage(null), 2000);
+          })
+          .catch(() => {});
+      }
+    }, 30000);
+  }, [pageId]);
+
+  // Cleanup autosave timer
+  useEffect(() => {
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    };
+  }, []);
 
   const handlePublished = useCallback(() => {
     setStatus("PUBLISHED");
@@ -244,15 +277,32 @@ export function LandingPageEditorPage() {
 
   return (
     <div className="page-editor">
+      {/* Breadcrumb */}
+      <nav className="breadcrumbs" aria-label="Breadcrumb">
+        <Link to="/dashboard/pages">Pages</Link>
+        <span className="breadcrumbs__separator" aria-hidden="true">/</span>
+        <span className="breadcrumbs__current">{pageData.title}</span>
+      </nav>
+
       <div className="page-editor__topbar">
         <div className="page-editor__topbar-left">
           <span className="page-editor__title">{pageData.title}</span>
           <span className={`page-editor__status page-editor__status--${status.toLowerCase()}`}>
             {status}
           </span>
+          {hasUnsavedChanges && (
+            <span className="page-editor__unsaved-dot" title="Unsaved changes" aria-label="Unsaved changes">
+              <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="4" fill="var(--color-warning)" /></svg>
+            </span>
+          )}
         </div>
         <div className="page-editor__topbar-right">
           {saveMessage && <span className="page-editor__save-message">{saveMessage}</span>}
+          {!saveMessage && lastSavedAt && !hasUnsavedChanges && (
+            <span className="page-editor__save-message" style={{ opacity: 0.6 }}>
+              Saved {lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
           <button
             type="button"
             className="page-editor__btn page-editor__btn--secondary"
@@ -275,7 +325,7 @@ export function LandingPageEditorPage() {
         <textarea
           className="page-editor__textarea"
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onChange={(e) => handleBodyChange(e.target.value)}
           placeholder="Write your landing page content in markdown..."
           aria-label="Page content editor"
         />

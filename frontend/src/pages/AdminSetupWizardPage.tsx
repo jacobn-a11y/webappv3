@@ -208,7 +208,24 @@ export function AdminSetupWizardPage() {
                 onClick={() => setSelectedPlan(plan.id as typeof selectedPlan)}
               >
                 <div className="plan-card__name">{plan.name}</div>
-                {plan.price != null && <div className="plan-card__price">{plan.price === 0 ? "Free" : `$${plan.price}/mo`}</div>}
+                {plan.price != null && (
+                  <div className="plan-card__price">
+                    {typeof plan.price === "object" && plan.price.amount != null
+                      ? `$${plan.price.amount}/${plan.price.interval ?? "mo"}`
+                      : plan.price === 0
+                        ? "Free"
+                        : `$${plan.price}/mo`}
+                  </div>
+                )}
+                {plan.price == null && <div className="plan-card__price">Free</div>}
+                {plan.description && (
+                  <div style={{ fontSize: 13, color: "var(--color-text-secondary)", marginTop: 8 }}>{plan.description}</div>
+                )}
+                {plan.features && plan.features.length > 0 && (
+                  <ul className="plan-card__features">
+                    {plan.features.map((f: string, i: number) => <li key={i}>{f}</li>)}
+                  </ul>
+                )}
               </div>
             ))}
           </div>
