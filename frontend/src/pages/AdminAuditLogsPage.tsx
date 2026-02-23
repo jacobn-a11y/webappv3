@@ -148,9 +148,20 @@ export function AdminAuditLogsPage() {
         </div>
       </div>
 
-      {error && <div className="alert alert--error" role="alert">{error}</div>}
+      {error && (error.includes("permission") || error.includes("denied") || error.includes("forbidden") || error.includes("unauthorized")) ? (
+        <div className="access-denied">
+          <div className="access-denied__icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg>
+          </div>
+          <h2 className="access-denied__title">Access Restricted</h2>
+          <p className="access-denied__message">You don't have permission to view audit logs. Contact your administrator.</p>
+          <a href="/" className="btn btn--primary">Return to Home</a>
+        </div>
+      ) : error ? (
+        <div className="alert alert--error" role="alert">{error}</div>
+      ) : null}
 
-      {loading ? (
+      {!error && loading ? (
         <div className="state-view" style={{ minHeight: 200 }} role="status" aria-live="polite">
           <div className="spinner" />
           <div className="state-view__title">Loading audit logs...</div>

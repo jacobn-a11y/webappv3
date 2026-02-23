@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
+import { Breadcrumb } from "../components/Breadcrumb";
 import {
   getAccountJourney,
   type JourneyAccount,
@@ -290,6 +291,14 @@ export function AccountJourneyPage() {
 
   return (
     <div className="journey__container">
+      <div className="journey__breadcrumb">
+        <Breadcrumb items={[
+          { label: "Home", to: "/" },
+          { label: "Accounts", to: "/accounts/acc_meridian" },
+          { label: account.name, to: `/accounts/${accountId}` },
+          { label: "Journey" },
+        ]} />
+      </div>
       {/* Sidebar */}
       <aside className="journey__sidebar">
         {/* Account Info */}

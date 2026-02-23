@@ -222,6 +222,19 @@ export function AdminDataGovernancePage() {
     return <div className="state-view"><div className="spinner" /><div className="state-view__title">Loading data governance...</div></div>;
   }
 
+  if (error && (error.includes("permission") || error.includes("denied") || error.includes("forbidden") || error.includes("unauthorized"))) {
+    return (
+      <div className="access-denied">
+        <div className="access-denied__icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg>
+        </div>
+        <h2 className="access-denied__title">Access Restricted</h2>
+        <p className="access-denied__message">You don't have permission to view data governance settings. Contact your administrator.</p>
+        <a href="/" className="btn btn--primary">Return to Home</a>
+      </div>
+    );
+  }
+
   return (
     <div className="page">
       <div className="page__header"><div className="page__header-text"><h1 className="page__title">Data Governance</h1><p className="page__subtitle">Manage retention policies, deletion approvals, and artifact governance</p></div></div>

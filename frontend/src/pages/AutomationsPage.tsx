@@ -9,7 +9,8 @@ import {
 import { formatEnumLabel, badgeClass, formatDate } from "../lib/format";
 import { useToast } from "../components/Toast";
 
-export function AutomationsPage() {
+export function AutomationsPage({ userRole }: { userRole?: string }) {
+  const isViewer = userRole === "VIEWER";
   const [rules, setRules] = useState<AutomationRule[]>([]);
   const [name, setName] = useState("");
   const [triggerType, setTriggerType] = useState<"THRESHOLD" | "SCHEDULE" | "EVENT">("THRESHOLD");
@@ -72,7 +73,7 @@ export function AutomationsPage() {
       {error && <div className="alert alert--error">{error}</div>}
 
       {/* Create Rule */}
-      <div className="card card--elevated">
+      {!isViewer && <div className="card card--elevated">
         <div className="card__header">
           <div className="card__title">Create Rule</div>
         </div>
@@ -132,7 +133,7 @@ export function AutomationsPage() {
         <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
           <button className="btn btn--primary" onClick={create}>Create Rule</button>
         </div>
-      </div>
+      </div>}
 
       {/* Rules Table */}
       <div className="card card--elevated">
