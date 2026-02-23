@@ -11,53 +11,109 @@
 }
 
 :root {
-  --color-bg: #f8f9fb;
-  --color-surface: #ffffff;
-  --color-text: #1a1a2e;
-  --color-text-secondary: #4a4b63;
-  --color-text-muted: #616380;
-  --color-accent: #4f46e5;
-  --color-accent-hover: #4338ca;
-  --color-accent-light: #eef2ff;
-  --color-border: #e5e7eb;
-  --color-border-hover: #d1d5db;
-  --color-success: #059669;
-  --color-success-light: #ecfdf5;
-  --color-error: #dc2626;
-  --color-error-light: #fef2f2;
-  --color-warning: #d97706;
-  --color-warning-light: #fffbeb;
-  --color-info: #2563eb;
-  --color-info-light: #dbeafe;
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --radius-sm: 6px;
+  /* ── Brand Neutrals (cool purple undertone) ── */
+  --neutral-000: #090A0F;
+  --neutral-100: #121213;
+  --neutral-200: #1C1B1C;
+  --neutral-300: #2E2D2F;
+  --neutral-400: #5C5B5E;
+  --neutral-500: #8A888E;
+  --neutral-600: #A19FA5;
+  --neutral-700: #B8B6BD;
+  --neutral-800: #CFCCD4;
+  --neutral-900: #E6E3EC;
+  --neutral-1000: #F3F1F6;
+  --neutral-1100: #FAF9FB;
+  --white: #FFFFFF;
+  --black: #1E1E1E;
+
+  /* ── Blue (Primary Action) ── */
+  --blue-000: #EBF2FF;
+  --blue-100: #B0CAFF;
+  --blue-200: #6195FF;
+  --blue-300: #397BFF;
+  --blue-400: #336FE6;
+  --blue-500: #2256C5;
+  --blue-600: #224A99;
+  --blue-700: #173166;
+  --blue-800: #0C1933;
+  --blue-900: #070F1F;
+
+  /* ── Semantic Colors ── */
+  --green-000: #EDF7EE;  --green-100: #B7DFB9;
+  --green-300: #4CAF50;  --green-500: #358238;  --green-600: #2E6930;
+  --red-000: #FEECEC;    --red-100: #FBB4B4;
+  --red-300: #F44343;    --red-500: #C33636;    --red-600: #922828;
+  --yellow-000: #FFFEF8; --yellow-100: #FFFBE2;
+  --yellow-300: #FFF6B6; --yellow-400: #FFEE70; --yellow-500: #f0da4e;
+  --orange-400: #ED7C4A; --purple-400: #9871E6; --teal-400: #7FE3D9;
+
+  /* ── Mapped Semantic Tokens ── */
+  --color-bg: var(--neutral-000);
+  --color-surface: var(--neutral-100);
+  --color-surface-raised: var(--neutral-200);
+  --color-text: var(--white);
+  --color-text-secondary: var(--neutral-600);
+  --color-text-muted: var(--neutral-500);
+  --color-text-body: var(--neutral-700);
+  --color-accent: var(--blue-400);
+  --color-accent-hover: var(--blue-300);
+  --color-accent-light: var(--blue-800);
+  --color-border: var(--neutral-300);
+  --color-border-hover: var(--neutral-400);
+  --color-success: var(--green-300);
+  --color-success-light: rgba(78, 175, 80, 0.12);
+  --color-error: var(--red-300);
+  --color-error-light: rgba(244, 67, 67, 0.12);
+  --color-warning: var(--yellow-400);
+  --color-warning-light: rgba(255, 238, 112, 0.1);
+  --color-info: var(--blue-400);
+  --color-info-light: rgba(51, 111, 230, 0.12);
+
+  /* ── Font ── */
+  --font-sans: 'Inter', 'General Sans', 'Satoshi', system-ui, sans-serif;
+
+  /* ── Border Radius (brand: no shadows, pill buttons) ── */
+  --radius-sm: 4px;
   --radius-md: 8px;
-  --radius-lg: 12px;
+  --radius-lg: 8px;
   --radius-xl: 16px;
-  --radius-full: 100px;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
-  --shadow-lg: 0 8px 30px rgba(0,0,0,0.12);
-  --shadow-xl: 0 20px 60px rgba(0,0,0,0.15);
+  --radius-full: 60px;
+  --radius-pill: 60px;
+  --radius-input: 50px;
+
+  /* ── No shadows in brand guide ── */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: 0 8px 30px rgba(0,0,0,0.3);
+  --shadow-xl: none;
+
+  /* ── Spacing (8px base unit) ── */
   --sidebar-width: 252px;
   --sidebar-collapsed-width: 64px;
+  --space-xxs: 4px;
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
   --space-lg: 24px;
   --space-xl: 32px;
   --space-2xl: 48px;
+  --space-3xl: 80px;
+
+  /* ── Transitions ── */
   --transition-fast: 0.15s ease;
-  --transition-normal: 0.2s ease;
+  --transition-normal: 0.25s ease-in-out;
 }
 
 body {
   font-family: var(--font-sans);
   background: var(--color-bg);
-  color: var(--color-text);
-  line-height: 1.6;
-  font-size: 14px;
+  color: var(--color-text-body);
+  line-height: 1.7;
+  font-size: 16px;
+  font-weight: 400;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ─── Accessibility Utilities ────────────────────────────────────────────── */
@@ -105,7 +161,7 @@ body {
 
 .sidebar {
   width: var(--sidebar-width);
-  background: var(--color-surface);
+  background: var(--neutral-000);
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
