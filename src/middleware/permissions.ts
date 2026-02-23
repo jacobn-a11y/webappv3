@@ -16,6 +16,7 @@ import type { Request, Response, NextFunction } from "express";
 import type { PrismaClient, PermissionType, UserRole, TranscriptTruncationMode } from "@prisma/client";
 import { RoleProfileService } from "../services/role-profiles.js";
 import { PolicyService, legacyPermissionActionToPolicyAction } from "../services/policy-engine.js";
+import logger from "../lib/logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -64,7 +65,7 @@ export function requireLandingPagesEnabled(prisma: PrismaClient) {
 
       next();
     } catch (err) {
-      console.error("Landing pages feature gate error:", err);
+      logger.error("Landing pages feature gate error", { error: err });
       res.status(500).json({ error: "permission_check_failed" });
     }
   };
@@ -144,7 +145,7 @@ export function requirePermission(prisma: PrismaClient, action: string) {
         deny_reason: decision.reason,
       });
     } catch (err) {
-      console.error("Permission middleware error:", err);
+      logger.error("Permission middleware error", { error: err });
       res.status(500).json({ error: "permission_check_failed" });
     }
   };
@@ -221,7 +222,7 @@ export function requirePageOwnerOrPermission(prisma: PrismaClient) {
         message: "You can only edit landing pages you created, or need EDIT_ANY permission.",
       });
     } catch (err) {
-      console.error("Page permission middleware error:", err);
+      logger.error("Page permission middleware error", { error: err });
       res.status(500).json({ error: "permission_check_failed" });
     }
   };

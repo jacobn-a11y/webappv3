@@ -27,15 +27,8 @@ interface AuthenticatedRequest extends Request {
 }
 
 function requestIp(req: Request): string {
-  const fallbackIp = req.ip ?? "";
-  const forwarded = req.headers["x-forwarded-for"];
-  if (Array.isArray(forwarded) && forwarded.length > 0) {
-    return forwarded[0].split(",")[0]?.trim() ?? fallbackIp;
-  }
-  if (typeof forwarded === "string" && forwarded.length > 0) {
-    return forwarded.split(",")[0]?.trim() ?? fallbackIp;
-  }
-  return fallbackIp;
+  // Rely on Express req.ip (honors trust proxy when configured).
+  return req.ip ?? req.socket.remoteAddress ?? "";
 }
 
 function hasMfa(req: Request): boolean {

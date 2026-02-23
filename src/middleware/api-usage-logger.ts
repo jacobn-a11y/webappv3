@@ -11,6 +11,7 @@
 import type { Response, NextFunction } from "express";
 import type { PrismaClient } from "@prisma/client";
 import type { ApiKeyAuthRequest } from "./api-key-auth.js";
+import logger from "../lib/logger.js";
 
 // ─── Middleware Factory ──────────────────────────────────────────────────────
 
@@ -62,7 +63,7 @@ export function createApiUsageLogger(prisma: PrismaClient) {
           },
         })
         .catch((err) => {
-          console.error("Failed to log API usage:", err);
+          logger.warn("Failed to log API usage", { error: err });
         });
     });
 

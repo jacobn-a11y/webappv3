@@ -54,8 +54,13 @@ export function logAuditEvent(event: AuditEvent): void {
     _type: "SECURITY_AUDIT",
   };
 
-  // Use console.log for structured logging (captured by log aggregators)
-  console.log(JSON.stringify(logEntry));
+  const level =
+    event.severity === "CRITICAL"
+      ? "error"
+      : event.severity === "WARN"
+        ? "warn"
+        : "info";
+  logger.log(level, "Security audit event", logEntry);
 }
 
 // ─── Convenience Functions ──────────────────────────────────────────────────
@@ -151,3 +156,4 @@ export function auditWebhookFailure(
     severity: "CRITICAL",
   });
 }
+import logger from "../lib/logger.js";

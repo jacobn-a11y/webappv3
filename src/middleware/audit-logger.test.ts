@@ -15,20 +15,21 @@ import {
   auditWebhookFailure,
   type AuditEvent,
 } from "./audit-logger.js";
+import logger from "../lib/logger.js";
 
 describe("Audit Logger", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let loggerSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    loggerSpy = vi.spyOn(logger, "log").mockImplementation(() => logger as any);
   });
 
   afterEach(() => {
-    consoleSpy.mockRestore();
+    loggerSpy.mockRestore();
   });
 
   describe("logAuditEvent", () => {
-    it("should log structured JSON to console", () => {
+    it("should log structured metadata via logger", () => {
       const event: AuditEvent = {
         timestamp: "2024-01-01T00:00:00.000Z",
         category: "AUTH",
@@ -42,8 +43,8 @@ describe("Audit Logger", () => {
 
       logAuditEvent(event);
 
-      expect(consoleSpy).toHaveBeenCalledTimes(1);
-      const logged = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+      expect(loggerSpy).toHaveBeenCalledTimes(1);
+      const logged = loggerSpy.mock.calls[0][2] as Record<string, unknown>;
       expect(logged.category).toBe("AUTH");
       expect(logged.action).toBe("LOGIN");
       expect(logged._type).toBe("SECURITY_AUDIT");
@@ -61,7 +62,7 @@ describe("Audit Logger", () => {
         severity: "WARN",
       });
 
-      const logged = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+      const logged = loggerSpy.mock.calls[0][2] as Record<string, any>;
       expect(logged.actorId).toBe("admin-1");
       expect(logged.organizationId).toBe("org-1");
       expect(logged.targetId).toBe("user-2");
@@ -74,7 +75,7 @@ describe("Audit Logger", () => {
     it("should log GRANT events with correct structure", () => {
       auditPermissionChange("GRANT", "admin-1", "user-2", "PUBLISH_LANDING_PAGE", "org-1");
 
-      const logged = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+      const logged = loggerSpy.mock.calls[0][2] as Record<string, any>;
       expect(logged.category).toBe("PERMISSION");
       expect(logged.action).toBe("PERMISSION_GRANT");
       expect(logged.actorId).toBe("admin-1");
@@ -86,7 +87,7 @@ describe("Audit Logger", () => {
     it("should log REVOKE events", () => {
       auditPermissionChange("REVOKE", "admin-1", "user-2", "DELETE_ANY_LANDING_PAGE", "org-1");
 
-      const logged = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+      const logged = loggerSpy.mock.calls[0][2] as Record<string, any>;
       expect(logged.action).toBe("PERMISSION_REVOKE");
     });
   });
@@ -95,7 +96,7 @@ describe("Audit Logger", () => {
     it("should log account access grants", () => {
       auditAccessChange("GRANT", "admin-1", "user-2", "CRM_REPORT", "org-1", "grant-123");
 
-      const logged = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+      const logged = loggerSpy.mock.calls[0][2] as Record<string, any>;
       expect(logged.category).toBe("ACCESS_CONTROL");
       expect(logged.action).toBe("ACCESS_GRANT");
       expect(logged.metadata.scopeType).toBe("CRM_REPORT");
@@ -105,7 +106,7 @@ describe("Audit Logger", () => {
     it("should log account access revocations", () => {
       auditAccessChange("REVOKE", "admin-1", "N/A", "N/A", "org-1", "grant-456");
 
-      const logged = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+      const logged = loggerSpy.mock.calls[0][2] as Record<string, any>;
       expect(logged.action).toBe("ACCESS_REVOKE");
     });
   });
@@ -114,7 +115,7 @@ describe("Audit Logger", () => {
     it("should log publish events", () => {
       auditPublishEvent("PUBLISH", "user-1", "page-1", "org-1", { visibility: "SHARED_WITH_LINK" });
 
-      const logged = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+      const logged = loggerSpy.mock.calls[0][2] as Record<string, any>;
       expect(logged.category).toBe("PUBLISH");
       expect(logged.action).toBe("PAGE_PUBLISH");
       expect(logged.metadata.visibility).toBe("SHARED_WITH_LINK");
@@ -125,7 +126,7 @@ describe("Audit Logger", () => {
     it("should log auth failures with IP", () => {
       auditAuthFailure("Invalid token", "192.168.1.100");
 
-      const logged = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+      const logged = loggerSpy.mock.calls[0][2] as Record<string, any>;
       expect(logged.category).toBe("AUTH");
       expect(logged.action).toBe("AUTH_FAILURE");
       expect(logged.metadata.reason).toBe("Invalid token");
@@ -138,7 +139,7 @@ describe("Audit Logger", () => {
     it("should log webhook signature failures as CRITICAL", () => {
       auditWebhookFailure("merge", "Invalid signature", "10.0.0.1");
 
-      const logged = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+      const logged = loggerSpy.mock.calls[0][2] as Record<string, any>;
       expect(logged.category).toBe("WEBHOOK");
       expect(logged.action).toBe("WEBHOOK_SIGNATURE_FAILURE");
       expect(logged.severity).toBe("CRITICAL");

@@ -19,6 +19,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { Queue } from "bullmq";
 import { GongProvider } from "../integrations/gong-provider.js";
 import type { GongCredentials } from "../integrations/types.js";
+import logger from "../lib/logger.js";
 
 // ─── Gong Webhook Payload Types ─────────────────────────────────────────────
 
@@ -136,7 +137,7 @@ export function createGongWebhookHandler(deps: {
 
       res.json({ received: true, processed: true });
     } catch (err) {
-      console.error("Gong webhook processing error:", err);
+      logger.error("Gong webhook processing error", { error: err });
       res.json({ received: true, processed: false, error: "Processing failed" });
     }
   };
@@ -205,6 +206,7 @@ async function handleCallReady(
       hasTranscript: !!transcript,
     },
     {
+      jobId: `process-call:${call.id}`,
       attempts: 3,
       backoff: { type: "exponential", delay: 5000 },
     }

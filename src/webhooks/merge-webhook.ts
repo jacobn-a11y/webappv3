@@ -34,7 +34,7 @@ interface MergeWebhookPayload {
   linked_account: {
     id: string;
     integration: string;
-    organization: string;
+    organization?: string;
   };
   data: Record<string, unknown>;
 }
@@ -157,23 +157,35 @@ export function createMergeWebhookHandler(deps: {
       return;
     }
 
-    if (!payload.hook?.event || !payload.linked_account?.organization) {
+    if (!payload.hook?.event || !payload.linked_account?.id) {
       res.status(400).json({ error: "Malformed webhook payload" });
       return;
     }
 
     const eventType = payload.hook.event;
 
-    // ── Resolve which organization this webhook belongs to ────────────
-    // In production, map linked_account.organization to our org ID
-    // For now, use the linked_account metadata
-    const org = await prisma.organization.findFirst({
-      where: { id: payload.linked_account.organization },
+    // ── Resolve org from linked-account ownership (tenant isolation) ──
+    const linkedAccount = await prisma.linkedAccount.findUnique({
+      where: { mergeLinkedAccountId: payload.linked_account.id },
+      select: { organizationId: true, status: true },
     });
 
-    if (!org) {
-      // Acknowledge but skip — no matching org
+    if (!linkedAccount || linkedAccount.status !== "ACTIVE") {
       res.json({ received: true, processed: false });
+      return;
+    }
+
+    const orgId = linkedAccount.organizationId;
+    if (
+      payload.linked_account.organization &&
+      payload.linked_account.organization !== orgId
+    ) {
+      logger.warn("Merge webhook organization mismatch", {
+        linkedAccountId: payload.linked_account.id,
+        payloadOrganizationId: payload.linked_account.organization,
+        resolvedOrganizationId: orgId,
+      });
+      res.status(401).json({ error: "Invalid webhook payload" });
       return;
     }
 
@@ -186,19 +198,19 @@ export function createMergeWebhookHandler(deps: {
             prisma,
             resolver,
             processingQueue,
-            org.id,
+            orgId,
             payload
           );
           break;
 
         case "contact.created":
         case "contact.updated":
-          await handleCRMContactEvent(prisma, org.id, payload);
+          await handleCRMContactEvent(prisma, orgId, payload);
           break;
 
         case "opportunity.created":
         case "opportunity.updated":
-          await handleCRMOpportunityEvent(prisma, org.id, payload);
+          await handleCRMOpportunityEvent(prisma, orgId, payload);
           break;
 
         default:
@@ -328,6 +340,7 @@ async function handleRecordingEvent(
       hasTranscript: !!recording.transcript,
     },
     {
+      jobId: `process-call:${call.id}`,
       attempts: 3,
       backoff: { type: "exponential", delay: 5000 },
     }

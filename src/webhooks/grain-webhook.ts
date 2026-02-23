@@ -20,6 +20,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { Queue } from "bullmq";
 import { GrainProvider } from "../integrations/grain-provider.js";
 import type { GrainCredentials } from "../integrations/types.js";
+import logger from "../lib/logger.js";
 
 // ─── Grain Webhook Payload Types ────────────────────────────────────────────
 
@@ -141,7 +142,7 @@ export function createGrainWebhookHandler(deps: {
 
       res.json({ received: true, processed: true });
     } catch (err) {
-      console.error("Grain webhook processing error:", err);
+      logger.error("Grain webhook processing error", { error: err });
       res.json({
         received: true,
         processed: false,
@@ -213,6 +214,7 @@ async function handleRecordingReady(
       hasTranscript: !!transcript,
     },
     {
+      jobId: `process-call:${call.id}`,
       attempts: 3,
       backoff: { type: "exponential", delay: 5000 },
     }

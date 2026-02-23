@@ -25,6 +25,7 @@ import {
   getPlanByPriceId,
 } from "../config/stripe-plans.js";
 import { buildPublicAppUrl } from "../lib/public-app-url.js";
+import logger from "../lib/logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -454,9 +455,11 @@ export function createStripeWebhookHandler(
             data: { plan, trialEndsAt: null },
           });
 
-          console.log(
-            `Checkout completed: org=${orgId} plan=${plan} subscription=${stripeSubscription.id}`
-          );
+          logger.info("Checkout completed", {
+            organizationId: orgId,
+            plan,
+            subscriptionId: stripeSubscription.id,
+          });
           break;
         }
 
@@ -502,9 +505,10 @@ export function createStripeWebhookHandler(
             });
           }
 
-          console.log(
-            `Invoice paid: subscription=${subscriptionId} amount=${invoice.amount_paid}`
-          );
+          logger.info("Invoice paid", {
+            subscriptionId,
+            amountPaid: invoice.amount_paid,
+          });
           break;
         }
 
@@ -529,9 +533,10 @@ export function createStripeWebhookHandler(
             });
           }
 
-          console.log(
-            `Invoice payment failed: subscription=${subscriptionId} attempt=${invoice.attempt_count}`
-          );
+          logger.warn("Invoice payment failed", {
+            subscriptionId,
+            attemptCount: invoice.attempt_count,
+          });
           break;
         }
 
@@ -594,9 +599,11 @@ export function createStripeWebhookHandler(
             });
           }
 
-          console.log(
-            `Subscription updated: org=${orgId} plan=${plan} status=${status}`
-          );
+          logger.info("Subscription updated", {
+            organizationId: orgId,
+            plan,
+            status,
+          });
           break;
         }
 
@@ -637,14 +644,18 @@ export function createStripeWebhookHandler(
             });
           }
 
-          console.log(
-            `Subscription deleted: org=${orgId} subscription=${stripeSubscription.id}`
-          );
+          logger.info("Subscription deleted", {
+            organizationId: orgId,
+            subscriptionId: stripeSubscription.id,
+          });
           break;
         }
       }
     } catch (err) {
-      console.error(`Webhook handler error for ${event.type}:`, err);
+      logger.error("Stripe webhook handler error", {
+        eventType: event.type,
+        error: err,
+      });
       res.status(500).json({ error: "webhook_processing_failed" });
       return;
     }
