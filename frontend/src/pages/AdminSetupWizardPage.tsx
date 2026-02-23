@@ -11,6 +11,8 @@ import {
   type SetupPlanCatalog,
   type SetupStatus,
 } from "../lib/api";
+import { useToast } from "../components/Toast";
+import { formatEnumLabel } from "../lib/format";
 
 export function AdminSetupWizardPage() {
   const [status, setStatus] = useState<SetupStatus | null>(null);
@@ -23,7 +25,7 @@ export function AdminSetupWizardPage() {
   const [products, setProducts] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   const load = async () => {
     setError(null);
@@ -48,16 +50,12 @@ export function AdminSetupWizardPage() {
   const saveOrgProfile = async () => {
     setSaving(true);
     setError(null);
-    setNotice(null);
     try {
       await saveSetupOrgProfile({
         company_overview: companyOverview,
-        products: products
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
+        products: products.split(",").map((s) => s.trim()).filter(Boolean),
       });
-      setNotice("Org profile setup saved.");
+      showToast("Organization profile saved", "success");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save org profile");
@@ -69,7 +67,6 @@ export function AdminSetupWizardPage() {
   const saveGovernanceDefaults = async () => {
     setSaving(true);
     setError(null);
-    setNotice(null);
     try {
       await saveSetupGovernanceDefaults({
         retention_days: 365,
@@ -81,7 +78,7 @@ export function AdminSetupWizardPage() {
         rto_target_minutes: 240,
         rpo_target_minutes: 60,
       });
-      setNotice("Governance defaults applied.");
+      showToast("Governance defaults applied", "success");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to apply governance defaults");
@@ -93,10 +90,9 @@ export function AdminSetupWizardPage() {
   const applyRolePresets = async () => {
     setSaving(true);
     setError(null);
-    setNotice(null);
     try {
       await applySetupRolePresets();
-      setNotice("Role presets applied.");
+      showToast("Role presets applied", "success");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to apply role presets");
@@ -108,14 +104,13 @@ export function AdminSetupWizardPage() {
   const continuePlanSelection = async () => {
     setSaving(true);
     setError(null);
-    setNotice(null);
     try {
       const result = await selectSetupPlan(selectedPlan);
       if (result.checkoutUrl) {
         window.location.assign(result.checkoutUrl);
         return;
       }
-      setNotice("Plan selection saved.");
+      showToast("Plan selection saved", "success");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to select plan");
@@ -124,76 +119,114 @@ export function AdminSetupWizardPage() {
     }
   };
 
+  const completionScore = status?.completionScore ?? 0;
+
   return (
-    <div className="admin-security__page">
-      <h1 className="admin-security__title">Setup Wizard</h1>
-      {error && <div className="admin-story-context__error">{error}</div>}
-      {notice && <div className="admin-story-context__notice">{notice}</div>}
+    <div className="page">
+      <div className="page__header">
+        <div className="page__header-text">
+          <h1 className="page__title">Setup Wizard</h1>
+          <p className="page__subtitle">Complete your organization setup to unlock all features</p>
+        </div>
+      </div>
 
-      <section className="admin-security__card">
-        <h2>Onboarding Completion</h2>
-        <div>Score: {status?.completionScore ?? 0}%</div>
-        <div>Current Step: {status?.currentStep ?? "-"}</div>
-        {status && status.missingPrompts.length > 0 && (
-          <ul>
-            {status.missingPrompts.map((p) => (
-              <li key={p}>{p}</li>
+      {error && <div className="alert alert--error">{error}</div>}
+
+      {/* Progress */}
+      {status && (
+        <div className="card card--elevated">
+          <div className="card__header">
+            <div>
+              <div className="card__title">Onboarding Progress</div>
+              <div className="card__subtitle">Current step: {formatEnumLabel(status.currentStep)}</div>
+            </div>
+            <span className={`badge ${completionScore >= 80 ? "badge--success" : completionScore >= 40 ? "badge--draft" : "badge--error"}`}>
+              {completionScore}% complete
+            </span>
+          </div>
+          <div className="progress-bar" style={{ height: 10 }}>
+            <div
+              className={`progress-bar__fill${completionScore >= 80 ? " progress-bar__fill--success" : completionScore >= 40 ? "" : " progress-bar__fill--warning"}`}
+              style={{ width: `${completionScore}%` }}
+            />
+          </div>
+          {status.missingPrompts.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Remaining Steps</div>
+              <div className="action-list">
+                {status.missingPrompts.map((p) => (
+                  <div className="action-item" key={p}>
+                    <div className="action-item__icon">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                    </div>
+                    <span className="action-item__text">{p}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Org Profile */}
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div className="card__title">Organization Profile</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="form-group">
+            <label className="form-group__label">Company Overview</label>
+            <textarea className="form-textarea" value={companyOverview} onChange={(e) => setCompanyOverview(e.target.value)} rows={4} placeholder="Describe what your company does..." />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Products</label>
+            <input className="form-input" value={products} onChange={(e) => setProducts(e.target.value)} placeholder="Product A, Product B, Product C" />
+            <span className="form-group__hint">Comma-separated list of product names</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button className="btn btn--primary" onClick={saveOrgProfile} disabled={saving}>Save Profile</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Plan Selection */}
+      {plans && (
+        <div className="card card--elevated">
+          <div className="card__header">
+            <div>
+              <div className="card__title">Plan Selection</div>
+              <div className="card__subtitle">
+                {plans.billing_enabled ? "Billing is enabled for your organization" : "Select a plan to get started"}
+              </div>
+            </div>
+          </div>
+          <div className="plan-card-grid">
+            {plans.plans.map((plan) => (
+              <div
+                key={plan.id}
+                className={`plan-card${selectedPlan === plan.id ? " plan-card--selected" : ""}`}
+                onClick={() => setSelectedPlan(plan.id as typeof selectedPlan)}
+              >
+                <div className="plan-card__name">{plan.name}</div>
+                {plan.price != null && <div className="plan-card__price">{plan.price === 0 ? "Free" : `$${plan.price}/mo`}</div>}
+              </div>
             ))}
-          </ul>
-        )}
-      </section>
+          </div>
+          <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+            <button className="btn btn--primary" onClick={continuePlanSelection} disabled={saving}>
+              Continue with {formatEnumLabel(selectedPlan)}
+            </button>
+          </div>
+        </div>
+      )}
 
-      <section className="admin-security__card">
-        <h2>Org Profile Setup</h2>
-        <label className="admin-security__field">
-          Company Overview
-          <textarea
-            value={companyOverview}
-            onChange={(e) => setCompanyOverview(e.target.value)}
-            rows={4}
-          />
-        </label>
-        <label className="admin-security__field">
-          Products (comma-separated)
-          <input
-            value={products}
-            onChange={(e) => setProducts(e.target.value)}
-            placeholder="Product A, Product B"
-          />
-        </label>
-        <button className="btn btn--secondary" onClick={saveOrgProfile} disabled={saving}>
-          Save Org Profile
-        </button>
-      </section>
-
-      <section className="admin-security__card">
-        <h2>Plan & Checkout</h2>
-        <div>Billing Enabled: {plans?.billing_enabled ? "Yes" : "No"}</div>
-        <label className="admin-security__field">
-          Selected Plan
-          <select
-            value={selectedPlan}
-            onChange={(e) =>
-              setSelectedPlan(
-                e.target.value as "FREE_TRIAL" | "STARTER" | "PROFESSIONAL" | "ENTERPRISE"
-              )
-            }
-          >
-            {plans?.plans.map((plan) => (
-              <option key={plan.id} value={plan.id}>
-                {plan.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="btn btn--primary" onClick={continuePlanSelection} disabled={saving}>
-          Continue Plan Setup
-        </button>
-      </section>
-
-      <section className="admin-security__card">
-        <h2>Preset Setup Actions</h2>
-        <div className="admin-security__inline">
+      {/* Quick Setup Actions */}
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div className="card__title">Quick Setup Actions</div>
+          <div className="card__subtitle">Apply recommended defaults in one click</div>
+        </div>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <button className="btn btn--secondary" onClick={saveGovernanceDefaults} disabled={saving}>
             Apply Governance Defaults
           </button>
@@ -201,36 +234,70 @@ export function AdminSetupWizardPage() {
             Apply Role Presets
           </button>
         </div>
-      </section>
+      </div>
 
-      <section className="admin-security__card">
-        <h2>First-Value Workflow</h2>
-        {firstValue && (
-          <>
-            <div className="admin-ops__grid">
-              <div>Stories Generated: {firstValue.completion.stories_generated}</div>
-              <div>Pages Published: {firstValue.completion.pages_published}</div>
-              <div>
-                Complete: {firstValue.completion.first_value_complete ? "Yes" : "No"}
+      {/* First Value Workflow */}
+      {firstValue && (
+        <div className="card card--elevated">
+          <div className="card__header">
+            <div>
+              <div className="card__title">First-Value Workflow</div>
+              <div className="card__subtitle">Track your path to first value realization</div>
+            </div>
+            <span className={`badge ${firstValue.completion.first_value_complete ? "badge--success" : "badge--draft"}`}>
+              {firstValue.completion.first_value_complete ? "Complete" : "In Progress"}
+            </span>
+          </div>
+
+          <div className="kpi-grid" style={{ marginBottom: 20 }}>
+            <div className="kpi-card">
+              <div className="kpi-card__content">
+                <div className="kpi-card__label">Stories Generated</div>
+                <div className="kpi-card__value">{firstValue.completion.stories_generated}</div>
               </div>
             </div>
-            <h3>Starter Templates</h3>
-            <ul>
-              {firstValue.starter_story_templates.map((t) => (
-                <li key={t.id}>
-                  {t.label} ({t.funnel_stage})
-                </li>
-              ))}
-            </ul>
-            <h3>Next Tasks</h3>
-            <ul>
-              {firstValue.next_tasks.map((t) => (
-                <li key={t}>{t}</li>
-              ))}
-            </ul>
-          </>
-        )}
-      </section>
+            <div className="kpi-card">
+              <div className="kpi-card__content">
+                <div className="kpi-card__label">Pages Published</div>
+                <div className="kpi-card__value">{firstValue.completion.pages_published}</div>
+              </div>
+            </div>
+          </div>
+
+          {firstValue.starter_story_templates.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Starter Templates</div>
+              <div className="action-list">
+                {firstValue.starter_story_templates.map((t) => (
+                  <div className="action-item" key={t.id}>
+                    <div className="action-item__icon">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14,2 14,8 20,8" /></svg>
+                    </div>
+                    <span className="action-item__text">{t.label}</span>
+                    <span className="badge badge--accent">{formatEnumLabel(t.funnel_stage)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {firstValue.next_tasks.length > 0 && (
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Next Steps</div>
+              <div className="action-list">
+                {firstValue.next_tasks.map((t) => (
+                  <div className="action-item" key={t}>
+                    <div className="action-item__icon">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9,11 12,14 22,4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
+                    </div>
+                    <span className="action-item__text">{t}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

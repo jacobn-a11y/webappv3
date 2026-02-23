@@ -6,7 +6,7 @@
  * Non-admin rows are expandable to show account access grants.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   getPermissions,
   grantPermission,
@@ -14,6 +14,8 @@ import {
   type PermissionUser,
   type PermissionAccessGrant,
 } from "../lib/api";
+import { useToast } from "../components/Toast";
+import { formatEnumLabel } from "../lib/format";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -37,31 +39,6 @@ const ROLE_ORDER: Record<string, number> = {
 
 const TOTAL_COLUMNS = PERMISSION_COLUMNS.length + 3; // user + role + perms + expand
 
-// ─── Toast Hook ─────────────────────────────────────────────────────────────
-
-interface Toast {
-  message: string;
-  isError: boolean;
-  id: number;
-}
-
-function useToast() {
-  const [toast, setToast] = useState<Toast | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
-  const idRef = useRef(0);
-
-  const showToast = useCallback((message: string, isError = false) => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    const id = ++idRef.current;
-    setToast({ message, isError, id });
-    timerRef.current = setTimeout(() => {
-      setToast((prev) => (prev?.id === id ? null : prev));
-    }, 2500);
-  }, []);
-
-  return { toast, showToast };
-}
-
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export function AdminPermissionsPage() {
@@ -70,7 +47,7 @@ export function AdminPermissionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedUsers, setExpandedUsers] = useState<Set<string>>(new Set());
   const [loadingCells, setLoadingCells] = useState<Set<string>>(new Set());
-  const { toast, showToast } = useToast();
+  const { showToast } = useToast();
 
   // ── Fetch users ───────────────────────────────────────────────────────
 
@@ -115,7 +92,7 @@ export function AdminPermissionsPage() {
         } else {
           await revokePermission(userId, permissionKey);
         }
-        showToast(isGranting ? "Permission granted" : "Permission revoked");
+        showToast(isGranting ? "Permission granted" : "Permission revoked", "success");
       } catch (err) {
         // Rollback on error
         setUsers((prev) =>
@@ -129,7 +106,7 @@ export function AdminPermissionsPage() {
         );
         showToast(
           err instanceof Error ? err.message : "Failed to update permission",
-          true
+          "error"
         );
       } finally {
         setLoadingCells((prev) => {
@@ -160,16 +137,16 @@ export function AdminPermissionsPage() {
 
   if (loading) {
     return (
-      <div className="admin-perms__page">
-        <header className="admin-perms__header">
-          <h1 className="admin-perms__title">Permissions</h1>
-          <p className="admin-perms__subtitle">
-            Manage user permissions for your organization.
-          </p>
-        </header>
-        <div className="admin-perms__loading" role="status" aria-live="polite">
-          <div className="loading-state__spinner loading-state__spinner--sm" aria-hidden="true" />
-          <span>Loading permissions...</span>
+      <div className="page">
+        <div className="page__header">
+          <div className="page__header-text">
+            <h1 className="page__title">Permissions</h1>
+            <p className="page__subtitle">Manage user permissions for your organization.</p>
+          </div>
+        </div>
+        <div className="state-view" style={{ minHeight: 200 }} role="status" aria-live="polite">
+          <div className="spinner" />
+          <div className="state-view__title">Loading permissions...</div>
         </div>
       </div>
     );
@@ -179,11 +156,13 @@ export function AdminPermissionsPage() {
 
   if (error) {
     return (
-      <div className="admin-perms__page">
-        <header className="admin-perms__header">
-          <h1 className="admin-perms__title">Permissions</h1>
-        </header>
-        <div className="admin-perms__error" role="alert">
+      <div className="page">
+        <div className="page__header">
+          <div className="page__header-text">
+            <h1 className="page__title">Permissions</h1>
+          </div>
+        </div>
+        <div className="alert alert--error" role="alert">
           <p>{error}</p>
           <button
             type="button"
@@ -200,14 +179,16 @@ export function AdminPermissionsPage() {
   // ── Render ────────────────────────────────────────────────────────────
 
   return (
-    <div className="admin-perms__page">
-      <header className="admin-perms__header">
-        <h1 className="admin-perms__title">Permissions</h1>
-        <p className="admin-perms__subtitle">
-          Manage user permissions for your organization. Owners and Admins have
-          all permissions by default.
-        </p>
-      </header>
+    <div className="page">
+      <div className="page__header">
+        <div className="page__header-text">
+          <h1 className="page__title">Permissions</h1>
+          <p className="page__subtitle">
+            Manage user permissions for your organization. Owners and Admins have
+            all permissions by default.
+          </p>
+        </div>
+      </div>
 
       <div className="admin-perms__table-container">
         <table className="admin-perms__table">
@@ -260,19 +241,6 @@ export function AdminPermissionsPage() {
           </tbody>
         </table>
       </div>
-
-      {/* Toast notification */}
-      <div
-        className={
-          "admin-perms__toast" +
-          (toast ? " admin-perms__toast--visible" : "") +
-          (toast?.isError ? " admin-perms__toast--error" : "")
-        }
-        role="status"
-        aria-live="polite"
-      >
-        {toast?.message}
-      </div>
     </div>
   );
 }
@@ -309,7 +277,7 @@ function UserRow({
           <span
             className={`admin-perms__role-badge admin-perms__role-badge--${user.role}`}
           >
-            {user.role}
+            {formatEnumLabel(user.role)}
           </span>
         </td>
         {PERMISSION_COLUMNS.map((col) => {
@@ -334,7 +302,7 @@ function UserRow({
                   disabled={isAdmin || isCellLoading}
                   title={
                     isAdmin
-                      ? `${col.label} (always on for ${user.role})`
+                      ? `${col.label} (always on for ${formatEnumLabel(user.role)})`
                       : `${hasPermission ? "Revoke" : "Grant"} ${col.label}`
                   }
                   onChange={() =>

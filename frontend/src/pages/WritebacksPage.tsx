@@ -6,6 +6,8 @@ import {
   rollbackWriteback,
   type WritebackRequest,
 } from "../lib/api";
+import { formatEnumLabel, badgeClass, formatDate } from "../lib/format";
+import { useToast } from "../components/Toast";
 
 export function WritebacksPage() {
   const [writebacks, setWritebacks] = useState<WritebackRequest[]>([]);
@@ -14,6 +16,7 @@ export function WritebacksPage() {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   const load = async () => {
     setError(null);
@@ -42,79 +45,141 @@ export function WritebacksPage() {
       setAccountId("");
       setTitle("");
       setBody("");
+      showToast("Writeback requested", "success");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to request writeback");
     }
   };
 
+  const pending = writebacks.filter((w) => w.status === "PENDING");
+
   return (
-    <div className="admin-security__page">
-      <h1 className="admin-security__title">CRM Writebacks</h1>
-      {error && <div className="admin-story-context__error">{error}</div>}
-
-      <section className="admin-security__card">
-        <h2>Request Writeback</h2>
-        <div className="admin-security__inline">
-          <input
-            value={accountId}
-            onChange={(e) => setAccountId(e.target.value)}
-            placeholder="Account ID"
-          />
-          <select value={actionType} onChange={(e) => setActionType(e.target.value as typeof actionType)}>
-            <option value="TASK">TASK</option>
-            <option value="NOTE">NOTE</option>
-            <option value="FIELD_UPDATE">FIELD_UPDATE</option>
-            <option value="TIMELINE_EVENT">TIMELINE_EVENT</option>
-          </select>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" />
-          <input value={body} onChange={(e) => setBody(e.target.value)} placeholder="Body" />
-          <button className="btn btn--secondary" onClick={submit}>
-            Request
-          </button>
+    <div className="page">
+      <div className="page__header">
+        <div className="page__header-text">
+          <h1 className="page__title">CRM Writebacks</h1>
+          <p className="page__subtitle">Push updates back to your CRM with approval workflows</p>
         </div>
-      </section>
+      </div>
 
-      <section className="admin-security__card">
-        <h2>Approval Queue</h2>
-        <table className="admin-ops__table">
-          <thead>
-            <tr>
-              <th>Created</th>
-              <th>Status</th>
-              <th>Target</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {writebacks.map((w) => (
-              <tr key={w.id}>
-                <td>{new Date(w.created_at).toLocaleString()}</td>
-                <td>{w.status}</td>
-                <td>{w.target_id}</td>
-                <td>
-                  {w.status === "PENDING" ? (
-                    <>
-                      <button className="btn btn--secondary" onClick={async () => { await reviewWriteback(w.id, { decision: "APPROVE" }); await load(); }}>
-                        Approve
-                      </button>{" "}
-                      <button className="btn btn--secondary" onClick={async () => { await reviewWriteback(w.id, { decision: "REJECT" }); await load(); }}>
-                        Reject
-                      </button>
-                    </>
-                  ) : w.status === "COMPLETED" ? (
-                    <button className="btn btn--secondary" onClick={async () => { await rollbackWriteback(w.id); await load(); }}>
-                      Rollback
-                    </button>
-                  ) : (
-                    "-"
-                  )}
-                </td>
+      {error && <div className="alert alert--error">{error}</div>}
+
+      {/* Request Form */}
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div className="card__title">Request Writeback</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="form-group">
+            <label className="form-group__label">Account ID</label>
+            <input className="form-input" value={accountId} onChange={(e) => setAccountId(e.target.value)} placeholder="acc_..." />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Action Type</label>
+            <select className="form-select" value={actionType} onChange={(e) => setActionType(e.target.value as typeof actionType)}>
+              <option value="TASK">Task</option>
+              <option value="NOTE">Note</option>
+              <option value="FIELD_UPDATE">Field Update</option>
+              <option value="TIMELINE_EVENT">Timeline Event</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Title</label>
+            <input className="form-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Optional title" />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Body</label>
+            <input className="form-input" value={body} onChange={(e) => setBody(e.target.value)} placeholder="Optional description" />
+          </div>
+        </div>
+        <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+          <button className="btn btn--primary" onClick={submit}>Request Writeback</button>
+        </div>
+      </div>
+
+      {/* Pending Queue */}
+      {pending.length > 0 && (
+        <div className="card card--elevated">
+          <div className="card__header">
+            <div className="card__title">Pending Approval</div>
+            <span className="badge badge--draft">{pending.length} pending</span>
+          </div>
+          <div className="table-container" style={{ border: "none", borderRadius: 0 }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Target</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pending.map((w) => (
+                  <tr key={w.id}>
+                    <td>{formatDate(w.created_at)}</td>
+                    <td><code style={{ fontSize: 12 }}>{w.target_id}</code></td>
+                    <td><span className={badgeClass(w.status)}>{formatEnumLabel(w.status)}</span></td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="btn btn--primary btn--sm" onClick={async () => { await reviewWriteback(w.id, { decision: "APPROVE" }); showToast("Approved", "success"); await load(); }}>
+                          Approve
+                        </button>
+                        <button className="btn btn--ghost btn--sm" style={{ color: "var(--color-error)" }} onClick={async () => { await reviewWriteback(w.id, { decision: "REJECT" }); showToast("Rejected", "info"); await load(); }}>
+                          Reject
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* All Writebacks */}
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div className="card__title">All Writebacks</div>
+          <span className="badge badge--accent">{writebacks.length} total</span>
+        </div>
+        <div className="table-container" style={{ border: "none", borderRadius: 0 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Created</th>
+                <th>Status</th>
+                <th>Target</th>
+                <th>Action</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+            </thead>
+            <tbody>
+              {writebacks.length === 0 ? (
+                <tr><td colSpan={4} className="data-table__empty">No writebacks yet</td></tr>
+              ) : (
+                writebacks.map((w) => (
+                  <tr key={w.id}>
+                    <td>{formatDate(w.created_at)}</td>
+                    <td><span className={badgeClass(w.status)}>{formatEnumLabel(w.status)}</span></td>
+                    <td><code style={{ fontSize: 12 }}>{w.target_id}</code></td>
+                    <td>
+                      {w.status === "COMPLETED" ? (
+                        <button className="btn btn--ghost btn--sm" onClick={async () => { await rollbackWriteback(w.id); showToast("Rolled back", "info"); await load(); }}>
+                          Rollback
+                        </button>
+                      ) : (
+                        <span style={{ color: "var(--color-text-muted)" }}>-</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

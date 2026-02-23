@@ -10,6 +10,7 @@ import {
   STORY_OUTLINE_LABELS,
   STORY_TYPE_INPUT_LABELS,
 } from "../types/taxonomy";
+import { useToast } from "../components/Toast";
 
 const EMPTY_SETTINGS: StoryContextSettings = {
   company_overview: "",
@@ -39,7 +40,7 @@ export function AdminStoryContextPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   const [productsCsv, setProductsCsv] = useState("");
   const [personasCsv, setPersonasCsv] = useState("");
@@ -70,7 +71,6 @@ export function AdminStoryContextPage() {
   const save = async () => {
     setSaving(true);
     setError(null);
-    setNotice(null);
     const payload: StoryContextSettings = {
       ...settings,
       products: splitCsv(productsCsv),
@@ -83,7 +83,7 @@ export function AdminStoryContextPage() {
     };
     try {
       await updateStoryContextSettings(payload);
-      setNotice("Story context saved.");
+      showToast("Story context saved", "success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings");
     } finally {
@@ -92,157 +92,170 @@ export function AdminStoryContextPage() {
   };
 
   if (loading) {
-    return <div className="admin-story-context__page">Loading story context...</div>;
+    return <div className="state-view" role="status" aria-live="polite"><div className="spinner" /><div className="state-view__title">Loading story context...</div></div>;
   }
 
   return (
-    <div className="admin-story-context__page">
-      <header>
-        <h1 className="admin-story-context__title">Story Context</h1>
-        <p className="admin-story-context__subtitle">
-          Configure company/product context and default prompt settings used by story generation.
-        </p>
-      </header>
+    <div className="page">
+      <div className="page__header">
+        <div className="page__header-text">
+          <h1 className="page__title">Story Context</h1>
+          <p className="page__subtitle">Configure company/product context and default prompt settings used by story generation.</p>
+        </div>
+      </div>
 
-      {error && <div className="admin-story-context__error">{error}</div>}
-      {notice && <div className="admin-story-context__notice">{notice}</div>}
+      {error && <div className="alert alert--error" role="alert">{error}</div>}
 
-      <section className="admin-story-context__card">
-        <h2>Company Narrative Context</h2>
-        <label>
-          Company Overview
-          <textarea
-            value={settings.company_overview}
-            onChange={(e) =>
-              setSettings((p) => ({ ...p, company_overview: e.target.value }))
-            }
-            rows={5}
-          />
-        </label>
-        <label>
-          Products (comma-separated)
-          <input value={productsCsv} onChange={(e) => setProductsCsv(e.target.value)} />
-        </label>
-        <label>
-          Target Personas (comma-separated)
-          <input value={personasCsv} onChange={(e) => setPersonasCsv(e.target.value)} />
-        </label>
-        <label>
-          Target Industries (comma-separated)
-          <input value={industriesCsv} onChange={(e) => setIndustriesCsv(e.target.value)} />
-        </label>
-        <label>
-          Differentiators (comma-separated)
-          <input
-            value={differentiatorsCsv}
-            onChange={(e) => setDifferentiatorsCsv(e.target.value)}
-          />
-        </label>
-        <label>
-          Proof Points (comma-separated)
-          <input value={proofPointsCsv} onChange={(e) => setProofPointsCsv(e.target.value)} />
-        </label>
-        <label>
-          Banned Claims (comma-separated)
-          <input value={bannedClaimsCsv} onChange={(e) => setBannedClaimsCsv(e.target.value)} />
-        </label>
-        <label>
-          Approved Terminology (comma-separated)
-          <input value={terminologyCsv} onChange={(e) => setTerminologyCsv(e.target.value)} />
-        </label>
-        <label>
-          Writing Style Guide
-          <textarea
-            value={settings.writing_style_guide}
-            onChange={(e) =>
-              setSettings((p) => ({ ...p, writing_style_guide: e.target.value }))
-            }
-            rows={4}
-          />
-        </label>
-      </section>
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div className="card__title">Company Narrative Context</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="form-group">
+            <label className="form-group__label">Company Overview</label>
+            <textarea
+              className="form-textarea"
+              value={settings.company_overview}
+              onChange={(e) =>
+                setSettings((p) => ({ ...p, company_overview: e.target.value }))
+              }
+              rows={5}
+              placeholder="Describe your company, mission, and value proposition..."
+            />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="form-group">
+              <label className="form-group__label">Products</label>
+              <input className="form-input" value={productsCsv} onChange={(e) => setProductsCsv(e.target.value)} placeholder="Product A, Product B, ..." />
+              <div className="form-group__hint">Comma-separated list</div>
+            </div>
+            <div className="form-group">
+              <label className="form-group__label">Target Personas</label>
+              <input className="form-input" value={personasCsv} onChange={(e) => setPersonasCsv(e.target.value)} placeholder="VP Sales, CRO, ..." />
+              <div className="form-group__hint">Comma-separated list</div>
+            </div>
+            <div className="form-group">
+              <label className="form-group__label">Target Industries</label>
+              <input className="form-input" value={industriesCsv} onChange={(e) => setIndustriesCsv(e.target.value)} placeholder="SaaS, Healthcare, ..." />
+              <div className="form-group__hint">Comma-separated list</div>
+            </div>
+            <div className="form-group">
+              <label className="form-group__label">Differentiators</label>
+              <input className="form-input" value={differentiatorsCsv} onChange={(e) => setDifferentiatorsCsv(e.target.value)} placeholder="AI-powered, Real-time, ..." />
+              <div className="form-group__hint">Comma-separated list</div>
+            </div>
+            <div className="form-group">
+              <label className="form-group__label">Proof Points</label>
+              <input className="form-input" value={proofPointsCsv} onChange={(e) => setProofPointsCsv(e.target.value)} placeholder="50% faster onboarding, ..." />
+              <div className="form-group__hint">Comma-separated list</div>
+            </div>
+            <div className="form-group">
+              <label className="form-group__label">Approved Terminology</label>
+              <input className="form-input" value={terminologyCsv} onChange={(e) => setTerminologyCsv(e.target.value)} placeholder="Customer success, Revenue ops, ..." />
+              <div className="form-group__hint">Comma-separated list</div>
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Banned Claims</label>
+            <input className="form-input" value={bannedClaimsCsv} onChange={(e) => setBannedClaimsCsv(e.target.value)} placeholder="Guaranteed ROI, #1 in market, ..." />
+            <div className="form-group__hint">Claims that should never appear in generated stories</div>
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Writing Style Guide</label>
+            <textarea
+              className="form-textarea"
+              value={settings.writing_style_guide}
+              onChange={(e) =>
+                setSettings((p) => ({ ...p, writing_style_guide: e.target.value }))
+              }
+              rows={4}
+              placeholder="Tone guidelines, brand voice notes, style preferences..."
+            />
+          </div>
+        </div>
+      </div>
 
-      <section className="admin-story-context__card">
-        <h2>Default Generation Settings</h2>
-        <label>
-          Default Story Length
-          <select
-            value={settings.default_story_length}
-            onChange={(e) =>
-              setSettings((p) => ({
-                ...p,
-                default_story_length: e.target.value as StoryContextSettings["default_story_length"],
-              }))
-            }
-          >
-            {Object.entries(STORY_LENGTH_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div className="card__title">Default Generation Settings</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="form-group">
+            <label className="form-group__label">Default Story Length</label>
+            <select
+              className="form-select"
+              value={settings.default_story_length}
+              onChange={(e) =>
+                setSettings((p) => ({
+                  ...p,
+                  default_story_length: e.target.value as StoryContextSettings["default_story_length"],
+                }))
+              }
+            >
+              {Object.entries(STORY_LENGTH_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
 
-        <label>
-          Default Story Outline
-          <select
-            value={settings.default_story_outline}
-            onChange={(e) =>
-              setSettings((p) => ({
-                ...p,
-                default_story_outline: e.target.value as StoryContextSettings["default_story_outline"],
-              }))
-            }
-          >
-            {Object.entries(STORY_OUTLINE_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+          <div className="form-group">
+            <label className="form-group__label">Default Story Outline</label>
+            <select
+              className="form-select"
+              value={settings.default_story_outline}
+              onChange={(e) =>
+                setSettings((p) => ({
+                  ...p,
+                  default_story_outline: e.target.value as StoryContextSettings["default_story_outline"],
+                }))
+              }
+            >
+              {Object.entries(STORY_OUTLINE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
 
-        <label>
-          Default Story Format
-          <select
-            value={settings.default_story_format ?? ""}
-            onChange={(e) =>
-              setSettings((p) => ({
-                ...p,
-                default_story_format: (e.target.value || null) as StoryContextSettings["default_story_format"],
-              }))
-            }
-          >
-            <option value="">Auto</option>
-            {Object.entries(STORY_FORMAT_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+          <div className="form-group">
+            <label className="form-group__label">Default Story Format</label>
+            <select
+              className="form-select"
+              value={settings.default_story_format ?? ""}
+              onChange={(e) =>
+                setSettings((p) => ({
+                  ...p,
+                  default_story_format: (e.target.value || null) as StoryContextSettings["default_story_format"],
+                }))
+              }
+            >
+              <option value="">Auto</option>
+              {Object.entries(STORY_FORMAT_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
 
-        <label>
-          Default Story Type
-          <select
-            value={settings.default_story_type}
-            onChange={(e) =>
-              setSettings((p) => ({
-                ...p,
-                default_story_type: e.target.value as StoryContextSettings["default_story_type"],
-              }))
-            }
-          >
-            {Object.entries(STORY_TYPE_INPUT_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </section>
+          <div className="form-group">
+            <label className="form-group__label">Default Story Type</label>
+            <select
+              className="form-select"
+              value={settings.default_story_type}
+              onChange={(e) =>
+                setSettings((p) => ({
+                  ...p,
+                  default_story_type: e.target.value as StoryContextSettings["default_story_type"],
+                }))
+              }
+            >
+              {Object.entries(STORY_TYPE_INPUT_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
 
-      <div className="admin-story-context__actions">
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button className="btn btn--primary" onClick={save} disabled={saving}>
           {saving ? "Saving..." : "Save Settings"}
         </button>

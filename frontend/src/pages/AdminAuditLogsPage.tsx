@@ -8,6 +8,7 @@ import {
   type AuditLogEntry,
   type AuditResourceDrilldown,
 } from "../lib/api";
+import { formatEnumLabel, badgeClass } from "../lib/format";
 
 export function AdminAuditLogsPage() {
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
@@ -100,127 +101,128 @@ export function AdminAuditLogsPage() {
   };
 
   return (
-    <div className="admin-audit__page">
-      <header className="admin-audit__header">
-        <h1 className="admin-audit__title">Audit Logs</h1>
-        <div className="admin-audit__filters">
-          <input
-            className="admin-audit__input"
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            placeholder="Category"
-            aria-label="Filter by category"
-          />
-          <input
-            className="admin-audit__input"
-            value={action}
-            onChange={(e) => setAction(e.target.value)}
-            placeholder="Action"
-            aria-label="Filter by action"
-          />
-          <input
-            className="admin-audit__input"
-            value={severity}
-            onChange={(e) => setSeverity(e.target.value)}
-            placeholder="Severity"
-            aria-label="Filter by severity"
-          />
-          <input
-            className="admin-audit__input"
-            value={actorUserId}
-            onChange={(e) => setActorUserId(e.target.value)}
-            placeholder="Actor User ID"
-            aria-label="Filter by actor user ID"
-          />
-          <input
-            className="admin-audit__input"
-            value={targetType}
-            onChange={(e) => setTargetType(e.target.value)}
-            placeholder="Target Type"
-            aria-label="Filter by target type"
-          />
-          <input
-            className="admin-audit__input"
-            value={targetId}
-            onChange={(e) => setTargetId(e.target.value)}
-            placeholder="Target ID"
-            aria-label="Filter by target ID"
-          />
-          <button className="btn btn--secondary" onClick={runSearch}>
-            Apply
-          </button>
-          <button className="btn btn--secondary" onClick={() => onExport("csv")}>
-            Export CSV
-          </button>
-          <button className="btn btn--secondary" onClick={() => onExport("json")}>
-            Export JSON
-          </button>
+    <div className="page">
+      <div className="page__header">
+        <div className="page__header-text">
+          <h1 className="page__title">Audit Logs</h1>
+          <p className="page__subtitle">Track and investigate all system events and user actions</p>
         </div>
-      </header>
+        <div className="page__actions">
+          <button className="btn btn--secondary" onClick={() => onExport("csv")}>Export CSV</button>
+          <button className="btn btn--secondary" onClick={() => onExport("json")}>Export JSON</button>
+        </div>
+      </div>
 
-      {loading && <div role="status" aria-live="polite">Loading audit logs...</div>}
-      {error && <div className="admin-story-context__error" role="alert">{error}</div>}
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div className="card__title">Filters</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+          <div className="form-group">
+            <label className="form-group__label">Category</label>
+            <input className="form-input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. AUTH" aria-label="Filter by category" />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Action</label>
+            <input className="form-input" value={action} onChange={(e) => setAction(e.target.value)} placeholder="e.g. LOGIN" aria-label="Filter by action" />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Severity</label>
+            <input className="form-input" value={severity} onChange={(e) => setSeverity(e.target.value)} placeholder="e.g. HIGH" aria-label="Filter by severity" />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Actor User ID</label>
+            <input className="form-input" value={actorUserId} onChange={(e) => setActorUserId(e.target.value)} placeholder="usr_..." aria-label="Filter by actor user ID" />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Target Type</label>
+            <input className="form-input" value={targetType} onChange={(e) => setTargetType(e.target.value)} placeholder="e.g. PAGE" aria-label="Filter by target type" />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Target ID</label>
+            <input className="form-input" value={targetId} onChange={(e) => setTargetId(e.target.value)} placeholder="Target ID" aria-label="Filter by target ID" />
+          </div>
+        </div>
+        <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+          <button className="btn btn--primary" onClick={runSearch}>Apply Filters</button>
+        </div>
+      </div>
 
-      {!loading && !error && (
-        <div className="admin-audit__table-wrap">
-          <table className="admin-audit__table">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Category</th>
-                <th>Action</th>
-                <th>Actor</th>
-                <th>Target</th>
-                <th>Severity</th>
-                <th>Schema</th>
-                <th>Metadata</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.map((log) => (
-                <tr key={log.id}>
-                  <td>{new Date(log.created_at).toLocaleString()}</td>
-                  <td>{log.category}</td>
-                  <td>{log.action}</td>
-                  <td>
-                    {log.actor_user_id ? (
-                      <button
-                        className="admin-audit__link-btn"
-                        onClick={() => openActorDrilldown(log.actor_user_id!)}
-                      >
-                        {log.actor_user_id}
-                      </button>
-                    ) : (
-                      "system"
-                    )}
-                  </td>
-                  <td>
-                    {log.target_type && log.target_id ? (
-                      <button
-                        className="admin-audit__link-btn"
-                        onClick={() => openResourceDrilldown(log.target_type!, log.target_id!)}
-                      >
-                        {log.target_type}:{log.target_id}
-                      </button>
-                    ) : (
-                      "-"
-                    )}
-                  </td>
-                  <td>{log.severity}</td>
-                  <td>{log.schema_version}</td>
-                  <td>
-                    <pre className="admin-audit__meta">
-                      {JSON.stringify(log.metadata ?? {}, null, 2)}
-                    </pre>
-                  </td>
+      {error && <div className="alert alert--error" role="alert">{error}</div>}
+
+      {loading ? (
+        <div className="state-view" style={{ minHeight: 200 }} role="status" aria-live="polite">
+          <div className="spinner" />
+          <div className="state-view__title">Loading audit logs...</div>
+        </div>
+      ) : (
+        <div className="card card--elevated">
+          <div className="table-container" style={{ border: "none", borderRadius: 0 }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Category</th>
+                  <th>Action</th>
+                  <th>Actor</th>
+                  <th>Target</th>
+                  <th>Severity</th>
+                  <th>Schema</th>
+                  <th>Metadata</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="admin-audit__footer">
-            <div>{logs.length} events loaded</div>
+              </thead>
+              <tbody>
+                {logs.length === 0 ? (
+                  <tr><td colSpan={8} className="data-table__empty">No audit log entries found</td></tr>
+                ) : (
+                  logs.map((log) => (
+                    <tr key={log.id}>
+                      <td style={{ whiteSpace: "nowrap" }}>{new Date(log.created_at).toLocaleString()}</td>
+                      <td><span className="badge badge--info">{formatEnumLabel(log.category)}</span></td>
+                      <td>{formatEnumLabel(log.action)}</td>
+                      <td>
+                        {log.actor_user_id ? (
+                          <button
+                            className="btn btn--ghost btn--sm"
+                            onClick={() => openActorDrilldown(log.actor_user_id!)}
+                            style={{ textDecoration: "underline", padding: "2px 4px" }}
+                          >
+                            {log.actor_user_id}
+                          </button>
+                        ) : (
+                          <span style={{ color: "var(--color-text-muted)" }}>system</span>
+                        )}
+                      </td>
+                      <td>
+                        {log.target_type && log.target_id ? (
+                          <button
+                            className="btn btn--ghost btn--sm"
+                            onClick={() => openResourceDrilldown(log.target_type!, log.target_id!)}
+                            style={{ textDecoration: "underline", padding: "2px 4px" }}
+                          >
+                            {log.target_type}:{log.target_id}
+                          </button>
+                        ) : (
+                          <span style={{ color: "var(--color-text-muted)" }}>-</span>
+                        )}
+                      </td>
+                      <td><span className={badgeClass(log.severity)}>{formatEnumLabel(log.severity)}</span></td>
+                      <td>{log.schema_version}</td>
+                      <td>
+                        <pre style={{ margin: 0, fontSize: 11, maxWidth: 300, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                          {JSON.stringify(log.metadata ?? {}, null, 2)}
+                        </pre>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderTop: "1px solid var(--color-border)" }}>
+            <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>{logs.length} events loaded</span>
             <button
-              className="btn btn--secondary"
+              className="btn btn--secondary btn--sm"
               disabled={!hasMore || loading}
               onClick={loadMore}
             >
@@ -231,25 +233,55 @@ export function AdminAuditLogsPage() {
       )}
 
       {actorDrilldown && (
-        <section className="admin-audit__drilldown">
-          <h2>Actor Drilldown</h2>
-          <div>
-            {actorDrilldown.actor.name ?? actorDrilldown.actor.id} (
-            {actorDrilldown.actor.email ?? "unknown"})
+        <div className="card card--elevated">
+          <div className="card__header">
+            <div>
+              <div className="card__title">Actor Drilldown</div>
+              <div className="card__subtitle">{actorDrilldown.actor.name ?? actorDrilldown.actor.id}</div>
+            </div>
+            <button className="btn btn--ghost btn--sm" onClick={() => setActorDrilldown(null)}>Close</button>
           </div>
-          <div>Total Events: {actorDrilldown.total_events}</div>
-        </section>
+          <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
+            <div className="kpi-card">
+              <div className="kpi-card__content">
+                <div className="kpi-card__label">Email</div>
+                <div className="kpi-card__value" style={{ fontSize: 14 }}>{actorDrilldown.actor.email ?? "unknown"}</div>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="kpi-card__content">
+                <div className="kpi-card__label">Total Events</div>
+                <div className="kpi-card__value">{actorDrilldown.total_events}</div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {resourceDrilldown && (
-        <section className="admin-audit__drilldown">
-          <h2>Resource Drilldown</h2>
-          <div>
-            {resourceDrilldown.resource.target_type}:
-            {resourceDrilldown.resource.target_id}
+        <div className="card card--elevated">
+          <div className="card__header">
+            <div>
+              <div className="card__title">Resource Drilldown</div>
+              <div className="card__subtitle">{resourceDrilldown.resource.target_type}:{resourceDrilldown.resource.target_id}</div>
+            </div>
+            <button className="btn btn--ghost btn--sm" onClick={() => setResourceDrilldown(null)}>Close</button>
           </div>
-          <div>Total Events: {resourceDrilldown.total_events}</div>
-        </section>
+          <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
+            <div className="kpi-card">
+              <div className="kpi-card__content">
+                <div className="kpi-card__label">Resource</div>
+                <div className="kpi-card__value" style={{ fontSize: 14 }}>{resourceDrilldown.resource.target_type}:{resourceDrilldown.resource.target_id}</div>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="kpi-card__content">
+                <div className="kpi-card__label">Total Events</div>
+                <div className="kpi-card__value">{resourceDrilldown.total_events}</div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

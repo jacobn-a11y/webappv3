@@ -9,6 +9,8 @@ import {
   type SharedAsset,
   type TeamWorkspace,
 } from "../lib/api";
+import { formatEnumLabel, formatDate } from "../lib/format";
+import { useToast } from "../components/Toast";
 
 export function WorkspacesPage() {
   const [workspaces, setWorkspaces] = useState<TeamWorkspace[]>([]);
@@ -21,6 +23,7 @@ export function WorkspacesPage() {
   const [assetVisibility, setAssetVisibility] = useState<"PRIVATE" | "TEAM" | "ORG">("TEAM");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   const load = async () => {
     setLoading(true);
@@ -44,12 +47,9 @@ export function WorkspacesPage() {
     if (!name.trim()) return;
     setError(null);
     try {
-      await createTeamWorkspace({
-        name: name.trim(),
-        team,
-        visibility,
-      });
+      await createTeamWorkspace({ name: name.trim(), team, visibility });
       setName("");
+      showToast("Workspace created", "success");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create workspace");
@@ -60,6 +60,7 @@ export function WorkspacesPage() {
     setError(null);
     try {
       await deleteTeamWorkspace(id);
+      showToast("Workspace deleted", "info");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete workspace");
@@ -70,12 +71,9 @@ export function WorkspacesPage() {
     if (!assetTitle.trim()) return;
     setError(null);
     try {
-      await createSharedAsset({
-        asset_type: assetType,
-        title: assetTitle.trim(),
-        visibility: assetVisibility,
-      });
+      await createSharedAsset({ asset_type: assetType, title: assetTitle.trim(), visibility: assetVisibility });
       setAssetTitle("");
+      showToast("Asset created", "success");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create shared asset");
@@ -86,6 +84,7 @@ export function WorkspacesPage() {
     setError(null);
     try {
       await deleteSharedAsset(id);
+      showToast("Asset deleted", "info");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete shared asset");
@@ -93,136 +92,154 @@ export function WorkspacesPage() {
   };
 
   return (
-    <div className="admin-security__page">
-      <h1 className="admin-security__title">Team Workspaces</h1>
-      {error && <div className="admin-story-context__error">{error}</div>}
-
-      <section className="admin-security__card">
-        <h2>Create Workspace</h2>
-        <div className="admin-security__inline">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Workspace name"
-          />
-          <select value={team} onChange={(e) => setTeam(e.target.value as typeof team)}>
-            <option value="REVOPS">REVOPS</option>
-            <option value="MARKETING">MARKETING</option>
-            <option value="SALES">SALES</option>
-            <option value="CS">CS</option>
-          </select>
-          <select
-            value={visibility}
-            onChange={(e) => setVisibility(e.target.value as typeof visibility)}
-          >
-            <option value="PRIVATE">PRIVATE</option>
-            <option value="TEAM">TEAM</option>
-            <option value="ORG">ORG</option>
-          </select>
-          <button className="btn btn--secondary" onClick={createWorkspace}>
-            Create
-          </button>
+    <div className="page">
+      <div className="page__header">
+        <div className="page__header-text">
+          <h1 className="page__title">Team Workspaces</h1>
+          <p className="page__subtitle">Manage team workspaces and shared asset library</p>
         </div>
-      </section>
+      </div>
 
-      <section className="admin-security__card">
-        <h2>Saved Views / Workspaces</h2>
+      {error && <div className="alert alert--error">{error}</div>}
+
+      {/* Create Workspace */}
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div className="card__title">Create Workspace</div>
+        </div>
+        <div className="form-row">
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="form-group__label">Name</label>
+            <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Workspace name" />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Team</label>
+            <select className="form-select" value={team} onChange={(e) => setTeam(e.target.value as typeof team)}>
+              <option value="REVOPS">RevOps</option>
+              <option value="MARKETING">Marketing</option>
+              <option value="SALES">Sales</option>
+              <option value="CS">CS</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Visibility</label>
+            <select className="form-select" value={visibility} onChange={(e) => setVisibility(e.target.value as typeof visibility)}>
+              <option value="PRIVATE">Private</option>
+              <option value="TEAM">Team</option>
+              <option value="ORG">Organization</option>
+            </select>
+          </div>
+          <button className="btn btn--primary" onClick={createWorkspace}>Create</button>
+        </div>
+      </div>
+
+      {/* Workspaces Table */}
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div className="card__title">Workspaces</div>
+        </div>
         {loading ? (
-          <div>Loading workspaces...</div>
+          <div className="state-view" style={{ minHeight: 120 }}>
+            <div className="spinner spinner--sm" />
+          </div>
         ) : (
-          <table className="admin-ops__table">
+          <div className="table-container" style={{ border: "none", borderRadius: 0 }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Team</th>
+                  <th>Visibility</th>
+                  <th>Updated</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workspaces.length === 0 ? (
+                  <tr><td colSpan={5} className="data-table__empty">No workspaces yet</td></tr>
+                ) : (
+                  workspaces.map((w) => (
+                    <tr key={w.id}>
+                      <td><strong>{w.name}</strong></td>
+                      <td><span className="badge badge--accent">{formatEnumLabel(w.team)}</span></td>
+                      <td><span className="badge badge--archived">{formatEnumLabel(w.visibility)}</span></td>
+                      <td>{formatDate(w.updated_at)}</td>
+                      <td>
+                        <button className="btn btn--ghost btn--sm" onClick={() => removeWorkspace(w.id)}>Delete</button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Shared Assets */}
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div>
+            <div className="card__title">Shared Asset Library</div>
+            <div className="card__subtitle">Collaborate on stories, pages, reports, and more</div>
+          </div>
+        </div>
+        <div className="form-row" style={{ marginBottom: 16 }}>
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="form-group__label">Title</label>
+            <input className="form-input" value={assetTitle} onChange={(e) => setAssetTitle(e.target.value)} placeholder="Asset title" />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Type</label>
+            <select className="form-select" value={assetType} onChange={(e) => setAssetType(e.target.value as typeof assetType)}>
+              <option value="STORY">Story</option>
+              <option value="PAGE">Page</option>
+              <option value="REPORT">Report</option>
+              <option value="PLAYBOOK">Playbook</option>
+              <option value="TEMPLATE">Template</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Visibility</label>
+            <select className="form-select" value={assetVisibility} onChange={(e) => setAssetVisibility(e.target.value as typeof assetVisibility)}>
+              <option value="PRIVATE">Private</option>
+              <option value="TEAM">Team</option>
+              <option value="ORG">Organization</option>
+            </select>
+          </div>
+          <button className="btn btn--primary" onClick={createAsset}>Add Asset</button>
+        </div>
+        <div className="table-container" style={{ border: "none", borderRadius: 0 }}>
+          <table className="data-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Team</th>
+                <th>Title</th>
+                <th>Type</th>
                 <th>Visibility</th>
                 <th>Updated</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {workspaces.map((w) => (
-                <tr key={w.id}>
-                  <td>{w.name}</td>
-                  <td>{w.team}</td>
-                  <td>{w.visibility}</td>
-                  <td>{new Date(w.updated_at).toLocaleString()}</td>
-                  <td>
-                    <button
-                      className="btn btn--secondary"
-                      onClick={() => removeWorkspace(w.id)}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {assets.length === 0 ? (
+                <tr><td colSpan={5} className="data-table__empty">No shared assets yet</td></tr>
+              ) : (
+                assets.map((a) => (
+                  <tr key={a.id}>
+                    <td><strong>{a.title}</strong></td>
+                    <td><span className="badge badge--accent">{formatEnumLabel(a.asset_type)}</span></td>
+                    <td><span className="badge badge--archived">{formatEnumLabel(a.visibility)}</span></td>
+                    <td>{formatDate(a.updated_at)}</td>
+                    <td>
+                      <button className="btn btn--ghost btn--sm" onClick={() => removeAsset(a.id)}>Delete</button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
-        )}
-      </section>
-
-      <section className="admin-security__card">
-        <h2>Shared Asset Library</h2>
-        <div className="admin-security__inline">
-          <input
-            value={assetTitle}
-            onChange={(e) => setAssetTitle(e.target.value)}
-            placeholder="Asset title"
-          />
-          <select
-            value={assetType}
-            onChange={(e) =>
-              setAssetType(
-                e.target.value as "STORY" | "PAGE" | "REPORT" | "PLAYBOOK" | "TEMPLATE"
-              )
-            }
-          >
-            <option value="STORY">STORY</option>
-            <option value="PAGE">PAGE</option>
-            <option value="REPORT">REPORT</option>
-            <option value="PLAYBOOK">PLAYBOOK</option>
-            <option value="TEMPLATE">TEMPLATE</option>
-          </select>
-          <select
-            value={assetVisibility}
-            onChange={(e) => setAssetVisibility(e.target.value as "PRIVATE" | "TEAM" | "ORG")}
-          >
-            <option value="PRIVATE">PRIVATE</option>
-            <option value="TEAM">TEAM</option>
-            <option value="ORG">ORG</option>
-          </select>
-          <button className="btn btn--secondary" onClick={createAsset}>
-            Add Asset
-          </button>
         </div>
-        <table className="admin-ops__table">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Type</th>
-              <th>Visibility</th>
-              <th>Updated</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {assets.map((a) => (
-              <tr key={a.id}>
-                <td>{a.title}</td>
-                <td>{a.asset_type}</td>
-                <td>{a.visibility}</td>
-                <td>{new Date(a.updated_at).toLocaleString()}</td>
-                <td>
-                  <button className="btn btn--secondary" onClick={() => removeAsset(a.id)}>
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+      </div>
     </div>
   );
 }
