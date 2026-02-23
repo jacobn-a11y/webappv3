@@ -241,10 +241,11 @@ export function AdminDataGovernancePage() {
       {error && <div className="alert alert--error">{error}</div>}
       {notice && <div className="alert alert--success">{notice}</div>}
 
-      <section className="card card--elevated">
+      <section className="card card--elevated form-container">
         <label className="form-group">
           Data retention (days)
           <input
+            className="form-input"
             type="number"
             min={30}
             max={3650}
@@ -258,6 +259,7 @@ export function AdminDataGovernancePage() {
         <label className="form-group">
           Audit log retention (days)
           <input
+            className="form-input"
             type="number"
             min={30}
             max={3650}
@@ -274,6 +276,7 @@ export function AdminDataGovernancePage() {
         <label className="form-group">
           RTO target (minutes)
           <input
+            className="form-input"
             type="number"
             min={5}
             max={60 * 24 * 14}
@@ -290,6 +293,7 @@ export function AdminDataGovernancePage() {
         <label className="form-group">
           RPO target (minutes)
           <input
+            className="form-input"
             type="number"
             min={5}
             max={60 * 24 * 14}
@@ -305,6 +309,7 @@ export function AdminDataGovernancePage() {
 
         <label className="form-row">
           <input
+            className="form-checkbox"
             type="checkbox"
             checked={policy.legal_hold_enabled}
             onChange={(e) =>
@@ -316,6 +321,7 @@ export function AdminDataGovernancePage() {
 
         <label className="form-row">
           <input
+            className="form-checkbox"
             type="checkbox"
             checked={policy.pii_export_enabled}
             onChange={(e) =>
@@ -327,6 +333,7 @@ export function AdminDataGovernancePage() {
 
         <label className="form-row">
           <input
+            className="form-checkbox"
             type="checkbox"
             checked={policy.allow_named_story_exports}
             onChange={(e) =>
@@ -341,6 +348,7 @@ export function AdminDataGovernancePage() {
 
         <label className="form-row">
           <input
+            className="form-checkbox"
             type="checkbox"
             checked={policy.deletion_requires_approval}
             onChange={(e) =>
@@ -363,6 +371,7 @@ export function AdminDataGovernancePage() {
 
         <label className="form-row">
           <input
+            className="form-checkbox"
             type="checkbox"
             checked={artifactPolicy.approval_chain_enabled}
             onChange={(e) =>
@@ -377,6 +386,7 @@ export function AdminDataGovernancePage() {
 
         <label className="form-row">
           <input
+            className="form-checkbox"
             type="checkbox"
             checked={artifactPolicy.require_provenance}
             onChange={(e) =>
@@ -392,6 +402,7 @@ export function AdminDataGovernancePage() {
         <label className="form-group">
           Max expiration (days, optional)
           <input
+            className="form-input"
             type="number"
             min={1}
             max={3650}
@@ -432,6 +443,7 @@ export function AdminDataGovernancePage() {
         {artifactPolicy.steps.map((step, idx) => (
           <div key={`${step.step_order}-${idx}`} className="form-row">
             <input
+              className="form-input"
               type="number"
               min={1}
               value={step.step_order}
@@ -446,6 +458,7 @@ export function AdminDataGovernancePage() {
               placeholder="Order"
             />
             <input
+              className="form-input"
               type="number"
               min={1}
               value={step.min_approvals}
@@ -460,6 +473,7 @@ export function AdminDataGovernancePage() {
               placeholder="Min approvals"
             />
             <select
+              className="form-select"
               value={step.required_user_role ?? ""}
               onChange={(e) =>
                 setArtifactPolicy((p) => ({
@@ -484,6 +498,7 @@ export function AdminDataGovernancePage() {
               <option value="VIEWER">VIEWER</option>
             </select>
             <input
+              className="form-input"
               value={step.required_role_profile_key ?? ""}
               onChange={(e) =>
                 setArtifactPolicy((p) => ({
@@ -501,6 +516,7 @@ export function AdminDataGovernancePage() {
               placeholder="Role profile key (optional)"
             />
             <select
+              className="form-select"
               value={step.approver_scope_type ?? "ROLE_PROFILE"}
               onChange={(e) =>
                 setArtifactPolicy((p) => ({
@@ -528,6 +544,7 @@ export function AdminDataGovernancePage() {
               <option value="SELF">SELF</option>
             </select>
             <input
+              className="form-input"
               value={step.approver_scope_value ?? ""}
               onChange={(e) =>
                 setArtifactPolicy((p) => ({
@@ -546,6 +563,7 @@ export function AdminDataGovernancePage() {
             />
             <label className="form-row">
               <input
+                className="form-checkbox"
                 type="checkbox"
                 checked={step.enabled}
                 onChange={(e) =>
@@ -561,6 +579,7 @@ export function AdminDataGovernancePage() {
             </label>
             <label className="form-row">
               <input
+                className="form-checkbox"
                 type="checkbox"
                 checked={step.allow_self_approval ?? false}
                 onChange={(e) =>
@@ -598,17 +617,19 @@ export function AdminDataGovernancePage() {
       <section className="card card--elevated">
         <h2>Request Deletion</h2>
         <div className="form-row">
-          <select value={targetType} onChange={(e) => setTargetType(e.target.value as "CALL" | "STORY" | "LANDING_PAGE")}>
+          <select className="form-select" value={targetType} onChange={(e) => setTargetType(e.target.value as "CALL" | "STORY" | "LANDING_PAGE")}>
             <option value="CALL">Call</option>
             <option value="STORY">Story</option>
             <option value="LANDING_PAGE">Landing Page</option>
           </select>
           <input
+            className="form-input"
             value={targetId}
             onChange={(e) => setTargetId(e.target.value)}
             placeholder="Target ID"
           />
           <input
+            className="form-input"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Reason (optional)"
@@ -623,11 +644,13 @@ export function AdminDataGovernancePage() {
         <h2>Approval Groups</h2>
         <div className="form-row">
           <input
+            className="form-input"
             value={newGroupName}
             onChange={(e) => setNewGroupName(e.target.value)}
             placeholder="Group name"
           />
           <input
+            className="form-input"
             value={newGroupDescription}
             onChange={(e) => setNewGroupDescription(e.target.value)}
             placeholder="Description (optional)"
@@ -642,6 +665,7 @@ export function AdminDataGovernancePage() {
             <div>{g.description || "-"}</div>
             <div className="form-row">
               <input
+                className="form-input"
                 value={groupMemberUserId[g.id] ?? ""}
                 onChange={(e) =>
                   setGroupMemberUserId((prev) => ({ ...prev, [g.id]: e.target.value }))
@@ -685,6 +709,7 @@ export function AdminDataGovernancePage() {
                 <td>{row.user.email}</td>
                 <td>
                   <input
+                    className="form-input"
                     defaultValue={row.team_keys.join(",")}
                     id={`scope-${row.user.id}`}
                   />

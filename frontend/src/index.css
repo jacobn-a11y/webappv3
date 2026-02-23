@@ -646,19 +646,19 @@ body {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: 18px 20px;
+  padding: 12px 16px;
   display: flex;
-  align-items: flex-start;
-  gap: 14px;
+  align-items: center;
+  gap: 12px;
   transition: border-color var(--transition-fast);
 }
 
 .kpi-card:hover { border-color: var(--color-border-hover); }
 
 .kpi-card__icon {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-md);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -682,11 +682,10 @@ body {
 }
 
 .kpi-card__value {
-  font-size: 26px;
-  font-weight: 300;
+  font-size: 20px;
+  font-weight: 400;
   color: var(--white);
   line-height: 1.2;
-  margin-top: 2px;
 }
 
 .kpi-card__trend {
@@ -785,6 +784,261 @@ body {
 .data-table__sort-icon--active {
   opacity: 1;
   color: var(--color-accent);
+}
+
+/* ─── Admin Permissions Table ────────────────────────────────────────────── */
+
+.admin-perms__table-container {
+  overflow-x: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.admin-perms__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-perms__th {
+  text-align: left;
+  padding: 12px 14px;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 2px solid var(--color-border);
+  background: var(--color-bg);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+
+.admin-perms__th--perm {
+  text-align: center;
+  min-width: 90px;
+}
+
+.admin-perms__perm-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.admin-perms__admin-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--color-warning);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.admin-perms__admin-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+.admin-perms__row {
+  transition: background var(--transition-fast);
+}
+
+.admin-perms__row:hover .admin-perms__td {
+  background: var(--color-accent-light);
+}
+
+.admin-perms__td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.admin-perms__td--perm {
+  text-align: center;
+}
+
+.admin-perms__user-name {
+  display: block;
+  font-weight: 500;
+  color: var(--white);
+  line-height: 1.3;
+}
+
+.admin-perms__user-email {
+  display: block;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+.admin-perms__role-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.admin-perms__role-badge--OWNER { background: var(--color-accent-light); color: var(--color-accent); }
+.admin-perms__role-badge--ADMIN { background: var(--color-warning-light); color: var(--color-warning); }
+.admin-perms__role-badge--MEMBER { background: var(--color-info-light); color: var(--color-info); }
+.admin-perms__role-badge--VIEWER { background: var(--neutral-200); color: var(--color-text-secondary); }
+
+.admin-perms__toggle-wrap {
+  display: flex;
+  justify-content: center;
+}
+
+.admin-perms__toggle {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--neutral-100);
+  cursor: pointer;
+  position: relative;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.admin-perms__toggle:checked {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.admin-perms__toggle:checked::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  width: 5px;
+  height: 9px;
+  border: solid var(--white);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.admin-perms__toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.admin-perms__toggle--loading {
+  opacity: 0.4;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.7; }
+}
+
+.admin-perms__expand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: var(--font-sans);
+}
+
+.admin-perms__expand-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.admin-perms__expand-btn svg {
+  width: 14px;
+  height: 14px;
+  transition: transform var(--transition-fast);
+}
+
+.admin-perms__expand-btn--expanded svg {
+  transform: rotate(180deg);
+}
+
+.admin-perms__access-row td {
+  padding: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.admin-perms__access-panel {
+  background: var(--color-bg);
+  padding: 16px 20px;
+}
+
+.admin-perms__access-panel-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 12px;
+}
+
+.admin-perms__no-grants {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.admin-perms__access-grant {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.admin-perms__access-grant + .admin-perms__access-grant {
+  border-top: 1px solid var(--color-border);
+}
+
+.admin-perms__access-grant-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.admin-perms__access-grant-icon--all { background: var(--color-accent-light); color: var(--color-accent); }
+.admin-perms__access-grant-icon--single { background: var(--color-info-light); color: var(--color-info); }
+.admin-perms__access-grant-icon--list { background: var(--color-warning-light); color: var(--color-warning); }
+.admin-perms__access-grant-icon--crm { background: var(--color-success-light); color: var(--color-success); }
+
+.admin-perms__access-grant-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-perms__access-grant-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--white);
+}
+
+.admin-perms__access-grant-detail {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
 }
 
 /* ─── Unified Badge ──────────────────────────────────────────────────────── */
@@ -974,6 +1228,49 @@ body {
   background-repeat: no-repeat;
   background-position: right 14px center;
   padding-right: 36px;
+}
+
+/* ─── Checkbox / Toggle ──────────────────────────────────────────────────── */
+
+.form-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--neutral-100);
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.form-checkbox:checked {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.form-checkbox:checked::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  width: 5px;
+  height: 9px;
+  border: solid var(--white);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.form-checkbox:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.form-checkbox:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ─── Form Container (max-width constraint) ──────────────────────────────── */
@@ -2703,12 +3000,21 @@ body {
 .dash-pages__title { font-size: 24px; font-weight: 300; color: var(--white); }
 .dash-pages__stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
 .dash-pages__stat-card {
-  background: var(--color-surface); border-radius: var(--radius-lg);
-  padding: 20px; border: 1px solid var(--color-border);
-  text-align: center;
+  background: var(--color-surface); border-radius: var(--radius-md);
+  padding: 12px 16px; border: 1px solid var(--color-border);
+  display: flex; align-items: center; gap: 12px;
 }
-.dash-pages__stat-value { display: block; font-size: 28px; font-weight: 300; color: var(--white); }
-.dash-pages__stat-label { display: block; font-size: 12px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+.dash-pages__stat-icon {
+  width: 32px; height: 32px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  background: var(--neutral-200); color: var(--color-text-secondary);
+}
+.dash-pages__stat-card--total .dash-pages__stat-icon { background: var(--color-accent-light); color: var(--color-accent); }
+.dash-pages__stat-card--published .dash-pages__stat-icon { background: var(--color-success-light); color: var(--color-success); }
+.dash-pages__stat-card--drafts .dash-pages__stat-icon { background: var(--color-warning-light); color: var(--color-warning); }
+.dash-pages__stat-card--views .dash-pages__stat-icon { background: var(--color-info-light); color: var(--color-info); }
+.dash-pages__stat-value { font-size: 20px; font-weight: 400; color: var(--white); line-height: 1.2; }
+.dash-pages__stat-label { font-size: 11px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .dash-pages__toolbar {
   display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap;
 }
