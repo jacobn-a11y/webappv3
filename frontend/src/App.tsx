@@ -22,6 +22,8 @@ import { AdminDataQualityPage } from "./pages/AdminDataQualityPage";
 import { AdminSetupWizardPage } from "./pages/AdminSetupWizardPage";
 import { AdminBillingReadinessPage } from "./pages/AdminBillingReadinessPage";
 import { HomePage } from "./pages/HomePage";
+import { PlatformOwnerDashboardPage } from "./pages/PlatformOwnerDashboardPage";
+import { AccountSettingsPage } from "./pages/AccountSettingsPage";
 import {
   clearAuthState,
   getAuthMe,
@@ -39,6 +41,7 @@ import { StatusPage } from "./pages/StatusPage";
 import { AuthPage } from "./pages/AuthPage";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { InviteAcceptPage } from "./pages/InviteAcceptPage";
+import { ProtectedRoute, AccessDenied } from "./components/ProtectedRoute";
 
 // ─── SVG Nav Icons (20x20 stroke) ────────────────────────────────────────────
 
@@ -198,7 +201,7 @@ function isGroup(entry: NavEntry): entry is NavGroup {
   return "items" in entry;
 }
 
-function buildNav(persona: RoleAwareHome["persona"] | null): NavEntry[] {
+function buildNav(persona: RoleAwareHome["persona"] | null, userRole: AuthUser["role"]): NavEntry[] {
   const primary: NavItem[] = [
     { to: "/", label: "Home", icon: IconHome },
     { to: "/status", label: "Status", icon: IconStatus },
@@ -208,13 +211,17 @@ function buildNav(persona: RoleAwareHome["persona"] | null): NavEntry[] {
   const adminItems: NavItem[] = [];
   const workItems: NavItem[] = [];
 
-  const isAdmin = !persona || persona === "REVOPS_ADMIN";
+  const isAdminRole = userRole === "OWNER" || userRole === "ADMIN";
+  const isAdmin = isAdminRole && (!persona || persona === "REVOPS_ADMIN");
   const isMarketing = persona === "MARKETING_ANALYST";
   const isSales = persona === "SALES_MANAGER";
   const isCSM = persona === "CSM";
+  const isExec = persona === "EXEC";
+  const isViewer = userRole === "VIEWER";
+  const isMember = userRole === "MEMBER";
 
-  // Core items available to most roles
-  if (isSales || isCSM) {
+  // Core items — Accounts available to MEMBER (content creators), SALES, CSM
+  if (isSales || isCSM || isMember || isAdmin) {
     coreItems.push({ to: "/accounts/acc_meridian", label: "Accounts", icon: IconAccounts });
   }
   coreItems.push({ to: "/dashboard/pages", label: "Pages", icon: IconPages });
@@ -224,37 +231,43 @@ function buildNav(persona: RoleAwareHome["persona"] | null): NavEntry[] {
     coreItems.push({ to: "/chat", label: "Chat", icon: IconChat });
   }
 
-  // Admin section
-  if (isAdmin) {
-    adminItems.push(
-      { to: "/admin/permissions", label: "Permissions", icon: IconKey },
-      { to: "/admin/roles", label: "Roles", icon: IconUsers },
-      { to: "/admin/story-context", label: "Story Context", icon: IconBook },
-      { to: "/admin/audit-logs", label: "Audit Logs", icon: IconClipboard },
-      { to: "/admin/ops", label: "Operations", icon: IconActivity },
-      { to: "/admin/security", label: "Security", icon: IconLock },
-      { to: "/admin/governance", label: "Governance", icon: IconDatabase },
-      { to: "/admin/publish-approvals", label: "Approvals", icon: IconCheckCircle },
-      { to: "/admin/data-quality", label: "Data Quality", icon: IconStar },
-      { to: "/admin/setup", label: "Setup", icon: IconTool },
-      { to: "/admin/billing", label: "Billing", icon: IconCreditCard },
-    );
+  // Admin section — only for actual admin roles
+  if (isAdminRole) {
+    if (isAdmin) {
+      adminItems.push(
+        { to: "/admin/permissions", label: "Permissions", icon: IconKey },
+        { to: "/admin/roles", label: "Roles", icon: IconUsers },
+        { to: "/admin/story-context", label: "Story Context", icon: IconBook },
+        { to: "/admin/audit-logs", label: "Audit Logs", icon: IconClipboard },
+        { to: "/admin/ops", label: "Operations", icon: IconActivity },
+        { to: "/admin/security", label: "Security", icon: IconLock },
+        { to: "/admin/governance", label: "Governance", icon: IconDatabase },
+        { to: "/admin/publish-approvals", label: "Approvals", icon: IconCheckCircle },
+        { to: "/admin/data-quality", label: "Data Quality", icon: IconStar },
+        { to: "/admin/setup", label: "Setup", icon: IconTool },
+      );
+      // Billing only for OWNER
+      if (userRole === "OWNER") {
+        adminItems.push({ to: "/admin/billing", label: "Billing", icon: IconCreditCard });
+      }
+    }
   } else if (isMarketing) {
     adminItems.push({ to: "/admin/story-context", label: "Story Context", icon: IconBook });
-  } else if (!isSales && !isCSM) {
-    adminItems.push({ to: "/admin/audit-logs", label: "Audit Logs", icon: IconClipboard });
   }
+  // Non-admin roles: no admin items
 
-  // Workspace items
-  if (!isCSM || isAdmin || isMarketing || isSales) {
-    workItems.push({ to: "/workspaces", label: "Workspaces", icon: IconFolder });
-  }
-  if (isAdmin || isMarketing || isSales) {
-    workItems.push({ to: "/writebacks", label: "Writebacks", icon: IconRefresh });
-    workItems.push({ to: "/automations", label: "Automations", icon: IconZap });
-  }
-  if (isCSM) {
-    workItems.push({ to: "/workspaces", label: "Workspaces", icon: IconFolder });
+  // Workspace items — not for VIEWER or EXEC
+  if (!isViewer && !isExec) {
+    if (!isCSM || isAdmin || isMarketing || isSales) {
+      workItems.push({ to: "/workspaces", label: "Workspaces", icon: IconFolder });
+    }
+    if (isAdmin || isMarketing || isSales) {
+      workItems.push({ to: "/writebacks", label: "Writebacks", icon: IconRefresh });
+      workItems.push({ to: "/automations", label: "Automations", icon: IconZap });
+    }
+    if (isCSM) {
+      workItems.push({ to: "/workspaces", label: "Workspaces", icon: IconFolder });
+    }
   }
 
   const nav: NavEntry[] = [...primary, ...coreItems];
@@ -265,6 +278,11 @@ function buildNav(persona: RoleAwareHome["persona"] | null): NavEntry[] {
 
   if (workItems.length > 0) {
     nav.push({ label: "Workspace", icon: IconSettings, items: workItems });
+  }
+
+  // Account settings (OWNER only)
+  if (userRole === "OWNER") {
+    nav.push({ to: "/account-settings", label: "Account Settings", icon: IconSettings });
   }
 
   return nav;
@@ -326,10 +344,17 @@ function Sidebar({
 
   return (
     <aside className={`sidebar${collapsed ? " sidebar--collapsed" : ""}`} aria-label="Main navigation">
-      {/* Logo */}
-      <Link to="/" className="sidebar__logo" onClick={onClose}>
-        <span className="sidebar__logo-text">StoryEngine</span>
-      </Link>
+      {/* Logo + Mobile Close */}
+      <div className="sidebar__top">
+        <Link to="/" className="sidebar__logo" onClick={onClose}>
+          <span className="sidebar__logo-text">StoryEngine</span>
+        </Link>
+        {onClose && (
+          <button type="button" className="sidebar__close-btn" onClick={onClose} aria-label="Close navigation">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
+        )}
+      </div>
 
       {/* Navigation */}
       <nav className="sidebar__nav">
@@ -392,6 +417,7 @@ function Sidebar({
           <div className="sidebar__avatar" title={user.email}>{initials || "U"}</div>
           <div className="sidebar__user-info">
             <span className="sidebar__user-email">{user.email}</span>
+            <span className="sidebar__user-role">{user.role === "OWNER" ? "Owner" : user.role === "ADMIN" ? "Admin" : user.role === "MEMBER" ? "Member" : "Viewer"}</span>
           </div>
           <button className="btn btn--ghost btn--sm" onClick={onLogout} title="Logout" style={{ padding: "4px 6px", marginLeft: "auto" }}>
             <IconLogout />
@@ -432,7 +458,7 @@ function AuthenticatedApp({
       .catch(() => setPersona(null));
   }, []);
 
-  const nav = useMemo(() => buildNav(persona), [persona]);
+  const nav = useMemo(() => buildNav(persona, user.role), [persona, user.role]);
 
   const toggleCollapse = useCallback(() => {
     setCollapsed((prev) => {
@@ -478,27 +504,81 @@ function AuthenticatedApp({
         <ErrorBoundary>
           <Routes>
             <Route path="/" element={<HomePage />} />
-            <Route path="/accounts/:accountId" element={<AccountDetailPage />} />
+            <Route path="/accounts/:accountId" element={<AccountDetailPage userRole={user.role} />} />
             <Route path="/accounts/:accountId/journey" element={<AccountJourneyPage />} />
             <Route path="/pages/:pageId/edit" element={<LandingPageEditorPage />} />
-            <Route path="/admin/account-access" element={<AdminAccountAccessPage />} />
-            <Route path="/admin/permissions" element={<AdminPermissionsPage />} />
-            <Route path="/admin/roles" element={<AdminRolesPage />} />
-            <Route path="/admin/story-context" element={<AdminStoryContextPage />} />
-            <Route path="/admin/audit-logs" element={<AdminAuditLogsPage />} />
-            <Route path="/admin/ops" element={<AdminOpsDiagnosticsPage />} />
-            <Route path="/admin/security" element={<AdminSecurityPolicyPage />} />
-            <Route path="/admin/governance" element={<AdminDataGovernancePage />} />
-            <Route path="/admin/publish-approvals" element={<AdminPublishApprovalsPage />} />
-            <Route path="/admin/data-quality" element={<AdminDataQualityPage />} />
-            <Route path="/admin/setup" element={<AdminSetupWizardPage />} />
-            <Route path="/admin/billing" element={<AdminBillingReadinessPage />} />
-            <Route path="/workspaces" element={<WorkspacesPage />} />
-            <Route path="/writebacks" element={<WritebacksPage />} />
-            <Route path="/automations" element={<AutomationsPage />} />
-            <Route path="/status" element={<StatusPage />} />
+            <Route path="/admin/account-access" element={
+              <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user} >
+                <AdminAccountAccessPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/permissions" element={
+              <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user} >
+                <AdminPermissionsPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/roles" element={
+              <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user} >
+                <AdminRolesPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/story-context" element={
+              <ProtectedRoute requiredRole={["OWNER", "ADMIN", "MEMBER"]} user={user} >
+                <AdminStoryContextPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/audit-logs" element={
+              <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user} >
+                <AdminAuditLogsPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/ops" element={
+              <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user} >
+                <AdminOpsDiagnosticsPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/security" element={
+              <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user} >
+                <AdminSecurityPolicyPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/governance" element={
+              <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user} >
+                <AdminDataGovernancePage />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/publish-approvals" element={
+              <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user} >
+                <AdminPublishApprovalsPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/data-quality" element={
+              <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user} >
+                <AdminDataQualityPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/setup" element={
+              <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user} >
+                <AdminSetupWizardPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/billing" element={
+              <ProtectedRoute requiredRole={["OWNER"]} user={user} >
+                <AdminBillingReadinessPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/workspaces" element={<WorkspacesPage userRole={user.role} />} />
+            <Route path="/writebacks" element={<WritebacksPage userRole={user.role} />} />
+            <Route path="/automations" element={<AutomationsPage userRole={user.role} />} />
+            <Route path="/status" element={<StatusPage userOrgId={user.organizationId} />} />
+            <Route path="/platform" element={<PlatformOwnerDashboardPage />} />
+            <Route path="/account-settings" element={
+              <ProtectedRoute requiredRole={["OWNER"]} user={user}>
+                <AccountSettingsPage />
+              </ProtectedRoute>
+            } />
             <Route path="/calls/:callId/transcript" element={<TranscriptViewerPage />} />
-            <Route path="/dashboard/pages" element={<DashboardPagesPage />} />
+            <Route path="/dashboard/pages" element={<DashboardPagesPage userRole={user.role} />} />
             <Route path="/chat" element={<ChatbotConnectorPage />} />
             <Route path="/analytics" element={<AnalyticsDashboardPage />} />
             <Route path="/settings/billing" element={<Navigate to="/admin/billing" replace />} />

@@ -3140,3 +3140,350 @@ html { scroll-behavior: smooth; }
     font-size: 12px;
   }
 }
+
+/* ─── Access Denied ────────────────────────────────────────────────────────── */
+
+.access-denied {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  text-align: center;
+  padding: 48px 24px;
+}
+
+.access-denied__icon {
+  color: var(--neutral-500);
+  margin-bottom: 24px;
+}
+
+.access-denied__title {
+  font-size: 24px;
+  font-weight: 300;
+  color: var(--white);
+  margin: 0 0 12px;
+  letter-spacing: -0.01em;
+}
+
+.access-denied__message {
+  font-size: 14px;
+  color: var(--neutral-600);
+  margin: 0 0 32px;
+  max-width: 420px;
+  line-height: 1.7;
+}
+
+/* ─── Breadcrumb ───────────────────────────────────────────────────────────── */
+
+.breadcrumb {
+  margin-bottom: 16px;
+}
+
+.breadcrumb__list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.breadcrumb__item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.breadcrumb__separator {
+  color: var(--neutral-400);
+  display: flex;
+  align-items: center;
+}
+
+.breadcrumb__link {
+  color: var(--neutral-500);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.15s ease;
+}
+
+.breadcrumb__link:hover {
+  color: var(--blue-400);
+}
+
+.breadcrumb__current {
+  color: var(--neutral-700);
+  font-weight: 600;
+}
+
+/* ─── Home CTA Row ─────────────────────────────────────────────────────────── */
+
+.home-cta-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.home-cta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px;
+  background: var(--neutral-100);
+  border: 1px solid var(--neutral-300);
+  border-radius: 8px;
+  color: var(--neutral-700);
+  text-decoration: none;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.home-cta:hover {
+  border-color: var(--neutral-400);
+  background: var(--neutral-200);
+}
+
+.home-cta--primary {
+  border-color: var(--blue-400);
+  background: rgba(51, 111, 230, 0.06);
+}
+
+.home-cta--primary:hover {
+  background: rgba(51, 111, 230, 0.12);
+  border-color: var(--blue-300);
+}
+
+.home-cta__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--neutral-200);
+  color: var(--blue-400);
+  flex-shrink: 0;
+}
+
+.home-cta--primary .home-cta__icon {
+  background: var(--blue-400);
+  color: var(--white);
+}
+
+.home-cta__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.home-cta__label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--white);
+  margin-bottom: 2px;
+}
+
+.home-cta__hint {
+  display: block;
+  font-size: 12px;
+  color: var(--neutral-500);
+}
+
+/* ─── Action Item (clickable) ──────────────────────────────────────────────── */
+
+.action-item--link {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.action-item--link:hover {
+  background: var(--neutral-100);
+}
+
+.action-item--link:hover .action-item__text {
+  color: var(--blue-400);
+}
+
+.action-item--link:hover .action-item__chevron {
+  color: var(--blue-400);
+  transform: translateX(2px);
+}
+
+.action-item__chevron {
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+/* ─── Sidebar Role Badge ───────────────────────────────────────────────────── */
+
+.sidebar__user-role {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--neutral-400);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
+.sidebar--collapsed .sidebar__user-role { display: none; }
+
+/* ─── Sidebar Top (Logo + Close) ───────────────────────────────────────────── */
+
+.sidebar__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar__close-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--neutral-500);
+  cursor: pointer;
+  padding: 8px;
+  margin-right: 8px;
+  border-radius: 4px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.sidebar__close-btn:hover {
+  color: var(--white);
+  background: var(--neutral-200);
+}
+
+/* ─── Modal (Small Confirmation) ───────────────────────────────────────────── */
+
+.modal--sm {
+  max-width: 420px;
+  padding: 24px;
+}
+
+.modal__title {
+  font-size: 18px;
+  font-weight: 300;
+  color: var(--white);
+  margin: 0 0 12px;
+}
+
+.modal__message {
+  font-size: 14px;
+  color: var(--neutral-600);
+  line-height: 1.7;
+  margin: 0 0 24px;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.btn--danger {
+  background: var(--red-300);
+  color: var(--white);
+  border-color: var(--red-300);
+  border-radius: 60px;
+  padding: 8px 20px;
+  font-weight: 800;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn--danger:hover {
+  background: var(--red-500);
+  border-color: var(--red-500);
+}
+
+/* ─── Journey Breadcrumb ───────────────────────────────────────────────────── */
+
+.journey__breadcrumb {
+  grid-column: 1 / -1;
+  padding: 0 0 8px;
+}
+
+/* ─── Account Detail Actions ───────────────────────────────────────────────── */
+
+.account-detail__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* ─── Mobile Overrides ─────────────────────────────────────────────────────── */
+
+/* ─── Support Account Info ──────────────────────────────────────────────────── */
+
+.support-account-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.support-account-info {
+  flex: 1;
+}
+
+.support-account-info__email {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--white);
+}
+
+.support-account-info__email--readonly {
+  color: var(--neutral-500);
+  cursor: default;
+}
+
+.support-account-info__hint {
+  font-size: 12px;
+  color: var(--neutral-500);
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.toggle-row__label {
+  font-size: 13px;
+  color: var(--neutral-600);
+}
+
+/* ─── Deletion Status ──────────────────────────────────────────────────────── */
+
+.deletion-status {
+  padding-top: 8px;
+}
+
+.deletion-inactive p {
+  max-width: 600px;
+}
+
+@media (max-width: 768px) {
+  .sidebar__close-btn {
+    display: flex;
+  }
+
+  .home-cta-row {
+    grid-template-columns: 1fr;
+  }
+
+  .support-account-row {
+    flex-direction: column;
+  }
+}

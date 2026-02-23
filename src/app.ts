@@ -34,6 +34,7 @@ import { createMergeRoutes } from "./api/merge-routes.js";
 import { createIntegrationRoutes } from "./api/integration-routes.js";
 import { createAISettingsRoutes } from "./api/ai-settings-routes.js";
 import { createPlatformAdminRoutes } from "./api/platform-admin-routes.js";
+import { createPlatformRoutes } from "./api/platform-routes.js";
 import { createTranscriptViewerRoutes } from "./api/transcript-viewer-routes.js";
 import { createEntityResolutionRoutes } from "./api/entity-resolution-routes.js";
 import { createEditorPageRoutes } from "./api/editor-page-renderer.js";
@@ -257,6 +258,13 @@ export function createApp(deps: AppDeps): express.Application {
 
   // Landing Page Exports — PDF, Google Doc, Slack (behind trial gate)
   app.use("/api/pages", trialGate, createExportRoutes(prisma));
+
+  // Platform (App Owner) — tenant management, support account, deletion approvals
+  app.use(
+    "/api/platform",
+    requireAuth(prisma),
+    createPlatformRoutes(prisma)
+  );
 
   // Dashboard — stats, page list, admin settings, permissions, account access
   app.use(

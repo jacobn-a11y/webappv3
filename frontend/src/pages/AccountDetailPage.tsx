@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { StoryGeneratorModal } from "../components/StoryGeneratorModal";
+import { Breadcrumb } from "../components/Breadcrumb";
 import { getAccountStories, type StorySummary } from "../lib/api";
 import { STORY_TYPE_LABELS } from "../types/taxonomy";
 
-export function AccountDetailPage() {
+export function AccountDetailPage({ userRole }: { userRole?: string }) {
   const { accountId } = useParams<{ accountId: string }>();
   const navigate = useNavigate();
   const [showModal, setShowModal] = useState(false);
@@ -40,24 +41,39 @@ export function AccountDetailPage() {
     return <div className="page-error" role="alert">No account ID provided.</div>;
   }
 
+  const isViewer = userRole === "VIEWER";
+
   return (
     <div className="account-detail">
+      <Breadcrumb items={[
+        { label: "Home", to: "/" },
+        { label: "Accounts", to: "/accounts/acc_meridian" },
+        { label: "Account Detail" },
+      ]} />
+
       {/* Page header */}
       <header className="account-detail__header">
         <div>
           <h1 className="account-detail__title">Account Detail</h1>
           <p className="account-detail__id">ID: {accountId}</p>
         </div>
-        <button
-          type="button"
-          className="btn btn--primary btn--lg"
-          onClick={() => setShowModal(true)}
-        >
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            <path d="M9 2v14M2 9h14" />
-          </svg>
-          Generate Story
-        </button>
+        <div className="account-detail__actions">
+          {!isViewer && (
+            <button
+              type="button"
+              className="btn btn--primary btn--lg"
+              onClick={() => setShowModal(true)}
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path d="M9 2v14M2 9h14" />
+              </svg>
+              Generate Story
+            </button>
+          )}
+          <Link to={`/accounts/${accountId}/journey`} className="btn btn--ghost">
+            View Journey
+          </Link>
+        </div>
       </header>
 
       {/* Previous stories */}
@@ -80,14 +96,16 @@ export function AccountDetailPage() {
               </svg>
             </div>
             <h3>No stories yet</h3>
-            <p>Generate your first story to see it here.</p>
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={() => setShowModal(true)}
-            >
-              Generate Story
-            </button>
+            <p>{isViewer ? "No stories have been generated for this account." : "Generate your first story to see it here."}</p>
+            {!isViewer && (
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => setShowModal(true)}
+              >
+                Generate Story
+              </button>
+            )}
           </div>
         )}
 

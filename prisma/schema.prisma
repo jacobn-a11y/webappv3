@@ -69,6 +69,8 @@ model Organization {
   supportImpersonationSessions SupportImpersonationSession[]
   incidents           Incident[]
   incidentUpdates     IncidentUpdate[]
+  supportOptOut       TenantSupportOptOut?
+  deletionRequest     TenantDeletionRequest?
 
   @@map("organizations")
 }
@@ -1054,6 +1056,55 @@ enum AssetType {
   REPORT
   PLAYBOOK
   TEMPLATE
+}
+
+// ─── Platform (App Owner) ────────────────────────────────────────────────────
+
+model PlatformSettings {
+  id                     String   @id @default(cuid())
+  supportAccountEmail    String?
+  supportAccountLabel    String   @default("Platform Support")
+  updatedAt              DateTime @updatedAt
+
+  @@map("platform_settings")
+}
+
+model TenantSupportOptOut {
+  id             String   @id @default(cuid())
+  organizationId String   @unique
+  optedOutAt     DateTime @default(now())
+  optedOutById   String
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_support_opt_outs")
+}
+
+model TenantDeletionRequest {
+  id               String    @id @default(cuid())
+  organizationId   String    @unique
+  requestedById    String
+  reason           String?
+  status           TenantDeletionStatus @default(PENDING_APPROVAL)
+  scheduledDeleteAt DateTime?
+  approvedAt       DateTime?
+  approvedById     String?
+  cancelledAt      DateTime?
+  cancelledById    String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("tenant_deletion_requests")
+}
+
+enum TenantDeletionStatus {
+  PENDING_APPROVAL
+  APPROVED
+  CANCELLED
+  COMPLETED
 }
 
 // ─── Permissions & Org Settings ──────────────────────────────────────────────

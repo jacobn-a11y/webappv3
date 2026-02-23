@@ -7,7 +7,7 @@ import { formatEnumLabel, badgeClass } from "../lib/format";
 
 const STORAGE_KEY = "status_page_org_id";
 
-export function StatusPage() {
+export function StatusPage({ userOrgId }: { userOrgId?: string }) {
   const [organizationId, setOrganizationId] = useState("");
   const [incidents, setIncidents] = useState<PublicStatusIncident[]>([]);
   const [loading, setLoading] = useState(false);
@@ -18,11 +18,13 @@ export function StatusPage() {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         setOrganizationId(saved);
+      } else if (userOrgId) {
+        setOrganizationId(userOrgId);
       }
     } catch {
-      // Ignore storage read failures.
+      if (userOrgId) setOrganizationId(userOrgId);
     }
-  }, []);
+  }, [userOrgId]);
 
   const load = async (orgId: string) => {
     if (!orgId.trim()) {

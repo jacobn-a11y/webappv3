@@ -9,7 +9,8 @@ import {
 import { formatEnumLabel, badgeClass, formatDate } from "../lib/format";
 import { useToast } from "../components/Toast";
 
-export function WritebacksPage() {
+export function WritebacksPage({ userRole }: { userRole?: string }) {
+  const isViewer = userRole === "VIEWER";
   const [writebacks, setWritebacks] = useState<WritebackRequest[]>([]);
   const [accountId, setAccountId] = useState("");
   const [actionType, setActionType] = useState<"TASK" | "NOTE" | "FIELD_UPDATE" | "TIMELINE_EVENT">("TASK");
@@ -66,7 +67,7 @@ export function WritebacksPage() {
       {error && <div className="alert alert--error">{error}</div>}
 
       {/* Request Form */}
-      <div className="card card--elevated">
+      {!isViewer && <div className="card card--elevated">
         <div className="card__header">
           <div className="card__title">Request Writeback</div>
         </div>
@@ -96,7 +97,7 @@ export function WritebacksPage() {
         <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
           <button className="btn btn--primary" onClick={submit}>Request Writeback</button>
         </div>
-      </div>
+      </div>}
 
       {/* Pending Queue */}
       {pending.length > 0 && (
