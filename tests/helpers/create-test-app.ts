@@ -72,7 +72,11 @@ export function createTestApp(options: TestAppOptions) {
   );
 
   // ─── Routes ─────────────────────────────────────────────────────────────
-  app.use("/api/rag", trialGate, createRAGRoutes(ragEngine as RAGEngine));
+  app.use(
+    "/api/rag",
+    trialGate,
+    createRAGRoutes(ragEngine as RAGEngine, prisma as PrismaClient)
+  );
   app.use(
     "/api/stories",
     trialGate,

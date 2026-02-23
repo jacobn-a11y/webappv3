@@ -254,13 +254,14 @@ export function createAISettingsRoutes(
    * Returns pending usage notifications for the current user.
    */
   router.get("/notifications", async (req: AuthReq, res: Response) => {
-    if (!req.userId) {
+    if (!req.organizationId || !req.userId) {
       res.status(401).json({ error: "Authentication required" });
       return;
     }
 
     try {
       const notifications = await usageTracker.getPendingNotifications(
+        req.organizationId,
         req.userId
       );
 
@@ -287,13 +288,21 @@ export function createAISettingsRoutes(
   router.post(
     "/notifications/:id/acknowledge",
     async (req: AuthReq, res: Response) => {
-      if (!req.userId) {
+      if (!req.organizationId || !req.userId) {
         res.status(401).json({ error: "Authentication required" });
         return;
       }
 
       try {
-        await usageTracker.acknowledgeNotification(req.params.id as string);
+        const acknowledged = await usageTracker.acknowledgeNotification(
+          req.organizationId,
+          req.userId,
+          req.params.id as string
+        );
+        if (!acknowledged) {
+          res.status(404).json({ error: "notification_not_found" });
+          return;
+        }
         res.json({ acknowledged: true });
       } catch (err) {
         console.error("Acknowledge notification error:", err);
@@ -308,14 +317,17 @@ export function createAISettingsRoutes(
   router.post(
     "/notifications/acknowledge-all",
     async (req: AuthReq, res: Response) => {
-      if (!req.userId) {
+      if (!req.organizationId || !req.userId) {
         res.status(401).json({ error: "Authentication required" });
         return;
       }
 
       try {
-        await usageTracker.acknowledgeAllNotifications(req.userId);
-        res.json({ acknowledged: true });
+        const acknowledgedCount = await usageTracker.acknowledgeAllNotifications(
+          req.organizationId,
+          req.userId
+        );
+        res.json({ acknowledged: true, count: acknowledgedCount });
       } catch (err) {
         console.error("Acknowledge all notifications error:", err);
         res.status(500).json({ error: "Failed to acknowledge notifications" });

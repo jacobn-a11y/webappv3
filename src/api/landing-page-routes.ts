@@ -889,6 +889,17 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           payload.current_step_order ?? steps[0]?.step_order ?? 1;
         const currentStep = steps.find((s) => s.step_order === currentStepOrder);
 
+        if (
+          currentStep &&
+          !(await canUserApproveStep(req, currentStep, request.requestedByUserId))
+        ) {
+          res.status(403).json({
+            error: "permission_denied",
+            message: "You are not eligible to approve this workflow step.",
+          });
+          return;
+        }
+
         if (parse.data.decision === "REJECT") {
           await prisma.approvalRequest.update({
             where: { id: request.id },
@@ -912,17 +923,6 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
             userAgent: req.get("user-agent"),
           });
           res.json({ status: "REJECTED" });
-          return;
-        }
-
-        if (
-          currentStep &&
-          !(await canUserApproveStep(req, currentStep, request.requestedByUserId))
-        ) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "You are not eligible to approve this workflow step.",
-          });
           return;
         }
 

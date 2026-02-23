@@ -7,24 +7,66 @@
  * - Tenant deletion request approval workflow
  */
 
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { logger } from "../lib/logger.js";
+import logger from "../lib/logger.js";
 
-const PLATFORM_OWNER_EMAIL = process.env.PLATFORM_OWNER_EMAIL ?? "";
-
-/** Guard: only the platform owner (highest-level user) can access these routes */
-function requirePlatformOwner(req: any, res: any, next: any) {
-  const email = req.userEmail ?? req.user?.email;
-  if (!PLATFORM_OWNER_EMAIL || email !== PLATFORM_OWNER_EMAIL) {
-    return res.status(403).json({ error: "Platform owner access required" });
-  }
-  next();
+interface PlatformOwnerRequest extends Request {
+  userId?: string;
+  userEmail?: string;
+  user?: { email?: string };
 }
+
+const pickFirstString = (value: unknown): string | null => {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  return null;
+};
 
 export function createPlatformRoutes(prisma: PrismaClient): Router {
   const router = Router();
+
+  // Guard: only the platform owner (highest-level user) can access these routes.
+  const requirePlatformOwner = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const platformOwnerEmail = process.env.PLATFORM_OWNER_EMAIL ?? "";
+      if (!platformOwnerEmail) {
+        res.status(500).json({ error: "PLATFORM_OWNER_EMAIL is not configured" });
+        return;
+      }
+
+      const ownerReq = req as PlatformOwnerRequest;
+      let email = pickFirstString(ownerReq.userEmail) ?? pickFirstString(ownerReq.user?.email);
+
+      if (!email && ownerReq.userId) {
+        const user = await prisma.user.findUnique({
+          where: { id: ownerReq.userId },
+          select: { email: true },
+        });
+        email = user?.email ?? null;
+      }
+
+      if (!email) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+
+      if (email !== platformOwnerEmail) {
+        res.status(403).json({ error: "Platform owner access required" });
+        return;
+      }
+
+      next();
+    } catch (err) {
+      logger.error("Platform owner auth error", { error: err });
+      res.status(500).json({ error: "Failed to validate platform owner access" });
+    }
+  };
 
   // ─── Platform Settings (Support Account) ──────────────────────────────────
 
@@ -171,7 +213,10 @@ export function createPlatformRoutes(prisma: PrismaClient): Router {
     requirePlatformOwner,
     async (req, res) => {
       try {
-        const { orgId } = req.params;
+        const orgId = pickFirstString(req.params.orgId);
+        if (!orgId) {
+          return res.status(400).json({ error: "Invalid organization id" });
+        }
         const existing = await prisma.tenantDeletionRequest.findUnique({
           where: { organizationId: orgId },
         });
@@ -205,7 +250,10 @@ export function createPlatformRoutes(prisma: PrismaClient): Router {
     requirePlatformOwner,
     async (req, res) => {
       try {
-        const { orgId } = req.params;
+        const orgId = pickFirstString(req.params.orgId);
+        if (!orgId) {
+          return res.status(400).json({ error: "Invalid organization id" });
+        }
         const existing = await prisma.tenantDeletionRequest.findUnique({
           where: { organizationId: orgId },
         });

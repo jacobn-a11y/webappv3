@@ -203,9 +203,6 @@ export function createApp(deps: AppDeps): express.Application {
     createRAGRoutes(ragEngine, prisma)
   );
 
-  // ─── Platform Admin (API-key protected, no user auth) ──────────────────
-  app.use("/api/platform", createPlatformAdminRoutes(aiConfigService));
-
   // ─── Auth Routes (public — no JWT required) ────────────────────────────
   app.use("/api/auth", createAuthRoutes(prisma, workos));
   // SCIM provisioning endpoints (bearer token authenticated per organization)
@@ -216,6 +213,12 @@ export function createApp(deps: AppDeps): express.Application {
 
   // Resolve application session tokens into request auth context.
   app.use(createSessionAuth(prisma));
+
+  // Platform owner operations (session context from createSessionAuth).
+  app.use("/api/platform", createPlatformRoutes(prisma));
+
+  // Platform admin (API-key protected, no user auth).
+  app.use("/api/platform", createPlatformAdminRoutes(aiConfigService));
 
   // ─── Setup Wizard (before auth — needed for first-run onboarding) ──────
   app.use("/api/setup", createSetupRoutes(prisma, stripe));
@@ -258,13 +261,6 @@ export function createApp(deps: AppDeps): express.Application {
 
   // Landing Page Exports — PDF, Google Doc, Slack (behind trial gate)
   app.use("/api/pages", trialGate, createExportRoutes(prisma));
-
-  // Platform (App Owner) — tenant management, support account, deletion approvals
-  app.use(
-    "/api/platform",
-    requireAuth(prisma),
-    createPlatformRoutes(prisma)
-  );
 
   // Dashboard — stats, page list, admin settings, permissions, account access
   app.use(

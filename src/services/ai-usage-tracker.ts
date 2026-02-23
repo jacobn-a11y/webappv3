@@ -512,25 +512,39 @@ export class AIUsageTracker {
 
   // ─── Notifications ──────────────────────────────────────────────────
 
-  async getPendingNotifications(userId: string) {
+  async getPendingNotifications(organizationId: string, userId: string) {
     return this.prisma.aIUsageNotification.findMany({
-      where: { userId, acknowledged: false },
+      where: { organizationId, userId, acknowledged: false },
       orderBy: { createdAt: "desc" },
     });
   }
 
-  async acknowledgeNotification(notificationId: string): Promise<void> {
-    await this.prisma.aIUsageNotification.update({
-      where: { id: notificationId },
+  async acknowledgeNotification(
+    organizationId: string,
+    userId: string,
+    notificationId: string
+  ): Promise<boolean> {
+    const updated = await this.prisma.aIUsageNotification.updateMany({
+      where: {
+        id: notificationId,
+        organizationId,
+        userId,
+        acknowledged: false,
+      },
       data: { acknowledged: true },
     });
+    return updated.count > 0;
   }
 
-  async acknowledgeAllNotifications(userId: string): Promise<void> {
-    await this.prisma.aIUsageNotification.updateMany({
-      where: { userId, acknowledged: false },
+  async acknowledgeAllNotifications(
+    organizationId: string,
+    userId: string
+  ): Promise<number> {
+    const updated = await this.prisma.aIUsageNotification.updateMany({
+      where: { organizationId, userId, acknowledged: false },
       data: { acknowledged: true },
     });
+    return updated.count;
   }
 
   // ─── Limit Management ──────────────────────────────────────────────

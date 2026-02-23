@@ -41,7 +41,8 @@ const QuerySchema = z.object({
     .min(3, "Query must be at least 3 characters")
     .max(1000, "Query must be under 1000 characters"),
   account_id: z.string().min(1),
-  organization_id: z.string().min(1),
+  // Optional for backwards compatibility; request org context comes from auth.
+  organization_id: z.string().min(1).optional(),
   top_k: z.number().int().min(1).max(20).optional(),
   funnel_stages: z.array(z.string()).optional(),
 });
@@ -83,7 +84,13 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    *     "tokens_used": 1234
    *   }
    */
-  router.post("/query", async (req: Request, res: Response) => {
+  router.post("/query", async (req: AuthReq, res: Response) => {
+    const orgId = req.organizationId;
+    if (!orgId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+
     const parseResult = QuerySchema.safeParse(req.body);
     if (!parseResult.success) {
       res.status(400).json({
@@ -97,10 +104,34 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
       parseResult.data;
 
     try {
+      if (organization_id && organization_id !== orgId) {
+        res.status(403).json({
+          error: "organization_mismatch",
+          message: "organization_id does not match the authenticated tenant.",
+        });
+        return;
+      }
+
+      if (req.userId) {
+        const canAccessAccount = await accessService.canAccessAccount(
+          req.userId,
+          orgId,
+          account_id,
+          req.userRole
+        );
+        if (!canAccessAccount) {
+          res.status(403).json({
+            error: "permission_denied",
+            message: "You do not have access to this account.",
+          });
+          return;
+        }
+      }
+
       const result = await ragEngine.query({
         query,
         accountId: account_id,
-        organizationId: organization_id,
+        organizationId: orgId,
         topK: top_k,
         funnelStages: funnel_stages,
       });
@@ -132,7 +163,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    * When account_id is null, searches across all org accounts.
    */
   router.post("/chat", async (req: AuthReq, res: Response) => {
-    const orgId = req.organizationId ?? req.body?.organization_id;
+    const orgId = req.organizationId;
     if (!orgId) {
       res.status(401).json({ error: "Authentication required" });
       return;
@@ -151,6 +182,22 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
       parseResult.data;
 
     try {
+      if (account_id && req.userId) {
+        const canAccessAccount = await accessService.canAccessAccount(
+          req.userId,
+          orgId,
+          account_id,
+          req.userRole
+        );
+        if (!canAccessAccount) {
+          res.status(403).json({
+            error: "permission_denied",
+            message: "You do not have access to this account.",
+          });
+          return;
+        }
+      }
+
       const result = await ragEngine.chat({
         query,
         accountId: account_id,
