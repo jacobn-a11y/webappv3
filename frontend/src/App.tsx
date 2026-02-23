@@ -328,9 +328,6 @@ function Sidebar({
     <aside className={`sidebar${collapsed ? " sidebar--collapsed" : ""}`} aria-label="Main navigation">
       {/* Logo */}
       <Link to="/" className="sidebar__logo" onClick={onClose}>
-        <div className="sidebar__logo-icon">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 5a3 3 0 013-3h6a3 3 0 013 3v3a3 3 0 01-3 3H9l-3 3V11H5a3 3 0 01-3-3V5z" fill="white" /></svg>
-        </div>
         <span className="sidebar__logo-text">StoryEngine</span>
       </Link>
 

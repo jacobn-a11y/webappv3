@@ -33,7 +33,7 @@ export class ErrorBoundary extends Component<Props, State> {
               height="48"
               viewBox="0 0 48 48"
               fill="none"
-              stroke="#dc2626"
+              stroke="#F44343"
               strokeWidth="2"
               aria-hidden="true"
             >

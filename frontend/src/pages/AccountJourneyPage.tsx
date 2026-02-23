@@ -14,10 +14,10 @@ type TopContact = JourneyAccount["top_contacts"][number];
 
 const STAGE_COLORS: Record<string, string> = {
   TOFU: "#059669",
-  MOFU: "#2563eb",
+  MOFU: "#336FE6",
   BOFU: "#ea580c",
   POST_SALE: "#7c3aed",
-  INTERNAL: "#6b7280",
+  INTERNAL: "#8A888E",
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -47,11 +47,11 @@ interface CrmEventConfig {
 const CRM_EVENT_CONFIGS: Record<string, CrmEventConfig> = {
   OPPORTUNITY_CREATED: {
     icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#2563eb" strokeWidth="1.5">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#336FE6" strokeWidth="1.5">
         <polygon points="8,1 10,6 15,6.5 11,10 12.5,15 8,12 3.5,15 5,10 1,6.5 6,6" />
       </svg>
     ),
-    color: "#2563eb",
+    color: "#336FE6",
   },
   OPPORTUNITY_STAGE_CHANGE: {
     icon: (
@@ -81,21 +81,21 @@ const CRM_EVENT_CONFIGS: Record<string, CrmEventConfig> = {
   },
   CONTACT_CREATED: {
     icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#6b7280" strokeWidth="1.5">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#8A888E" strokeWidth="1.5">
         <circle cx="8" cy="6" r="3" />
         <path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5" />
       </svg>
     ),
-    color: "#6b7280",
+    color: "#8A888E",
   },
   NOTE_CREATED: {
     icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#6b7280" strokeWidth="1.5">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#8A888E" strokeWidth="1.5">
         <rect x="3" y="2" width="10" height="12" rx="1" />
         <path d="M6 5h4M6 8h4M6 11h2" />
       </svg>
     ),
-    color: "#6b7280",
+    color: "#8A888E",
   },
   TASK_COMPLETED: {
     icon: (
@@ -108,23 +108,23 @@ const CRM_EVENT_CONFIGS: Record<string, CrmEventConfig> = {
   },
   EMAIL_SENT: {
     icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#2563eb" strokeWidth="1.5">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#336FE6" strokeWidth="1.5">
         <rect x="2" y="3" width="12" height="10" rx="1" />
         <path d="M2 4l6 5 6-5" />
       </svg>
     ),
-    color: "#2563eb",
+    color: "#336FE6",
   },
 };
 
 const DEFAULT_CRM_CONFIG: CrmEventConfig = {
   icon: (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#6b7280" strokeWidth="1.5">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#8A888E" strokeWidth="1.5">
       <circle cx="8" cy="8" r="6" />
       <path d="M8 5v3l2 2" />
     </svg>
   ),
-  color: "#6b7280",
+  color: "#8A888E",
 };
 
 // ─── Provider Icons ─────────────────────────────────────────────────────────
@@ -467,7 +467,7 @@ function CallNode({ node }: { node: JourneyTimelineNode }) {
   const stageColor =
     node.primary_stage && STAGE_COLORS[node.primary_stage]
       ? STAGE_COLORS[node.primary_stage]
-      : "#6b7280";
+      : "#8A888E";
   const { date, time } = formatDateTime(node.date);
   const participants = node.participants ?? [];
   const maxAvatars = 5;
