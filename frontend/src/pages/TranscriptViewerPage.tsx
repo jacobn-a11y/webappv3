@@ -34,12 +34,12 @@ const STAGE_COLORS: Record<string, string> = {
 };
 
 const STAGE_BG_COLORS: Record<string, string> = {
-  TOFU: "#eff6ff",
-  MOFU: "#f5f3ff",
-  BOFU: "#ecfdf5",
-  POST_SALE: "#fffbeb",
-  INTERNAL: "#f3f4f6",
-  VERTICAL: "#fef2f2",
+  TOFU: "rgba(37, 99, 235, 0.12)",
+  MOFU: "rgba(124, 58, 237, 0.12)",
+  BOFU: "rgba(5, 150, 105, 0.12)",
+  POST_SALE: "rgba(217, 119, 6, 0.12)",
+  INTERNAL: "rgba(107, 114, 128, 0.12)",
+  VERTICAL: "rgba(220, 38, 38, 0.12)",
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -114,7 +114,7 @@ function stageColor(stage: string): string {
 }
 
 function stageBgColor(stage: string): string {
-  return STAGE_BG_COLORS[stage] ?? "#f3f4f6";
+  return STAGE_BG_COLORS[stage] ?? "rgba(107, 114, 128, 0.12)";
 }
 
 function stageLabel(stage: string): string {
@@ -893,8 +893,8 @@ const transcriptStyles = `
   display: flex;
   min-height: 100vh;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: #f8f9fb;
-  color: #1a1a2e;
+  background: #090A0F;
+  color: #B8B6BD;
   font-size: 14px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -919,13 +919,13 @@ const transcriptStyles = `
   justify-content: center;
   min-height: 100vh;
   gap: 1rem;
-  color: #555770;
+  color: #B8B6BD;
 }
 
 .transcript__loading-spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid #e5e7eb;
+  border: 3px solid rgba(255, 255, 255, 0.1);
   border-top-color: #4f46e5;
   border-radius: 50%;
   animation: transcript-spin 0.8s linear infinite;
@@ -942,7 +942,7 @@ const transcriptStyles = `
   justify-content: center;
   min-height: 100vh;
   gap: 0.5rem;
-  color: #555770;
+  color: #B8B6BD;
   text-align: center;
   padding: 2rem;
 }
@@ -955,12 +955,12 @@ const transcriptStyles = `
 .transcript__error-title {
   font-size: 1.1rem;
   font-weight: 600;
-  color: #1a1a2e;
+  color: #FFFFFF;
 }
 
 .transcript__error-detail {
   font-size: 0.9rem;
-  color: #8b8fa3;
+  color: #706D79;
 }
 
 /* ─── Header ──────────────────────────────────────────────────── */
@@ -968,8 +968,8 @@ const transcriptStyles = `
   position: sticky;
   top: 0;
   z-index: 100;
-  background: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
+  background: #0D0E14;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   padding: 0 2rem;
 }
 
@@ -1009,12 +1009,12 @@ const transcriptStyles = `
   width: 260px;
   height: 36px;
   padding: 0 2.25rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   font-size: 0.85rem;
   font-family: inherit;
-  background: #f8f9fb;
-  color: #1a1a2e;
+  background: rgba(255, 255, 255, 0.06);
+  color: #FFFFFF;
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
@@ -1031,7 +1031,7 @@ const transcriptStyles = `
   transform: translateY(-50%);
   width: 16px;
   height: 16px;
-  color: #8b8fa3;
+  color: #706D79;
   pointer-events: none;
 }
 
@@ -1041,7 +1041,7 @@ const transcriptStyles = `
   top: 50%;
   transform: translateY(-50%);
   font-size: 0.7rem;
-  color: #8b8fa3;
+  color: #706D79;
   pointer-events: none;
 }
 
@@ -1055,10 +1055,10 @@ const transcriptStyles = `
 .transcript__search-nav-btn {
   width: 28px;
   height: 28px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
-  background: #ffffff;
-  color: #555770;
+  background: rgba(255, 255, 255, 0.06);
+  color: #B8B6BD;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1067,7 +1067,7 @@ const transcriptStyles = `
 }
 
 .transcript__search-nav-btn:hover {
-  background: #f8f9fb;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .transcript__search-nav-btn svg {
@@ -1086,7 +1086,7 @@ const transcriptStyles = `
   display: flex;
   gap: 1rem;
   padding: 1rem 0;
-  border-bottom: 1px solid #f0f1f3;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   scroll-margin-top: calc(64px + 1rem);
 }
 
@@ -1119,7 +1119,7 @@ const transcriptStyles = `
 .transcript__seg-timestamp {
   font-size: 0.7rem;
   font-family: 'SF Mono', 'Fira Code', 'Fira Mono', Menlo, monospace;
-  color: #8b8fa3;
+  color: #706D79;
   white-space: nowrap;
 }
 
@@ -1138,19 +1138,19 @@ const transcriptStyles = `
 .transcript__seg-speaker {
   font-weight: 600;
   font-size: 0.9rem;
-  color: #1a1a2e;
+  color: #FFFFFF;
 }
 
 .transcript__seg-duration {
   font-size: 0.7rem;
-  color: #8b8fa3;
+  color: #706D79;
   font-family: 'SF Mono', 'Fira Code', 'Fira Mono', Menlo, monospace;
 }
 
 .transcript__seg-text {
   font-size: 0.9rem;
   line-height: 1.7;
-  color: #1a1a2e;
+  color: #B8B6BD;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -1182,14 +1182,14 @@ const transcriptStyles = `
 
 /* ─── Search Highlights ───────────────────────────────────────── */
 .transcript__search-hit {
-  background: #fef08a;
-  color: inherit;
+  background: rgba(255, 238, 112, 0.1);
+  color: #FFFFFF;
   border-radius: 2px;
   padding: 0 1px;
 }
 
 .transcript__search-hit--active {
-  background: #fde047;
+  background: rgba(255, 238, 112, 0.25);
   outline: 2px solid #4f46e5;
   outline-offset: 1px;
 }
@@ -1201,8 +1201,8 @@ const transcriptStyles = `
   right: 0;
   width: 340px;
   height: 100vh;
-  background: #ffffff;
-  border-left: 1px solid #e5e7eb;
+  background: #0D0E14;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
   overflow-y: auto;
   z-index: 50;
   transition: transform 0.3s ease;
@@ -1219,21 +1219,21 @@ const transcriptStyles = `
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
+  background: #1A1B23;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   transition: transform 0.3s;
 }
 
 .transcript__sidebar-toggle svg {
   width: 16px;
   height: 16px;
-  color: #555770;
+  color: #B8B6BD;
   transition: transform 0.3s;
 }
 
@@ -1272,7 +1272,7 @@ const transcriptStyles = `
 .transcript__sidebar-call-title {
   font-size: 1rem;
   font-weight: 600;
-  color: #1a1a2e;
+  color: #FFFFFF;
   margin-bottom: 0.75rem;
   line-height: 1.4;
 }
@@ -1285,7 +1285,7 @@ const transcriptStyles = `
   height: 18px;
   padding: 0 5px;
   border-radius: 100px;
-  background: #eef2ff;
+  background: rgba(79, 70, 229, 0.15);
   color: #4f46e5;
   font-size: 0.65rem;
   font-weight: 700;
@@ -1316,7 +1316,7 @@ const transcriptStyles = `
   display: flex;
   justify-content: space-between;
   padding: 0.4rem 0;
-  border-bottom: 1px solid #f0f1f3;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   font-size: 0.82rem;
 }
 
@@ -1330,7 +1330,7 @@ const transcriptStyles = `
 }
 
 .transcript__meta-value {
-  color: #1a1a2e;
+  color: #FFFFFF;
   font-weight: 500;
   text-align: right;
 }
@@ -1370,7 +1370,7 @@ const transcriptStyles = `
 .transcript__participant-name {
   font-size: 0.82rem;
   font-weight: 600;
-  color: #1a1a2e;
+  color: #FFFFFF;
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -1390,7 +1390,7 @@ const transcriptStyles = `
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #4f46e5;
-  background: #eef2ff;
+  background: rgba(79, 70, 229, 0.15);
   padding: 0.05rem 0.35rem;
   border-radius: 4px;
 }
@@ -1403,19 +1403,19 @@ const transcriptStyles = `
 
 /* ─── Entity Card ─────────────────────────────────────────────── */
 .transcript__entity-card {
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   padding: 0.75rem;
 }
 
 .transcript__entity-card--resolved {
-  border-color: #a7f3d0;
-  background: #f0fdf4;
+  border-color: rgba(5, 150, 105, 0.3);
+  background: rgba(5, 150, 105, 0.08);
 }
 
 .transcript__entity-card--unresolved {
-  border-color: #fecaca;
-  background: #fef2f2;
+  border-color: rgba(220, 38, 38, 0.3);
+  background: rgba(220, 38, 38, 0.08);
 }
 
 .transcript__entity-status {
@@ -1454,7 +1454,7 @@ const transcriptStyles = `
 }
 
 .transcript__entity-value {
-  color: #1a1a2e;
+  color: #FFFFFF;
   font-weight: 500;
 }
 
@@ -1481,7 +1481,7 @@ const transcriptStyles = `
 .transcript__empty-title {
   font-size: 1.1rem;
   font-weight: 600;
-  color: #1a1a2e;
+  color: #FFFFFF;
   margin-bottom: 0.3rem;
 }
 
