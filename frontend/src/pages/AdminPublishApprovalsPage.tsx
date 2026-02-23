@@ -39,27 +39,27 @@ export function AdminPublishApprovalsPage() {
   };
 
   return (
-    <div className="admin-security__page">
-      <h1 className="admin-security__title">Publish Approvals</h1>
+    <div className="page">
+      <div className="page__header"><div className="page__header-text"><h1 className="page__title">Publish Approvals</h1><p className="page__subtitle">Review and approve content publishing requests</p></div></div>
 
-      <div className="admin-security__card">
-        <label className="admin-security__field">
-          Status
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="PENDING">PENDING</option>
-            <option value="APPROVED">APPROVED</option>
-            <option value="REJECTED">REJECTED</option>
+      <div className="card card--elevated">
+        <div className="form-group" style={{ maxWidth: 200 }}>
+          <label className="form-group__label">Filter by Status</label>
+          <select className="form-select" value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="PENDING">Pending</option>
+            <option value="APPROVED">Approved</option>
+            <option value="REJECTED">Rejected</option>
           </select>
-        </label>
+        </div>
       </div>
 
-      {error && <div className="admin-story-context__error">{error}</div>}
+      {error && <div className="alert alert--error">{error}</div>}
 
-      <div className="admin-security__card">
+      <div className="card card--elevated">
         {loading ? (
-          <div>Loading approvals...</div>
+          <div className="state-view" style={{ minHeight: 120 }}><div className="spinner spinner--sm" /></div>
         ) : (
-          <table className="admin-ops__table">
+          <table className="data-table">
             <thead>
               <tr>
                 <th>Created</th>

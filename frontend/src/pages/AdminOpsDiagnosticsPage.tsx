@@ -244,22 +244,22 @@ export function AdminOpsDiagnosticsPage() {
   }, []);
 
   return (
-    <div className="admin-ops__page">
-      <header className="admin-ops__header">
-        <h1 className="admin-ops__title">Ops Diagnostics</h1>
+    <div className="page">
+      <header className="page__header">
+        <h1 className="page__title">Ops Diagnostics</h1>
         <button className="btn btn--secondary" onClick={load}>
           Refresh
         </button>
       </header>
 
       {loading && <div role="status" aria-live="polite">Loading diagnostics...</div>}
-      {error && <div className="admin-story-context__error" role="alert">{error}</div>}
+      {error && <div className="alert alert--error" role="alert">{error}</div>}
 
       {!loading && data && (
         <>
-          <section className="admin-ops__card">
+          <section className="card card--elevated">
             <h2>Tenant Totals</h2>
-            <div className="admin-ops__grid">
+            <div className="kpi-grid">
               <div>Accounts: {data.tenant.totals.accounts}</div>
               <div>Calls: {data.tenant.totals.calls}</div>
               <div>Stories: {data.tenant.totals.stories}</div>
@@ -267,17 +267,17 @@ export function AdminOpsDiagnosticsPage() {
             </div>
           </section>
 
-          <section className="admin-ops__card">
+          <section className="card card--elevated">
             <h2>Pipeline Status (Last 24h)</h2>
             {pipelineStatus ? (
               <>
-                <div className="admin-ops__grid">
+                <div className="kpi-grid">
                   <div>Pending Approvals: {pipelineStatus.pending_approvals}</div>
                   <div>Failed Backfills: {pipelineStatus.failed_backfills}</div>
                   <div>Sync Failed: {pipelineStatus.sync.failed}</div>
                   <div>Replay Failed: {pipelineStatus.replay.failed}</div>
                 </div>
-                <table className="admin-ops__table">
+                <table className="data-table">
                   <thead>
                     <tr>
                       <th>Run Type</th>
@@ -307,17 +307,17 @@ export function AdminOpsDiagnosticsPage() {
             )}
           </section>
 
-          <section className="admin-ops__card">
+          <section className="card card--elevated">
             <h2>DR Readiness</h2>
             {drReadiness ? (
               <>
-                <div className="admin-ops__grid">
+                <div className="kpi-grid">
                   <div>Status: {drReadiness.status}</div>
                   <div>RTO Target: {drReadiness.targets.rto_minutes}m</div>
                   <div>RPO Target: {drReadiness.targets.rpo_minutes}m</div>
                   <div>Backup Age: {drReadiness.backup_age_minutes ?? "-"}m</div>
                 </div>
-                <div className="admin-security__inline">
+                <div className="form-row">
                   <button className="btn btn--secondary" onClick={triggerBackupVerify}>
                     Verify Backup Snapshot
                   </button>
@@ -331,7 +331,7 @@ export function AdminOpsDiagnosticsPage() {
             )}
           </section>
 
-          <section className="admin-ops__card">
+          <section className="card card--elevated">
             <h2>Synthetic Dependency Health</h2>
             {syntheticHealth ? (
               <>
@@ -339,7 +339,7 @@ export function AdminOpsDiagnosticsPage() {
                   Status: <strong>{syntheticHealth.status}</strong> (checked{" "}
                   {new Date(syntheticHealth.checked_at).toLocaleString()})
                 </div>
-                <table className="admin-ops__table">
+                <table className="data-table">
                   <thead>
                     <tr>
                       <th>Dependency</th>
@@ -363,11 +363,11 @@ export function AdminOpsDiagnosticsPage() {
             )}
           </section>
 
-          <section className="admin-ops__card">
+          <section className="card card--elevated">
             <h2>Queue SLO (Last 24h)</h2>
             {queueSlo ? (
               <>
-                <div className="admin-ops__grid">
+                <div className="kpi-grid">
                   <div>Total Runs: {queueSlo.total_runs}</div>
                   <div>Failed Runs: {queueSlo.failed_runs}</div>
                   <div>Failure Rate: {queueSlo.failure_rate}%</div>
@@ -388,15 +388,15 @@ export function AdminOpsDiagnosticsPage() {
             )}
           </section>
 
-          <section className="admin-ops__card">
+          <section className="card card--elevated">
             <h2>Support Impersonation</h2>
-            <div className="admin-ops__grid">
+            <div className="kpi-grid">
               <div>
                 Current Session Token:{" "}
                 {activeSupportToken ? "Active in this browser" : "None"}
               </div>
             </div>
-            <div className="admin-security__inline">
+            <div className="form-row">
               <input
                 value={supportTargetUserId}
                 onChange={(e) => setSupportTargetUserId(e.target.value)}
@@ -434,7 +434,7 @@ export function AdminOpsDiagnosticsPage() {
                 Clear Local Token
               </button>
             </div>
-            <table className="admin-ops__table">
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>Started</th>
@@ -476,9 +476,9 @@ export function AdminOpsDiagnosticsPage() {
             </table>
           </section>
 
-          <section className="admin-ops__card">
+          <section className="card card--elevated">
             <h2>Incident Response & Status</h2>
-            <div className="admin-security__inline">
+            <div className="form-row">
               <input
                 value={incidentTitle}
                 onChange={(e) => setIncidentTitle(e.target.value)}
@@ -514,7 +514,7 @@ export function AdminOpsDiagnosticsPage() {
             {incidents.length === 0 ? (
               <div>No incidents reported.</div>
             ) : (
-              <table className="admin-ops__table">
+              <table className="data-table">
                 <thead>
                   <tr>
                     <th>Started</th>
@@ -534,7 +534,7 @@ export function AdminOpsDiagnosticsPage() {
                       <td>{incident.status}</td>
                       <td>{incident.summary}</td>
                       <td>
-                        <div className="admin-security__inline">
+                        <div className="form-row">
                           <input
                             value={incidentUpdateText[incident.id] ?? ""}
                             onChange={(e) =>
@@ -576,9 +576,9 @@ export function AdminOpsDiagnosticsPage() {
             )}
           </section>
 
-          <section className="admin-ops__card">
+          <section className="card card--elevated">
             <h2>Integration Health</h2>
-            <table className="admin-ops__table">
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>Provider</th>
@@ -606,14 +606,14 @@ export function AdminOpsDiagnosticsPage() {
             </table>
           </section>
 
-          <section className="admin-ops__card">
+          <section className="card card--elevated">
             <h2>Integrations</h2>
-            <div className="admin-ops__grid">
+            <div className="kpi-grid">
               <div>Total: {data.integrations.total}</div>
               <div>Enabled: {data.integrations.enabled}</div>
               <div>Failed: {data.integrations.failed}</div>
             </div>
-            <table className="admin-ops__table">
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>Provider</th>
@@ -637,9 +637,9 @@ export function AdminOpsDiagnosticsPage() {
             </table>
           </section>
 
-          <section className="admin-ops__card">
+          <section className="card card--elevated">
             <h2>Recent Audit Events</h2>
-            <table className="admin-ops__table">
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>Time</th>
@@ -661,12 +661,12 @@ export function AdminOpsDiagnosticsPage() {
             </table>
           </section>
 
-          <section className="admin-ops__card">
+          <section className="card card--elevated">
             <h2>Dead-Letter Integration Runs</h2>
             {deadLetterRuns.length === 0 ? (
               <div>No failed integration runs.</div>
             ) : (
-              <table className="admin-ops__table">
+              <table className="data-table">
                 <thead>
                   <tr>
                     <th>Provider</th>
@@ -699,9 +699,9 @@ export function AdminOpsDiagnosticsPage() {
             )}
           </section>
 
-          <section className="admin-ops__card">
+          <section className="card card--elevated">
             <h2>Backfill Runs</h2>
-            <div className="admin-security__inline">
+            <div className="form-row">
               <select
                 value={backfillProvider}
                 onChange={(e) => setBackfillProvider(e.target.value)}
@@ -725,7 +725,7 @@ export function AdminOpsDiagnosticsPage() {
                 Trigger Backfill
               </button>
             </div>
-            <table className="admin-ops__table">
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>Provider</th>

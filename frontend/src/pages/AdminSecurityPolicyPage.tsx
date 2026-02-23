@@ -88,7 +88,7 @@ export function AdminSecurityPolicyPage() {
     }
   };
 
-  if (loading) return <div className="admin-security__page" role="status" aria-live="polite">Loading security policy...</div>;
+  if (loading) return <div className="state-view" role="status" aria-live="polite"><div className="spinner" /><div className="state-view__title">Loading security policy...</div></div>;
 
   const addIpEntry = async () => {
     if (!newCidr.trim()) return;
@@ -117,13 +117,13 @@ export function AdminSecurityPolicyPage() {
   };
 
   return (
-    <div className="admin-security__page">
-      <h1 className="admin-security__title">Security Policy</h1>
-      {error && <div className="admin-story-context__error" role="alert">{error}</div>}
-      {notice && <div className="admin-story-context__notice" role="status" aria-live="polite">{notice}</div>}
+    <div className="page">
+      <div className="page__header"><div className="page__header-text"><h1 className="page__title">Security Policy</h1><p className="page__subtitle">Configure authentication, session controls, and access policies</p></div></div>
+      {error && <div className="alert alert--error" role="alert">{error}</div>}
+      {notice && <div className="alert alert--success" role="status" aria-live="polite">{notice}</div>}
 
-      <section className="admin-security__card">
-        <label className="admin-security__row">
+      <section className="card card--elevated">
+        <label className="form-row">
           <input
             type="checkbox"
             checked={policy.enforce_mfa_for_admin_actions}
@@ -137,7 +137,7 @@ export function AdminSecurityPolicyPage() {
           Enforce MFA for admin actions
         </label>
 
-        <label className="admin-security__row">
+        <label className="form-row">
           <input
             type="checkbox"
             checked={policy.sso_enforced ?? false}
@@ -151,7 +151,7 @@ export function AdminSecurityPolicyPage() {
           Enforce SSO-only authentication
         </label>
 
-        <label className="admin-security__field">
+        <label className="form-group">
           Allowed SSO domains (comma-separated)
           <input
             value={allowedDomainsText}
@@ -160,7 +160,7 @@ export function AdminSecurityPolicyPage() {
           />
         </label>
 
-        <label className="admin-security__row">
+        <label className="form-row">
           <input
             type="checkbox"
             checked={policy.session_controls_enabled ?? false}
@@ -174,7 +174,7 @@ export function AdminSecurityPolicyPage() {
           Enable session policy enforcement
         </label>
 
-        <label className="admin-security__field">
+        <label className="form-group">
           Max session age (hours)
           <input
             type="number"
@@ -191,7 +191,7 @@ export function AdminSecurityPolicyPage() {
           />
         </label>
 
-        <label className="admin-security__field">
+        <label className="form-group">
           Sensitive-action re-auth window (minutes)
           <input
             type="number"
@@ -208,7 +208,7 @@ export function AdminSecurityPolicyPage() {
           />
         </label>
 
-        <label className="admin-security__row">
+        <label className="form-row">
           <input
             type="checkbox"
             checked={policy.ip_allowlist_enabled}
@@ -222,7 +222,7 @@ export function AdminSecurityPolicyPage() {
           Enable IP allowlist
         </label>
 
-        <label className="admin-security__field">
+        <label className="form-group">
           Allowed IPs (comma-separated)
           <input
             value={ipAllowlistText}
@@ -233,9 +233,9 @@ export function AdminSecurityPolicyPage() {
         </label>
       </section>
 
-      <section className="admin-security__card">
+      <section className="card card--elevated">
         <h2>IP Allowlist Entries</h2>
-        <div className="admin-security__inline">
+        <div className="form-row">
           <input
             value={newCidr}
             onChange={(e) => setNewCidr(e.target.value)}
@@ -250,7 +250,7 @@ export function AdminSecurityPolicyPage() {
             Add
           </button>
         </div>
-        <table className="admin-ops__table">
+        <table className="data-table">
           <thead>
             <tr>
               <th>CIDR</th>
@@ -293,9 +293,9 @@ export function AdminSecurityPolicyPage() {
         </table>
       </section>
 
-      <section className="admin-security__card">
+      <section className="card card--elevated">
         <h2>Active Sessions / Devices</h2>
-        <table className="admin-ops__table">
+        <table className="data-table">
           <thead>
             <tr>
               <th>User</th>
@@ -330,9 +330,9 @@ export function AdminSecurityPolicyPage() {
         </table>
       </section>
 
-      <section className="admin-security__card">
+      <section className="card card--elevated">
         <h2>SCIM Provisioning</h2>
-        <label className="admin-security__row">
+        <label className="form-row">
           <input
             type="checkbox"
             checked={scim?.enabled ?? false}
@@ -351,7 +351,7 @@ export function AdminSecurityPolicyPage() {
           Rotate SCIM Token
         </button>
         {newScimToken && (
-          <div className="admin-story-context__notice">
+          <div className="alert alert--success">
             New SCIM token (copy now): <code>{newScimToken}</code>
           </div>
         )}

@@ -9,6 +9,8 @@ import {
   type RoleProfile,
   type UpsertRoleProfileRequest,
 } from "../lib/api";
+import { formatEnumLabel } from "../lib/format";
+import { useToast } from "../components/Toast";
 
 const PERMISSIONS = [
   "CREATE_LANDING_PAGE",
@@ -66,6 +68,7 @@ export function AdminRolesPage() {
   const [saving, setSaving] = useState(false);
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const [form, setForm] = useState<RoleFormState>(DEFAULT_FORM);
+  const { showToast } = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -122,8 +125,10 @@ export function AdminRolesPage() {
     try {
       if (editingRoleId) {
         await updateRoleProfile(editingRoleId, payload);
+        showToast("Role updated", "success");
       } else {
         await createRoleProfile(payload);
+        showToast("Role created", "success");
       }
       resetForm();
       await load();
@@ -162,6 +167,7 @@ export function AdminRolesPage() {
     try {
       await deleteRoleProfile(role.id);
       if (editingRoleId === role.id) resetForm();
+      showToast("Role deleted", "info");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete role");
@@ -176,6 +182,7 @@ export function AdminRolesPage() {
     setError(null);
     try {
       await assignRoleProfile(userId, roleProfileId);
+      showToast("Role assigned", "success");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to assign role");
@@ -185,320 +192,243 @@ export function AdminRolesPage() {
   };
 
   if (loading) {
-    return <div className="admin-roles__page" role="status" aria-live="polite">Loading roles...</div>;
+    return <div className="state-view" role="status" aria-live="polite"><div className="spinner" /><div className="state-view__title">Loading roles...</div></div>;
   }
 
   return (
-    <div className="admin-roles__page">
-      <h1 className="admin-roles__title">Role Profiles</h1>
-      <p className="admin-roles__subtitle">
-        Configure preset and custom team roles, usage limits, account scope, and named/anonymous story permissions.
-      </p>
-
-      {error && <div className="admin-roles__error" role="alert">{error}</div>}
-
-      <form className="admin-roles__form" onSubmit={onSubmit}>
-        <h2>{editingRoleId ? "Edit Role" : "Create Custom Role"}</h2>
-        <div className="admin-roles__grid">
-          <label>
-            Key
-            <input
-              value={form.key}
-              onChange={(e) => setForm((p) => ({ ...p, key: e.target.value }))}
-              required
-              disabled={saving}
-            />
-          </label>
-          <label>
-            Name
-            <input
-              value={form.name}
-              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-              required
-              disabled={saving}
-            />
-          </label>
-          <label className="admin-roles__wide">
-            Description
-            <input
-              value={form.description}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, description: e.target.value }))
-              }
-              disabled={saving}
-            />
-          </label>
-          <label>
-            Default Account Scope
-            <select
-              value={form.default_account_scope_type}
-              onChange={(e) =>
-                setForm((p) => ({
-                  ...p,
-                  default_account_scope_type: e.target.value as RoleFormState["default_account_scope_type"],
-                }))
-              }
-              disabled={saving}
-            >
-              <option value="ALL_ACCOUNTS">ALL_ACCOUNTS</option>
-              <option value="SINGLE_ACCOUNT">SINGLE_ACCOUNT</option>
-              <option value="ACCOUNT_LIST">ACCOUNT_LIST</option>
-              <option value="CRM_REPORT">CRM_REPORT</option>
-            </select>
-          </label>
-          <label className="admin-roles__wide">
-            Default Account IDs (comma-separated)
-            <input
-              value={form.default_account_ids}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, default_account_ids: e.target.value }))
-              }
-              disabled={saving}
-            />
-          </label>
-          <label>
-            Max Tokens / Day
-            <input
-              type="number"
-              min={0}
-              value={form.max_tokens_per_day}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, max_tokens_per_day: e.target.value }))
-              }
-              disabled={saving}
-            />
-          </label>
-          <label>
-            Max Tokens / Month
-            <input
-              type="number"
-              min={0}
-              value={form.max_tokens_per_month}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, max_tokens_per_month: e.target.value }))
-              }
-              disabled={saving}
-            />
-          </label>
-          <label>
-            Max Requests / Day
-            <input
-              type="number"
-              min={0}
-              value={form.max_requests_per_day}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, max_requests_per_day: e.target.value }))
-              }
-              disabled={saving}
-            />
-          </label>
-          <label>
-            Max Requests / Month
-            <input
-              type="number"
-              min={0}
-              value={form.max_requests_per_month}
-              onChange={(e) =>
-                setForm((p) => ({
-                  ...p,
-                  max_requests_per_month: e.target.value,
-                }))
-              }
-              disabled={saving}
-            />
-          </label>
-          <label>
-            Max Stories / Month
-            <input
-              type="number"
-              min={0}
-              value={form.max_stories_per_month}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, max_stories_per_month: e.target.value }))
-              }
-              disabled={saving}
-            />
-          </label>
+    <div className="page">
+      <div className="page__header">
+        <div className="page__header-text">
+          <h1 className="page__title">Role Profiles</h1>
+          <p className="page__subtitle">Configure preset and custom team roles, usage limits, account scope, and story permissions.</p>
         </div>
+      </div>
 
-        <div className="admin-roles__flags">
-          <label>
-            <input
-              type="checkbox"
-              checked={form.can_access_anonymous_stories}
-              onChange={(e) =>
-                setForm((p) => ({
-                  ...p,
-                  can_access_anonymous_stories: e.target.checked,
-                }))
-              }
-            />
-            Can access anonymous stories
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={form.can_generate_anonymous_stories}
-              onChange={(e) =>
-                setForm((p) => ({
-                  ...p,
-                  can_generate_anonymous_stories: e.target.checked,
-                }))
-              }
-            />
-            Can generate anonymous stories
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={form.can_access_named_stories}
-              onChange={(e) =>
-                setForm((p) => ({
-                  ...p,
-                  can_access_named_stories: e.target.checked,
-                }))
-              }
-            />
-            Can access named stories
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={form.can_generate_named_stories}
-              onChange={(e) =>
-                setForm((p) => ({
-                  ...p,
-                  can_generate_named_stories: e.target.checked,
-                }))
-              }
-            />
-            Can generate named stories
-          </label>
-        </div>
+      {error && <div className="alert alert--error" role="alert">{error}</div>}
 
-        <div className="admin-roles__permissions">
-          {PERMISSIONS.map((perm) => (
-            <label key={perm}>
-              <input
-                type="checkbox"
-                checked={form.permissions.includes(perm)}
-                onChange={(e) =>
-                  setForm((p) => ({
-                    ...p,
-                    permissions: e.target.checked
-                      ? [...new Set([...p.permissions, perm])]
-                      : p.permissions.filter((x) => x !== perm),
-                  }))
-                }
-              />
-              {perm}
-            </label>
-          ))}
-        </div>
-
-        <div className="admin-roles__form-actions">
-          <button type="submit" className="btn btn--primary" disabled={saving}>
-            {editingRoleId ? "Save Role" : "Create Role"}
-          </button>
+      {/* Role Form */}
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div className="card__title">{editingRoleId ? "Edit Role" : "Create Custom Role"}</div>
           {editingRoleId && (
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={resetForm}
-              disabled={saving}
-            >
-              Cancel
-            </button>
+            <button className="btn btn--ghost btn--sm" onClick={resetForm} disabled={saving}>Cancel</button>
           )}
         </div>
-      </form>
+        <form onSubmit={onSubmit}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="form-group">
+              <label className="form-group__label">Key</label>
+              <input className="form-input" value={form.key} onChange={(e) => setForm((p) => ({ ...p, key: e.target.value }))} required disabled={saving} placeholder="CUSTOM_ROLE_KEY" />
+            </div>
+            <div className="form-group">
+              <label className="form-group__label">Name</label>
+              <input className="form-input" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} required disabled={saving} placeholder="Role display name" />
+            </div>
+            <div className="form-group" style={{ gridColumn: "1 / -1" }}>
+              <label className="form-group__label">Description</label>
+              <input className="form-input" value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} disabled={saving} placeholder="Brief description of this role" />
+            </div>
+            <div className="form-group">
+              <label className="form-group__label">Default Account Scope</label>
+              <select className="form-select" value={form.default_account_scope_type} onChange={(e) => setForm((p) => ({ ...p, default_account_scope_type: e.target.value as RoleFormState["default_account_scope_type"] }))} disabled={saving}>
+                <option value="ALL_ACCOUNTS">All Accounts</option>
+                <option value="SINGLE_ACCOUNT">Single Account</option>
+                <option value="ACCOUNT_LIST">Account List</option>
+                <option value="CRM_REPORT">CRM Report</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-group__label">Default Account IDs</label>
+              <input className="form-input" value={form.default_account_ids} onChange={(e) => setForm((p) => ({ ...p, default_account_ids: e.target.value }))} disabled={saving} placeholder="Comma-separated IDs" />
+            </div>
+          </div>
 
-      <section className="admin-roles__section">
-        <h2>Roles</h2>
-        <table className="admin-roles__table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Key</th>
-              <th>Type</th>
-              <th>Permissions</th>
-              <th>Story Access</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {roles.map((role) => (
-              <tr key={role.id}>
-                <td>{role.name}</td>
-                <td>{role.key}</td>
-                <td>{role.isPreset ? "Preset" : "Custom"}</td>
-                <td>{role.permissions.join(", ") || "None"}</td>
-                <td>
-                  A:{role.canAccessAnonymousStories ? "Y" : "N"}/G:
-                  {role.canGenerateAnonymousStories ? "Y" : "N"} | N:
-                  {role.canAccessNamedStories ? "Y" : "N"}/G:
-                  {role.canGenerateNamedStories ? "Y" : "N"}
-                </td>
-                <td className="admin-roles__actions">
-                  <button
-                    type="button"
-                    className="btn btn--secondary btn--sm"
-                    onClick={() => onEdit(role)}
-                    disabled={saving}
-                  >
-                    Edit
-                  </button>
-                  {!role.isPreset && (
-                    <button
-                      type="button"
-                      className="btn btn--ghost btn--sm"
-                      onClick={() => onDelete(role)}
+          {/* Usage Limits */}
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Usage Limits</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+              <div className="form-group">
+                <label className="form-group__label">Max Tokens / Day</label>
+                <input className="form-input" type="number" min={0} value={form.max_tokens_per_day} onChange={(e) => setForm((p) => ({ ...p, max_tokens_per_day: e.target.value }))} disabled={saving} placeholder="Unlimited" />
+              </div>
+              <div className="form-group">
+                <label className="form-group__label">Max Tokens / Month</label>
+                <input className="form-input" type="number" min={0} value={form.max_tokens_per_month} onChange={(e) => setForm((p) => ({ ...p, max_tokens_per_month: e.target.value }))} disabled={saving} placeholder="Unlimited" />
+              </div>
+              <div className="form-group">
+                <label className="form-group__label">Max Requests / Day</label>
+                <input className="form-input" type="number" min={0} value={form.max_requests_per_day} onChange={(e) => setForm((p) => ({ ...p, max_requests_per_day: e.target.value }))} disabled={saving} placeholder="Unlimited" />
+              </div>
+              <div className="form-group">
+                <label className="form-group__label">Max Requests / Month</label>
+                <input className="form-input" type="number" min={0} value={form.max_requests_per_month} onChange={(e) => setForm((p) => ({ ...p, max_requests_per_month: e.target.value }))} disabled={saving} placeholder="Unlimited" />
+              </div>
+              <div className="form-group">
+                <label className="form-group__label">Max Stories / Month</label>
+                <input className="form-input" type="number" min={0} value={form.max_stories_per_month} onChange={(e) => setForm((p) => ({ ...p, max_stories_per_month: e.target.value }))} disabled={saving} placeholder="Unlimited" />
+              </div>
+            </div>
+          </div>
+
+          {/* Story Access Flags */}
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Story Access</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <label className="form-row">
+                <input type="checkbox" checked={form.can_access_anonymous_stories} onChange={(e) => setForm((p) => ({ ...p, can_access_anonymous_stories: e.target.checked }))} />
+                Can access anonymous stories
+              </label>
+              <label className="form-row">
+                <input type="checkbox" checked={form.can_generate_anonymous_stories} onChange={(e) => setForm((p) => ({ ...p, can_generate_anonymous_stories: e.target.checked }))} />
+                Can generate anonymous stories
+              </label>
+              <label className="form-row">
+                <input type="checkbox" checked={form.can_access_named_stories} onChange={(e) => setForm((p) => ({ ...p, can_access_named_stories: e.target.checked }))} />
+                Can access named stories
+              </label>
+              <label className="form-row">
+                <input type="checkbox" checked={form.can_generate_named_stories} onChange={(e) => setForm((p) => ({ ...p, can_generate_named_stories: e.target.checked }))} />
+                Can generate named stories
+              </label>
+            </div>
+          </div>
+
+          {/* Permissions */}
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Permissions</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              {PERMISSIONS.map((perm) => (
+                <label key={perm} className="form-row">
+                  <input
+                    type="checkbox"
+                    checked={form.permissions.includes(perm)}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        permissions: e.target.checked
+                          ? [...new Set([...p.permissions, perm])]
+                          : p.permissions.filter((x) => x !== perm),
+                      }))
+                    }
+                  />
+                  {formatEnumLabel(perm)}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 20, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            {editingRoleId && (
+              <button type="button" className="btn btn--secondary" onClick={resetForm} disabled={saving}>Cancel</button>
+            )}
+            <button type="submit" className="btn btn--primary" disabled={saving}>
+              {editingRoleId ? "Save Role" : "Create Role"}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Roles Table */}
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div className="card__title">Roles</div>
+          <span className="badge badge--accent">{roles.length} roles</span>
+        </div>
+        <div className="table-container" style={{ border: "none", borderRadius: 0 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Key</th>
+                <th>Type</th>
+                <th>Permissions</th>
+                <th>Story Access</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {roles.map((role) => (
+                <tr key={role.id}>
+                  <td style={{ fontWeight: 500 }}>{role.name}</td>
+                  <td><code style={{ fontSize: 12 }}>{role.key}</code></td>
+                  <td><span className={role.isPreset ? "badge badge--info" : "badge badge--accent"}>{role.isPreset ? "Preset" : "Custom"}</span></td>
+                  <td style={{ maxWidth: 200 }}>
+                    {role.permissions.length > 0 ? (
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        {role.permissions.slice(0, 3).map((p) => (
+                          <span key={p} className="badge badge--accent" style={{ fontSize: 10 }}>{formatEnumLabel(p)}</span>
+                        ))}
+                        {role.permissions.length > 3 && (
+                          <span className="badge badge--accent" style={{ fontSize: 10 }}>+{role.permissions.length - 3}</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span style={{ color: "var(--color-text-muted)" }}>None</span>
+                    )}
+                  </td>
+                  <td style={{ fontSize: 12 }}>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {role.canAccessAnonymousStories && <span className="badge badge--success" style={{ fontSize: 10 }}>Anon Read</span>}
+                      {role.canGenerateAnonymousStories && <span className="badge badge--success" style={{ fontSize: 10 }}>Anon Gen</span>}
+                      {role.canAccessNamedStories && <span className="badge badge--info" style={{ fontSize: 10 }}>Named Read</span>}
+                      {role.canGenerateNamedStories && <span className="badge badge--info" style={{ fontSize: 10 }}>Named Gen</span>}
+                    </div>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button type="button" className="btn btn--secondary btn--sm" onClick={() => onEdit(role)} disabled={saving}>Edit</button>
+                      {!role.isPreset && (
+                        <button type="button" className="btn btn--ghost btn--sm" style={{ color: "var(--color-error)" }} onClick={() => onDelete(role)} disabled={saving}>Delete</button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* User Assignments */}
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div className="card__title">User Assignments</div>
+          <span className="badge badge--accent">{users.length} users</span>
+        </div>
+        <div className="table-container" style={{ border: "none", borderRadius: 0 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Base Role</th>
+                <th>Assigned Profile</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.id}>
+                  <td style={{ fontWeight: 500 }}>{user.name ?? user.email}</td>
+                  <td><span className="badge badge--info">{formatEnumLabel(user.base_role)}</span></td>
+                  <td>
+                    <select
+                      className="form-select"
+                      value={user.role_profile_id ?? ""}
+                      onChange={(e) => onAssign(user.id, e.target.value)}
                       disabled={saving}
+                      style={{ maxWidth: 220 }}
                     >
-                      Delete
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      <section className="admin-roles__section">
-        <h2>User Assignments</h2>
-        <table className="admin-roles__table">
-          <thead>
-            <tr>
-              <th>User</th>
-              <th>Base Role</th>
-              <th>Assigned Profile</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((user) => (
-              <tr key={user.id}>
-                <td>{user.name ?? user.email}</td>
-                <td>{user.base_role}</td>
-                <td>
-                  <select
-                    value={user.role_profile_id ?? ""}
-                    onChange={(e) => onAssign(user.id, e.target.value)}
-                    disabled={saving}
-                  >
-                    <option value="">No profile</option>
-                    {roles.map((role) => (
-                      <option key={role.id} value={role.id}>
-                        {role.name}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+                      <option value="">No profile</option>
+                      {roles.map((role) => (
+                        <option key={role.id} value={role.id}>{role.name}</option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

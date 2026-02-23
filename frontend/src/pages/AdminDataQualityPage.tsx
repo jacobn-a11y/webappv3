@@ -99,16 +99,16 @@ export function AdminDataQualityPage() {
   };
 
   if (loading) {
-    return <div className="admin-security__page">Loading quality dashboard...</div>;
+    return <div className="state-view"><div className="spinner" /><div className="state-view__title">Loading quality dashboard...</div></div>;
   }
 
   return (
-    <div className="admin-security__page">
-      <h1 className="admin-security__title">Data Quality & Trust</h1>
-      {error && <div className="admin-story-context__error">{error}</div>}
+    <div className="page">
+      <div className="page__header"><div className="page__header-text"><h1 className="page__title">Data Quality & Trust</h1><p className="page__subtitle">Monitor story confidence, lineage coverage, and human feedback</p></div></div>
+      {error && <div className="alert alert--error">{error}</div>}
 
       {overview && (
-        <section className="admin-security__card">
+        <section className="card card--elevated">
           <div>Stories Total: {overview.stories_total}</div>
           <div>Confidence 30d: {overview.confidence.avg_30d}</div>
           <div>Drift: {overview.confidence.drift_status} ({overview.confidence.drift_delta})</div>
@@ -119,9 +119,9 @@ export function AdminDataQualityPage() {
         </section>
       )}
 
-      <section className="admin-security__card">
+      <section className="card card--elevated">
         <h2>Lookup Story Lineage</h2>
-        <div className="admin-security__inline">
+        <div className="form-row">
           <input
             value={storyId}
             onChange={(e) => setStoryId(e.target.value)}
@@ -146,9 +146,9 @@ export function AdminDataQualityPage() {
         )}
       </section>
 
-      <section className="admin-security__card">
+      <section className="card card--elevated">
         <h2>Submit Quality Feedback (Human-in-the-loop)</h2>
-        <div className="admin-security__inline">
+        <div className="form-row">
           <input
             value={newFeedback.story_id}
             onChange={(e) => setNewFeedback((s) => ({ ...s, story_id: e.target.value }))}
@@ -185,12 +185,12 @@ export function AdminDataQualityPage() {
           />
         </div>
         <textarea
-          className="admin-story-context__textarea"
+          className="form-textarea"
           value={newFeedback.notes}
           onChange={(e) => setNewFeedback((s) => ({ ...s, notes: e.target.value }))}
           placeholder="Feedback notes"
         />
-        <label className="admin-security__row">
+        <label className="form-row">
           <input
             type="checkbox"
             checked={newFeedback.apply_to_prompt_tuning}
@@ -205,9 +205,9 @@ export function AdminDataQualityPage() {
         </button>
       </section>
 
-      <section className="admin-security__card">
+      <section className="card card--elevated">
         <h2>Feedback Queue</h2>
-        <table className="admin-ops__table">
+        <table className="data-table">
           <thead>
             <tr>
               <th>Created</th>

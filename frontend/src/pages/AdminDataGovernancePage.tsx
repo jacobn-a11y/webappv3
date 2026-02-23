@@ -219,17 +219,17 @@ export function AdminDataGovernancePage() {
   };
 
   if (loading) {
-    return <div className="admin-security__page">Loading data governance...</div>;
+    return <div className="state-view"><div className="spinner" /><div className="state-view__title">Loading data governance...</div></div>;
   }
 
   return (
-    <div className="admin-security__page">
-      <h1 className="admin-security__title">Data Governance</h1>
-      {error && <div className="admin-story-context__error">{error}</div>}
-      {notice && <div className="admin-story-context__notice">{notice}</div>}
+    <div className="page">
+      <div className="page__header"><div className="page__header-text"><h1 className="page__title">Data Governance</h1><p className="page__subtitle">Manage retention policies, deletion approvals, and artifact governance</p></div></div>
+      {error && <div className="alert alert--error">{error}</div>}
+      {notice && <div className="alert alert--success">{notice}</div>}
 
-      <section className="admin-security__card">
-        <label className="admin-security__field">
+      <section className="card card--elevated">
+        <label className="form-group">
           Data retention (days)
           <input
             type="number"
@@ -242,7 +242,7 @@ export function AdminDataGovernancePage() {
           />
         </label>
 
-        <label className="admin-security__field">
+        <label className="form-group">
           Audit log retention (days)
           <input
             type="number"
@@ -258,7 +258,7 @@ export function AdminDataGovernancePage() {
           />
         </label>
 
-        <label className="admin-security__field">
+        <label className="form-group">
           RTO target (minutes)
           <input
             type="number"
@@ -274,7 +274,7 @@ export function AdminDataGovernancePage() {
           />
         </label>
 
-        <label className="admin-security__field">
+        <label className="form-group">
           RPO target (minutes)
           <input
             type="number"
@@ -290,7 +290,7 @@ export function AdminDataGovernancePage() {
           />
         </label>
 
-        <label className="admin-security__row">
+        <label className="form-row">
           <input
             type="checkbox"
             checked={policy.legal_hold_enabled}
@@ -301,7 +301,7 @@ export function AdminDataGovernancePage() {
           Enable legal hold (blocks deletions)
         </label>
 
-        <label className="admin-security__row">
+        <label className="form-row">
           <input
             type="checkbox"
             checked={policy.pii_export_enabled}
@@ -312,7 +312,7 @@ export function AdminDataGovernancePage() {
           Allow exports containing governed data
         </label>
 
-        <label className="admin-security__row">
+        <label className="form-row">
           <input
             type="checkbox"
             checked={policy.allow_named_story_exports}
@@ -326,7 +326,7 @@ export function AdminDataGovernancePage() {
           Allow named story exports
         </label>
 
-        <label className="admin-security__row">
+        <label className="form-row">
           <input
             type="checkbox"
             checked={policy.deletion_requires_approval}
@@ -345,10 +345,10 @@ export function AdminDataGovernancePage() {
         </button>
       </section>
 
-      <section className="admin-security__card">
+      <section className="card card--elevated">
         <h2>Artifact Governance (Publishing)</h2>
 
-        <label className="admin-security__row">
+        <label className="form-row">
           <input
             type="checkbox"
             checked={artifactPolicy.approval_chain_enabled}
@@ -362,7 +362,7 @@ export function AdminDataGovernancePage() {
           Require approval chain before publishing
         </label>
 
-        <label className="admin-security__row">
+        <label className="form-row">
           <input
             type="checkbox"
             checked={artifactPolicy.require_provenance}
@@ -376,7 +376,7 @@ export function AdminDataGovernancePage() {
           Require release provenance metadata
         </label>
 
-        <label className="admin-security__field">
+        <label className="form-group">
           Max expiration (days, optional)
           <input
             type="number"
@@ -393,7 +393,7 @@ export function AdminDataGovernancePage() {
         </label>
 
         <h3>Approval Steps</h3>
-        <div className="admin-security__inline" style={{ marginBottom: 8 }}>
+        <div className="form-row" style={{ marginBottom: 8 }}>
           <button
             className="btn btn--secondary"
             onClick={() =>
@@ -417,7 +417,7 @@ export function AdminDataGovernancePage() {
         </div>
 
         {artifactPolicy.steps.map((step, idx) => (
-          <div key={`${step.step_order}-${idx}`} className="admin-security__inline">
+          <div key={`${step.step_order}-${idx}`} className="form-row">
             <input
               type="number"
               min={1}
@@ -531,7 +531,7 @@ export function AdminDataGovernancePage() {
               }
               placeholder="Scope value (team key/user id/group id)"
             />
-            <label className="admin-security__row">
+            <label className="form-row">
               <input
                 type="checkbox"
                 checked={step.enabled}
@@ -546,7 +546,7 @@ export function AdminDataGovernancePage() {
               />
               Enabled
             </label>
-            <label className="admin-security__row">
+            <label className="form-row">
               <input
                 type="checkbox"
                 checked={step.allow_self_approval ?? false}
@@ -582,9 +582,9 @@ export function AdminDataGovernancePage() {
         </button>
       </section>
 
-      <section className="admin-security__card">
+      <section className="card card--elevated">
         <h2>Request Deletion</h2>
-        <div className="admin-security__inline">
+        <div className="form-row">
           <select value={targetType} onChange={(e) => setTargetType(e.target.value as "CALL" | "STORY" | "LANDING_PAGE")}>
             <option value="CALL">Call</option>
             <option value="STORY">Story</option>
@@ -606,9 +606,9 @@ export function AdminDataGovernancePage() {
         </div>
       </section>
 
-      <section className="admin-security__card">
+      <section className="card card--elevated">
         <h2>Approval Groups</h2>
-        <div className="admin-security__inline">
+        <div className="form-row">
           <input
             value={newGroupName}
             onChange={(e) => setNewGroupName(e.target.value)}
@@ -624,10 +624,10 @@ export function AdminDataGovernancePage() {
           </button>
         </div>
         {approvalGroups.map((g) => (
-          <div key={g.id} className="admin-security__card" style={{ marginTop: 8 }}>
+          <div key={g.id} className="card card--elevated" style={{ marginTop: 8 }}>
             <h3>{g.name}</h3>
             <div>{g.description || "-"}</div>
-            <div className="admin-security__inline">
+            <div className="form-row">
               <input
                 value={groupMemberUserId[g.id] ?? ""}
                 onChange={(e) =>
@@ -653,10 +653,10 @@ export function AdminDataGovernancePage() {
         ))}
       </section>
 
-      <section className="admin-security__card">
+      <section className="card card--elevated">
         <h2>Team Approval Admin Scopes</h2>
         <p>Billing admins can set which team keys each Team Approval Admin can approve.</p>
-        <table className="admin-ops__table">
+        <table className="data-table">
           <thead>
             <tr>
               <th>User</th>
@@ -695,9 +695,9 @@ export function AdminDataGovernancePage() {
         </table>
       </section>
 
-      <section className="admin-security__card">
+      <section className="card card--elevated">
         <h2>Deletion Approval Queue</h2>
-        <table className="admin-ops__table">
+        <table className="data-table">
           <thead>
             <tr>
               <th>Created</th>
