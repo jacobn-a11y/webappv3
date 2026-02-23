@@ -4,6 +4,9 @@ Use this checklist before customer-facing launch and each major release.
 Automated orchestrator:
 `npm run launch:gate` (P0) and `npm run launch:gate:p1` (P0+P1).
 
+Current release freeze policy:
+`docs/release-policy/release-freeze-2026-02-23.md`
+
 ## P0 - Must Pass Before Release
 
 1. `npm run migrate:safety`
