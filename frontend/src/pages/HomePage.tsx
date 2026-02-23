@@ -603,6 +603,11 @@ function AdminDashboard({
         </div>
       </div>
 
+      {/* Recommended Actions — shown first for actionability */}
+      {data.recommended_actions.length > 0 && (
+        <RecommendedActions actions={data.recommended_actions} />
+      )}
+
       {/* KPI Cards */}
       <div className="kpi-grid">
         <div className="kpi-card">
@@ -660,11 +665,6 @@ function AdminDashboard({
           </div>
         </div>
       </div>
-
-      {/* Recommended Actions */}
-      {data.recommended_actions.length > 0 && (
-        <RecommendedActions actions={data.recommended_actions} />
-      )}
 
       {/* Customer Success Health */}
       {csHealth && (

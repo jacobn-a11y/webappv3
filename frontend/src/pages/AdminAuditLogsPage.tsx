@@ -184,7 +184,13 @@ export function AdminAuditLogsPage() {
               </thead>
               <tbody>
                 {logs.length === 0 ? (
-                  <tr><td colSpan={8} className="data-table__empty">No audit log entries found</td></tr>
+                  <tr><td colSpan={8} className="data-table__empty">
+                    <div className="state-view" style={{ minHeight: 120 }}>
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-border)" strokeWidth="1.5" aria-hidden="true"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /></svg>
+                      <div className="state-view__title">No audit log entries found</div>
+                      <div className="state-view__message">Activity will appear here as users interact with the system.</div>
+                    </div>
+                  </td></tr>
                 ) : (
                   logs.map((log) => (
                     <tr key={log.id}>

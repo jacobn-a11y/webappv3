@@ -117,6 +117,11 @@ export function renderLandingPageHtml(page: {
   const bodyHtml = markdownToHtml(page.body);
   const safeCustomCss = sanitizeCustomCss(page.customCss) ?? "";
   const safeHeroImageUrl = sanitizeHeroImageUrl(page.heroImageUrl);
+
+  // Reading time estimate (~200 words/min average reading speed)
+  const wordCount = page.body.split(/\s+/).filter(Boolean).length;
+  const readingTimeMinutes = Math.max(1, Math.ceil(wordCount / 200));
+  const readingTimeLabel = readingTimeMinutes === 1 ? "1 min read" : `${readingTimeMinutes} min read`;
   const calloutBoxes = Array.isArray(page.calloutBoxes)
     ? page.calloutBoxes
     : [];
@@ -257,6 +262,71 @@ export function renderLandingPageHtml(page: {
       color: var(--color-text-secondary);
       font-weight: 400;
       line-height: 1.5;
+    }
+
+    /* ─── Reading Time ─────────────────────────────────────────── */
+    .reading-time {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.85rem;
+      color: var(--color-text-secondary);
+      margin-top: 0.75rem;
+    }
+
+    /* ─── Share Section ────────────────────────────────────────── */
+    .share-section {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 2.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--color-border);
+    }
+    .share-section__label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--color-text-secondary);
+      white-space: nowrap;
+    }
+    .share-section__buttons {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .share-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      font-family: var(--font-sans);
+      color: var(--color-text-secondary);
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      text-decoration: none;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .share-btn:hover {
+      border-color: var(--color-accent);
+      color: var(--color-accent);
+    }
+
+    /* ─── Footer ────────────────────────────────────────────────── */
+    .page-footer {
+      text-align: center;
+      padding: 2rem 1.5rem;
+      font-size: 0.82rem;
+      color: var(--color-text-secondary);
+      border-top: 1px solid var(--color-border);
+      margin-top: 3rem;
+    }
+    .page-footer strong {
+      color: var(--color-accent);
+      font-weight: 600;
     }
 
     /* ─── Callout Boxes ─────────────────────────────────────────── */
@@ -468,6 +538,12 @@ export function renderLandingPageHtml(page: {
     <header class="page-header">
       <h1>${escapeHtml(page.title)}</h1>
       ${page.subtitle ? `<p class="subtitle">${escapeHtml(page.subtitle)}</p>` : ""}
+      <div class="reading-time" aria-label="Estimated reading time">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/>
+        </svg>
+        ${readingTimeLabel}
+      </div>
     </header>
 
     ${
@@ -479,7 +555,31 @@ export function renderLandingPageHtml(page: {
     <article class="content">
       ${bodyHtml}
     </article>
+
+    <!-- Share section -->
+    <div class="share-section" aria-label="Share this page">
+      <span class="share-section__label">Share this story</span>
+      <div class="share-section__buttons">
+        <button class="share-btn" aria-label="Copy link to clipboard" onclick="navigator.clipboard.writeText(window.location.href).then(function(){var b=document.querySelector('.share-btn--copy-feedback');if(b){b.textContent='Copied!';setTimeout(function(){b.textContent='Copy link'},2000)}})">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+          <span class="share-btn--copy-feedback">Copy link</span>
+        </button>
+        <a class="share-btn" href="mailto:?subject=${encodeURIComponent(page.title)}&body=Check out this story: " aria-label="Share via email" onclick="this.href=this.href+encodeURIComponent(window.location.href)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          Email
+        </a>
+        <a class="share-btn" href="https://www.linkedin.com/sharing/share-offsite/?url=" target="_blank" rel="noopener noreferrer" aria-label="Share on LinkedIn" onclick="this.href=this.href+encodeURIComponent(window.location.href)">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+          LinkedIn
+        </a>
+      </div>
+    </div>
   </main>
+
+  <!-- Footer -->
+  <footer class="page-footer" role="contentinfo">
+    <p>Powered by <strong>StoryEngine</strong></p>
+  </footer>
 
   <!-- Floating AI Compilation Badge -->
   <aside class="ai-badge" role="complementary" aria-label="AI compilation notice">

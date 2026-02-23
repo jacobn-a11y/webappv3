@@ -106,7 +106,7 @@ export function AdminStoryContextPage() {
 
       {error && <div className="alert alert--error" role="alert">{error}</div>}
 
-      <div className="card card--elevated">
+      <div className="card card--elevated form-container--wide">
         <div className="card__header">
           <div className="card__title">Company Narrative Context</div>
         </div>

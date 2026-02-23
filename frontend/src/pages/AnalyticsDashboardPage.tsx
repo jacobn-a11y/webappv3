@@ -50,6 +50,12 @@ function formatPercent(p: number): string {
   return `${(p * 100).toFixed(1)}%`;
 }
 
+function formatShortDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[d.getMonth()]} ${d.getDate()}`;
+}
+
 // ─── Chart Hook ─────────────────────────────────────────────────────────────
 
 function useChart(
@@ -334,7 +340,7 @@ function CallsPerWeekChart({ data }: { data: AnalyticsData }) {
       new Chart(ctx, {
         type: "bar",
         data: {
-          labels: data.callsPerWeek.map((d) => d.weekStart),
+          labels: data.callsPerWeek.map((d) => formatShortDate(d.weekStart)),
           datasets: [
             {
               label: "Calls",
@@ -360,7 +366,7 @@ function CallsPerWeekChart({ data }: { data: AnalyticsData }) {
             },
             y: {
               beginAtZero: true,
-              grid: { color: "rgba(46,45,47,0.5)" },
+              grid: { color: "rgba(46,45,47,0.4)", lineWidth: 0.5 },
               ticks: { color: "#8A888E" },
             },
           },
@@ -454,7 +460,7 @@ function TopAccountsChart({ data }: { data: AnalyticsData }) {
           scales: {
             x: {
               beginAtZero: true,
-              grid: { color: "rgba(46,45,47,0.5)" },
+              grid: { color: "rgba(46,45,47,0.4)", lineWidth: 0.5 },
               ticks: { color: "#8A888E" },
             },
             y: {
@@ -483,7 +489,7 @@ function ResolutionChart({ data }: { data: AnalyticsData }) {
       new Chart(ctx, {
         type: "line",
         data: {
-          labels: data.entityResolutionOverTime.map((d) => d.weekStart),
+          labels: data.entityResolutionOverTime.map((d) => formatShortDate(d.weekStart)),
           datasets: [
             {
               label: "Resolution Rate",
@@ -491,7 +497,7 @@ function ResolutionChart({ data }: { data: AnalyticsData }) {
               borderColor: PALETTE[3],
               backgroundColor: `${PALETTE[3]}20`,
               fill: true,
-              tension: 0.3,
+              tension: 0.4,
               pointRadius: 3,
               pointHoverRadius: 6,
             },
@@ -517,7 +523,7 @@ function ResolutionChart({ data }: { data: AnalyticsData }) {
             y: {
               beginAtZero: true,
               max: 100,
-              grid: { color: "rgba(46,45,47,0.5)" },
+              grid: { color: "rgba(46,45,47,0.4)", lineWidth: 0.5 },
               ticks: { color: "#8A888E", callback: (v) => `${v}%` },
             },
           },
@@ -542,7 +548,7 @@ function PageViewsChart({ data }: { data: AnalyticsData }) {
       new Chart(ctx, {
         type: "bar",
         data: {
-          labels: data.viewsOverTime.map((d) => d.weekStart),
+          labels: data.viewsOverTime.map((d) => formatShortDate(d.weekStart)),
           datasets: [
             {
               type: "bar" as const,
@@ -569,7 +575,7 @@ function PageViewsChart({ data }: { data: AnalyticsData }) {
             },
             y: {
               beginAtZero: true,
-              grid: { color: "rgba(46,45,47,0.5)" },
+              grid: { color: "rgba(46,45,47,0.4)", lineWidth: 0.5 },
               ticks: { color: "#8A888E" },
             },
           },
