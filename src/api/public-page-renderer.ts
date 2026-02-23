@@ -15,6 +15,7 @@
 import { Router, type Request, type Response } from "express";
 import { LandingPageEditor, type CalloutBox } from "../services/landing-page-editor.js";
 import type { PrismaClient } from "@prisma/client";
+import { verifyPagePassword } from "../lib/page-password.js";
 
 // ─── Markdown to HTML (simple converter) ─────────────────────────────────────
 
@@ -725,12 +726,10 @@ export function createPublicPageRoutes(prisma: PrismaClient): Router {
   const router = Router();
   const editor = new LandingPageEditor(prisma);
 
-  // Shared handler for both GET (with query param) and POST (with body) password flows
+  // Shared handler for GET and POST. Password is accepted via POST body only.
   async function handleSlugRequest(req: Request, res: Response): Promise<void> {
     const slug = req.params.slug as string;
-    const password =
-      (req.query.p as string | undefined) ??
-      (req.body?.p as string | undefined);
+    const password = typeof req.body?.p === "string" ? req.body.p : undefined;
 
     // Check if page exists and needs a password
     const rawPage = await prisma.landingPage.findUnique({
@@ -759,14 +758,16 @@ export function createPublicPageRoutes(prisma: PrismaClient): Router {
     }
 
     // Password check
-    if (rawPage.password && !password) {
-      res.status(200).send(renderPasswordPage(slug));
-      return;
-    }
+    if (rawPage.password) {
+      if (!password) {
+        res.status(200).send(renderPasswordPage(slug));
+        return;
+      }
 
-    if (rawPage.password && password !== rawPage.password) {
-      res.status(200).send(renderPasswordPage(slug, true));
-      return;
+      if (!verifyPagePassword(password, rawPage.password)) {
+        res.status(200).send(renderPasswordPage(slug, true));
+        return;
+      }
     }
 
     // Fetch and render

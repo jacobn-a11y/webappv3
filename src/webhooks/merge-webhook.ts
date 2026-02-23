@@ -136,15 +136,17 @@ export function createMergeWebhookHandler(deps: {
     const signature = typeof signatureHeader === "string" ? signatureHeader : "";
     const webhookSecret = process.env.MERGE_WEBHOOK_SECRET;
 
-    if (webhookSecret) {
-      if (!signature) {
-        res.status(401).json({ error: "Missing webhook signature" });
-        return;
-      }
-      if (!verifyMergeSignature(rawBody, signature, webhookSecret)) {
-        res.status(401).json({ error: "Invalid webhook signature" });
-        return;
-      }
+    if (!webhookSecret) {
+      res.status(500).json({ error: "MERGE_WEBHOOK_SECRET is not configured" });
+      return;
+    }
+    if (!signature) {
+      res.status(401).json({ error: "Missing webhook signature" });
+      return;
+    }
+    if (!verifyMergeSignature(rawBody, signature, webhookSecret)) {
+      res.status(401).json({ error: "Invalid webhook signature" });
+      return;
     }
 
     let payload: MergeWebhookPayload;

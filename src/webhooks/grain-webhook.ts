@@ -81,30 +81,27 @@ export function createGrainWebhookHandler(deps: {
       return;
     }
 
-    if (grainConfigs.some((c: { webhookSecret: string | null }) => !!c.webhookSecret) && !signature) {
+    if (grainConfigs.some((c: { webhookSecret: string | null }) => !c.webhookSecret)) {
+      res.status(500).json({
+        error: "All active Grain integrations must configure webhookSecret",
+      });
+      return;
+    }
+    if (!signature) {
       res.status(401).json({ error: "Missing webhook signature" });
       return;
     }
 
     // Try to match signature to a specific org's webhook secret
     type GrainConfig = (typeof grainConfigs)[number];
-    let matchedConfig: GrainConfig | null = null;
-    if (signature) {
-      matchedConfig = grainConfigs.find(
-        (c: GrainConfig) =>
-          c.webhookSecret &&
-          verifyGrainSignature(rawBody, signature, c.webhookSecret)
-      ) ?? null;
-      if (!matchedConfig) {
-        res.status(401).json({ error: "Invalid webhook signature" });
-        return;
-      }
-    } else {
-      matchedConfig = grainConfigs.find((c: GrainConfig) => !c.webhookSecret) ?? null;
-      if (!matchedConfig) {
-        res.status(401).json({ error: "Invalid webhook configuration" });
-        return;
-      }
+    const matchedConfig = grainConfigs.find(
+      (c: GrainConfig) =>
+        c.webhookSecret &&
+        verifyGrainSignature(rawBody, signature, c.webhookSecret)
+    ) ?? null;
+    if (!matchedConfig) {
+      res.status(401).json({ error: "Invalid webhook signature" });
+      return;
     }
 
     let payload: GrainWebhookPayload;

@@ -9,6 +9,7 @@ import {
 function mockReq(overrides: Record<string, unknown> = {}): Request {
   return {
     organizationId: "org-1",
+    userRole: "ADMIN",
     body: {},
     headers: {},
     ...overrides,
@@ -106,6 +107,23 @@ describe("billing handlers", () => {
     });
   });
 
+  it("rejects checkout for non-admin roles", async () => {
+    process.env.STRIPE_STARTER_PRICE_ID = "price_starter";
+    const handler = createCheckoutHandler({} as any, {} as any);
+    const req = mockReq({
+      userRole: "MEMBER",
+      body: { plan: "STARTER" },
+    });
+    const res = mockRes();
+
+    await handler(req as any, res);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ error: "permission_denied" })
+    );
+  });
+
   it("creates portal session with frontend billing return route", async () => {
     const prisma = {
       organization: {
@@ -139,6 +157,19 @@ describe("billing handlers", () => {
     expect(res.json).toHaveBeenCalledWith({
       portalUrl: "https://portal.stripe.test",
     });
+  });
+
+  it("rejects portal for non-admin roles", async () => {
+    const handler = createPortalHandler({} as any, {} as any);
+    const req = mockReq({ userRole: "VIEWER" });
+    const res = mockRes();
+
+    await handler(req as any, res);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ error: "permission_denied" })
+    );
   });
 
   it("returns 500 so Stripe retries when webhook processing fails", async () => {

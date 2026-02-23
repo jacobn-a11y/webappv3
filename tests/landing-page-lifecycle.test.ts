@@ -478,20 +478,31 @@ describe.runIf(dbAvailable)("GET /s/:slug — password protection", () => {
     expect(res.text).not.toContain("ai-badge");
   });
 
-  it("shows a password prompt when wrong password is provided", async () => {
+  it("does not accept password via URL query parameter", async () => {
     const app = buildApp(adminAuth());
     const res = await withRequestServer(app, (req) =>
-      req.get(`/s/${slug}?p=wrongpassword`).expect(200)
+      req.get(`/s/${slug}?p=${PASSWORD}`).expect(200)
     );
 
     expect(res.text).toContain("This page is protected");
     expect(res.text).not.toContain("ai-badge");
   });
 
-  it("serves the full page when correct password is provided", async () => {
+  it("shows a password prompt when wrong password is submitted via POST body", async () => {
     const app = buildApp(adminAuth());
     const res = await withRequestServer(app, (req) =>
-      req.get(`/s/${slug}?p=${PASSWORD}`).expect(200)
+      req.post(`/s/${slug}`).send({ p: "wrongpassword" }).expect(200)
+    );
+
+    expect(res.text).toContain("This page is protected");
+    expect(res.text).toContain("Incorrect password");
+    expect(res.text).not.toContain("ai-badge");
+  });
+
+  it("serves the full page when correct password is submitted via POST body", async () => {
+    const app = buildApp(adminAuth());
+    const res = await withRequestServer(app, (req) =>
+      req.post(`/s/${slug}`).send({ p: PASSWORD }).expect(200)
     );
 
     expect(res.text).toContain("ai-badge");

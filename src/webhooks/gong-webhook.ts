@@ -80,32 +80,27 @@ export function createGongWebhookHandler(deps: {
       return;
     }
 
-    // If any active config has a webhook secret, enforce signature auth.
-    if (gongConfigs.some((c: { webhookSecret: string | null }) => !!c.webhookSecret) && !signature) {
+    if (gongConfigs.some((c: { webhookSecret: string | null }) => !c.webhookSecret)) {
+      res.status(500).json({
+        error: "All active Gong integrations must configure webhookSecret",
+      });
+      return;
+    }
+    if (!signature) {
       res.status(401).json({ error: "Missing webhook signature" });
       return;
     }
 
     // Try to match signature to a specific org's webhook secret
     type GongConfig = (typeof gongConfigs)[number];
-    let matchedConfig: GongConfig | null = null;
-    if (signature) {
-      matchedConfig = gongConfigs.find(
-        (c: GongConfig) =>
-          c.webhookSecret &&
-          verifyGongSignature(rawBody, signature, c.webhookSecret)
-      ) ?? null;
-      if (!matchedConfig) {
-        res.status(401).json({ error: "Invalid webhook signature" });
-        return;
-      }
-    } else {
-      // Backward compatibility: allow only config without a secret.
-      matchedConfig = gongConfigs.find((c: GongConfig) => !c.webhookSecret) ?? null;
-      if (!matchedConfig) {
-        res.status(401).json({ error: "Invalid webhook configuration" });
-        return;
-      }
+    const matchedConfig = gongConfigs.find(
+      (c: GongConfig) =>
+        c.webhookSecret &&
+        verifyGongSignature(rawBody, signature, c.webhookSecret)
+    ) ?? null;
+    if (!matchedConfig) {
+      res.status(401).json({ error: "Invalid webhook signature" });
+      return;
     }
 
     let payload: GongWebhookPayload;

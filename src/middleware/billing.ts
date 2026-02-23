@@ -12,7 +12,12 @@
 
 import type { Request, Response, NextFunction } from "express";
 import Stripe from "stripe";
-import type { PrismaClient, Plan, SubscriptionStatus } from "@prisma/client";
+import type {
+  PrismaClient,
+  Plan,
+  SubscriptionStatus,
+  UserRole,
+} from "@prisma/client";
 import { z } from "zod";
 import {
   PLAN_CONFIGS,
@@ -25,7 +30,10 @@ import { buildPublicAppUrl } from "../lib/public-app-url.js";
 
 interface AuthenticatedRequest extends Request {
   organizationId?: string;
+  userRole?: UserRole;
 }
+
+const BILLING_ADMIN_ROLES: UserRole[] = ["OWNER", "ADMIN"];
 
 // ─── Billing Feature Flag ────────────────────────────────────────────────────
 
@@ -160,6 +168,13 @@ export function createCheckoutHandler(prisma: PrismaClient, stripe: Stripe) {
       res.status(401).json({ error: "Authentication required" });
       return;
     }
+    if (!req.userRole || !BILLING_ADMIN_ROLES.includes(req.userRole)) {
+      res.status(403).json({
+        error: "permission_denied",
+        message: "Billing changes require OWNER or ADMIN role.",
+      });
+      return;
+    }
 
     const parsed = checkoutSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -246,6 +261,13 @@ export function createPortalHandler(prisma: PrismaClient, stripe: Stripe) {
     const orgId = req.organizationId;
     if (!orgId) {
       res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    if (!req.userRole || !BILLING_ADMIN_ROLES.includes(req.userRole)) {
+      res.status(403).json({
+        error: "permission_denied",
+        message: "Billing changes require OWNER or ADMIN role.",
+      });
       return;
     }
 

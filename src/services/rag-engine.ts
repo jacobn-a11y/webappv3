@@ -110,7 +110,7 @@ export class RAGEngine {
       organization_id: input.organizationId,
     };
     if (input.funnelStages && input.funnelStages.length > 0) {
-      filter.funnel_stage = { $in: input.funnelStages };
+      filter.funnel_stages = { $in: input.funnelStages };
     }
 
     const searchResults = await index.query({
@@ -194,7 +194,7 @@ ${contextBlock}`,
       filter.account_id = input.accountId;
     }
     if (input.funnelStages && input.funnelStages.length > 0) {
-      filter.funnel_stage = { $in: input.funnelStages };
+      filter.funnel_stages = { $in: input.funnelStages };
     }
 
     const searchResults = await index.query({

@@ -14,6 +14,7 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import type { PrismaClient, PageVisibility, PageStatus } from "@prisma/client";
 import { CompanyScrubber } from "./company-scrubber.js";
+import { hashPagePassword, verifyPagePassword } from "../lib/page-password.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -275,7 +276,7 @@ export class LandingPageEditor {
           : undefined,
         status: "PUBLISHED",
         visibility: options.visibility,
-        password: options.password ?? null,
+        password: options.password ? hashPagePassword(options.password) : null,
         expiresAt: options.expiresAt ?? null,
         publishedAt,
         noIndex: true,
@@ -374,7 +375,9 @@ export class LandingPageEditor {
     if (page.visibility === "PRIVATE") return null;
 
     // Check password
-    if (page.password && page.password !== password) return null;
+    if (page.password) {
+      if (!password || !verifyPagePassword(password, page.password)) return null;
+    }
 
     // Increment view count
     await this.prisma.landingPage.update({
