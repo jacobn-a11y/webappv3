@@ -409,7 +409,7 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
       </div>
 
       {/* Stat Cards */}
-      <div className="dash-pages__stats">
+      <div className="dash-pages__stats-grid">
         <div className="dash-pages__stat-card dash-pages__stat-card--total">
           <div className="dash-pages__stat-icon">
             <svg

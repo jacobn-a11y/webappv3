@@ -135,9 +135,10 @@ export function AdminSecurityPolicyPage() {
       {error && <div className="alert alert--error" role="alert">{error}</div>}
       {notice && <div className="alert alert--success" role="status" aria-live="polite">{notice}</div>}
 
-      <section className="card card--elevated">
+      <section className="card card--elevated form-container">
         <label className="form-row">
           <input
+            className="form-checkbox"
             type="checkbox"
             checked={policy.enforce_mfa_for_admin_actions}
             onChange={(e) =>
@@ -152,6 +153,7 @@ export function AdminSecurityPolicyPage() {
 
         <label className="form-row">
           <input
+            className="form-checkbox"
             type="checkbox"
             checked={policy.sso_enforced ?? false}
             onChange={(e) =>
@@ -167,6 +169,7 @@ export function AdminSecurityPolicyPage() {
         <label className="form-group">
           Allowed SSO domains (comma-separated)
           <input
+            className="form-input"
             value={allowedDomainsText}
             onChange={(e) => setAllowedDomainsText(e.target.value)}
             placeholder="example.com, subdomain.example.com"
@@ -175,6 +178,7 @@ export function AdminSecurityPolicyPage() {
 
         <label className="form-row">
           <input
+            className="form-checkbox"
             type="checkbox"
             checked={policy.session_controls_enabled ?? false}
             onChange={(e) =>
@@ -190,6 +194,7 @@ export function AdminSecurityPolicyPage() {
         <label className="form-group">
           Max session age (hours)
           <input
+            className="form-input"
             type="number"
             min={1}
             max={2160}
@@ -207,6 +212,7 @@ export function AdminSecurityPolicyPage() {
         <label className="form-group">
           Sensitive-action re-auth window (minutes)
           <input
+            className="form-input"
             type="number"
             min={5}
             max={1440}
@@ -223,6 +229,7 @@ export function AdminSecurityPolicyPage() {
 
         <label className="form-row">
           <input
+            className="form-checkbox"
             type="checkbox"
             checked={policy.ip_allowlist_enabled}
             onChange={(e) =>
@@ -238,6 +245,7 @@ export function AdminSecurityPolicyPage() {
         <label className="form-group">
           Allowed IPs (comma-separated)
           <input
+            className="form-input"
             value={ipAllowlistText}
             onChange={(e) => setIpAllowlistText(e.target.value)}
             placeholder="203.0.113.10, 198.51.100.21"
@@ -250,11 +258,13 @@ export function AdminSecurityPolicyPage() {
         <h2>IP Allowlist Entries</h2>
         <div className="form-row">
           <input
+            className="form-input"
             value={newCidr}
             onChange={(e) => setNewCidr(e.target.value)}
             placeholder="203.0.113.10/32"
           />
           <input
+            className="form-input"
             value={newCidrLabel}
             onChange={(e) => setNewCidrLabel(e.target.value)}
             placeholder="Office VPN"
@@ -347,6 +357,7 @@ export function AdminSecurityPolicyPage() {
         <h2>SCIM Provisioning</h2>
         <label className="form-row">
           <input
+            className="form-checkbox"
             type="checkbox"
             checked={scim?.enabled ?? false}
             onChange={async (e) => {
