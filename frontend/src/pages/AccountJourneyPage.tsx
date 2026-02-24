@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Breadcrumb } from "../components/Breadcrumb";
+import { formatEnumLabel } from "../lib/format";
 import {
   getAccountJourney,
   type JourneyAccount,
@@ -548,7 +549,7 @@ function CrmEventNode({ node }: { node: JourneyTimelineNode }) {
   const eventType = node.event_type ?? "";
   const config = CRM_EVENT_CONFIGS[eventType] ?? DEFAULT_CRM_CONFIG;
   const { date } = formatDateTime(node.date);
-  const label = CRM_EVENT_LABELS[eventType] ?? eventType.replace(/_/g, " ");
+  const label = CRM_EVENT_LABELS[eventType] ?? formatEnumLabel(eventType);
 
   return (
     <div className="journey__node journey__node--crm">

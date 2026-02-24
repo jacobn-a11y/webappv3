@@ -5449,9 +5449,58 @@ html { scroll-behavior: smooth; }
   color: var(--color-text-secondary);
 }
 
+.admin-perm__role-badge--MEMBER {
+  background: rgba(6, 182, 212, 0.12);
+  color: var(--color-info);
+}
+
+.admin-perm__role-badge--VIEWER {
+  background: rgba(138, 136, 142, 0.2);
+  color: var(--color-text-muted);
+}
+
+.admin-perm__expand-btn--expanded {
+  transform: rotate(180deg);
+}
+
+.admin-perm__toggle--loading {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
 .admin-perm__no-grants {
   color: var(--color-text-muted);
   font-size: 13px;
+}
+
+.admin-perm__access-grant-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.admin-perm__access-grant-icon--all {
+  background: rgba(5, 150, 105, 0.12);
+  color: var(--color-success);
+}
+
+.admin-perm__access-grant-icon--single {
+  background: rgba(51, 111, 230, 0.12);
+  color: var(--color-accent);
+}
+
+.admin-perm__access-grant-icon--list {
+  background: rgba(217, 119, 6, 0.12);
+  color: var(--color-warning);
+}
+
+.admin-perm__access-grant-icon--crm {
+  background: rgba(124, 58, 237, 0.12);
+  color: var(--purple-500);
 }
 
 .admin-perm__access-grant-info {

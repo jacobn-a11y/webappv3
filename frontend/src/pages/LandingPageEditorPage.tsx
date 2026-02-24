@@ -21,6 +21,7 @@ import {
   type ArtifactVersion,
   type EditorPageData,
 } from "../lib/api";
+import { formatEnumLabel } from "../lib/format";
 
 // ─── Inline Confirm Dialog ──────────────────────────────────────────────────
 
@@ -353,7 +354,7 @@ export function LandingPageEditorPage() {
             {versions.map((v) => (
               <div key={v.id} className="page-editor__version-row">
                 <div>
-                  <strong>v{v.version_number}</strong> · {v.status}
+                  <strong>v{v.version_number}</strong> · {formatEnumLabel(v.status)}
                   <div className="page-editor__version-meta">
                     {new Date(v.created_at).toLocaleString()}
                     {v.release_notes ? ` · ${v.release_notes}` : ""}

@@ -217,7 +217,7 @@ export function AdminAuditLogsPage() {
                             onClick={() => openResourceDrilldown(log.target_type!, log.target_id!)}
                             style={{ textDecoration: "underline", padding: "2px 4px" }}
                           >
-                            {log.target_type}:{log.target_id}
+                            {formatEnumLabel(log.target_type)}:{log.target_id}
                           </button>
                         ) : (
                           <span style={{ color: "var(--color-text-muted)" }}>-</span>
@@ -280,7 +280,7 @@ export function AdminAuditLogsPage() {
           <div className="card__header">
             <div>
               <div className="card__title">Resource Drilldown</div>
-              <div className="card__subtitle">{resourceDrilldown.resource.target_type}:{resourceDrilldown.resource.target_id}</div>
+              <div className="card__subtitle">{formatEnumLabel(resourceDrilldown.resource.target_type)}:{resourceDrilldown.resource.target_id}</div>
             </div>
             <button className="btn btn--ghost btn--sm" onClick={() => setResourceDrilldown(null)}>Close</button>
           </div>
@@ -288,7 +288,7 @@ export function AdminAuditLogsPage() {
             <div className="kpi-card">
               <div className="kpi-card__content">
                 <div className="kpi-card__label">Resource</div>
-                <div className="kpi-card__value" style={{ fontSize: 14 }}>{resourceDrilldown.resource.target_type}:{resourceDrilldown.resource.target_id}</div>
+                <div className="kpi-card__value" style={{ fontSize: 14 }}>{formatEnumLabel(resourceDrilldown.resource.target_type)}:{resourceDrilldown.resource.target_id}</div>
               </div>
             </div>
             <div className="kpi-card">

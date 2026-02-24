@@ -20,6 +20,7 @@ import {
   type DeletionRequest,
   type TeamApprovalAdminScopeRow,
 } from "../lib/api";
+import { badgeClass, formatEnumLabel } from "../lib/format";
 
 const DEFAULT_POLICY: DataGovernanceSettings = {
   retention_days: 365,
@@ -478,10 +479,10 @@ export function AdminDataGovernancePage() {
               }
             >
               <option value="">Any role</option>
-              <option value="OWNER">OWNER</option>
-              <option value="ADMIN">ADMIN</option>
-              <option value="MEMBER">MEMBER</option>
-              <option value="VIEWER">VIEWER</option>
+              <option value="OWNER">{formatEnumLabel("OWNER")}</option>
+              <option value="ADMIN">{formatEnumLabel("ADMIN")}</option>
+              <option value="MEMBER">{formatEnumLabel("MEMBER")}</option>
+              <option value="VIEWER">{formatEnumLabel("VIEWER")}</option>
             </select>
             <input
               value={step.required_role_profile_key ?? ""}
@@ -521,11 +522,11 @@ export function AdminDataGovernancePage() {
                 }))
               }
             >
-              <option value="ROLE_PROFILE">ROLE_PROFILE</option>
-              <option value="TEAM">TEAM</option>
-              <option value="USER">USER</option>
-              <option value="GROUP">GROUP</option>
-              <option value="SELF">SELF</option>
+              <option value="ROLE_PROFILE">{formatEnumLabel("ROLE_PROFILE")}</option>
+              <option value="TEAM">{formatEnumLabel("TEAM")}</option>
+              <option value="USER">{formatEnumLabel("USER")}</option>
+              <option value="GROUP">{formatEnumLabel("GROUP")}</option>
+              <option value="SELF">{formatEnumLabel("SELF")}</option>
             </select>
             <input
               value={step.approver_scope_value ?? ""}
@@ -730,8 +731,8 @@ export function AdminDataGovernancePage() {
               return (
                 <tr key={r.id}>
                   <td>{new Date(r.created_at).toLocaleString()}</td>
-                  <td>{r.status}</td>
-                  <td>{r.target_type}</td>
+                  <td><span className={badgeClass(r.status)}>{formatEnumLabel(r.status)}</span></td>
+                  <td>{formatEnumLabel(r.target_type)}</td>
                   <td>{r.target_id}</td>
                   <td>{payload.reason ?? "-"}</td>
                   <td>

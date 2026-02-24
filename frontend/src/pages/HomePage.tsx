@@ -44,6 +44,14 @@ function getGreeting(): string {
   return "Good evening";
 }
 
+function formatActionText(action: string): string {
+  return action
+    .replace(/\b[A-Z][A-Z0-9_]{2,}\b/g, (value) => formatEnumLabel(value))
+    .replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (value) =>
+      formatEnumLabel(value.toUpperCase())
+    );
+}
+
 export function HomePage() {
   const [data, setData] = useState<RoleAwareHome | null>(null);
   const [csHealth, setCsHealth] = useState<CustomerSuccessHealth | null>(null);
@@ -909,12 +917,13 @@ function RecommendedActions({ actions }: { actions: string[] }) {
       <div className="action-list">
         {actions.map((item, i) => {
           const actionLink = mapActionToLink(item);
+          const displayAction = formatActionText(item);
           const content = (
             <>
               <div className="action-item__icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9,11 12,14 22,4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
               </div>
-              <span className="action-item__text">{item}</span>
+              <span className="action-item__text">{displayAction}</span>
               <div className="action-item__chevron">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9,18 15,12 9,6" /></svg>
               </div>

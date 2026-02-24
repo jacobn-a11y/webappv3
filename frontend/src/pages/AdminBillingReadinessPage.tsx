@@ -159,7 +159,7 @@ export function AdminBillingReadinessPage() {
               <div className="kpi-card">
                 <div className="kpi-card__content">
                   <div className="kpi-card__label">Usage Metric</div>
-                  <div className="kpi-card__value" style={{ fontSize: 18 }}>{readiness.overage.metric}</div>
+                  <div className="kpi-card__value" style={{ fontSize: 18 }}>{formatEnumLabel(readiness.overage.metric)}</div>
                 </div>
               </div>
               <div className="kpi-card">

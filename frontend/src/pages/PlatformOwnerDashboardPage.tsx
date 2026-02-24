@@ -18,6 +18,7 @@ import {
   type TenantOverview,
 } from "../lib/api";
 import { useToast } from "../components/Toast";
+import { formatEnumLabel } from "../lib/format";
 
 export function PlatformOwnerDashboardPage() {
   const [settings, setSettings] = useState<PlatformSettings | null>(null);
@@ -273,7 +274,7 @@ export function PlatformOwnerDashboardPage() {
                 tenants.map((t) => (
                   <tr key={t.id}>
                     <td><strong>{t.name}</strong></td>
-                    <td><span className="badge badge--accent">{t.plan.replace(/_/g, " ")}</span></td>
+                    <td><span className="badge badge--accent">{formatEnumLabel(t.plan)}</span></td>
                     <td>{t.user_count}</td>
                     <td>{t.story_count_30d}</td>
                     <td>{t.page_count_30d}</td>
@@ -287,7 +288,7 @@ export function PlatformOwnerDashboardPage() {
                     <td>
                       {t.deletion_request ? (
                         <span className={`badge ${t.deletion_request.status === "PENDING_APPROVAL" ? "badge--draft" : t.deletion_request.status === "APPROVED" ? "badge--error" : "badge--archived"}`}>
-                          {t.deletion_request.status === "PENDING_APPROVAL" ? "Deletion Pending" : t.deletion_request.status === "APPROVED" ? "Deleting " + (t.deletion_request.scheduled_delete_at ? new Date(t.deletion_request.scheduled_delete_at).toLocaleDateString() : "") : t.deletion_request.status.replace(/_/g, " ")}
+                          {t.deletion_request.status === "PENDING_APPROVAL" ? "Deletion Pending" : t.deletion_request.status === "APPROVED" ? "Deleting " + (t.deletion_request.scheduled_delete_at ? new Date(t.deletion_request.scheduled_delete_at).toLocaleDateString() : "") : formatEnumLabel(t.deletion_request.status)}
                         </span>
                       ) : (
                         <span className="badge badge--success">Active</span>

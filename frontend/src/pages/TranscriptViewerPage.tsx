@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useParams } from "react-router-dom";
 import { getTranscriptData, type TranscriptData } from "../lib/api";
+import { formatEnumLabel } from "../lib/format";
 import { TOPIC_LABELS, type TaxonomyTopic } from "../types/taxonomy";
 import "./TranscriptViewerPage.css";
 
@@ -125,7 +126,7 @@ function stageLabel(stage: string): string {
 function topicLabel(topic: string): string {
   return (
     TOPIC_LABELS[topic as TaxonomyTopic] ??
-    topic.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+    formatEnumLabel(topic)
   );
 }
 

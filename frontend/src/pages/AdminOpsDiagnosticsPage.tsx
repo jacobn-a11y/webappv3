@@ -31,6 +31,7 @@ import {
   type SupportImpersonationSession,
   type SyntheticHealth,
 } from "../lib/api";
+import { badgeClass, formatEnumLabel } from "../lib/format";
 
 export function AdminOpsDiagnosticsPage() {
   const [data, setData] = useState<OpsDiagnostics | null>(null);
@@ -291,9 +292,9 @@ export function AdminOpsDiagnosticsPage() {
                   <tbody>
                     {pipelineStatus.latest_runs.map((r, idx) => (
                       <tr key={`${r.run_type}-${r.started_at}-${idx}`}>
-                        <td>{r.run_type}</td>
-                        <td>{r.status}</td>
-                        <td>{r.provider}</td>
+                        <td>{formatEnumLabel(r.run_type)}</td>
+                        <td><span className={badgeClass(r.status)}>{formatEnumLabel(r.status)}</span></td>
+                        <td>{formatEnumLabel(r.provider)}</td>
                         <td>{new Date(r.started_at).toLocaleString()}</td>
                         <td>{r.processed_count}</td>
                         <td>{r.failure_count}</td>
@@ -312,7 +313,7 @@ export function AdminOpsDiagnosticsPage() {
             {drReadiness ? (
               <>
                 <div className="kpi-grid">
-                  <div>Status: {drReadiness.status}</div>
+                  <div>Status: {formatEnumLabel(drReadiness.status)}</div>
                   <div>RTO Target: {drReadiness.targets.rto_minutes}m</div>
                   <div>RPO Target: {drReadiness.targets.rpo_minutes}m</div>
                   <div>Backup Age: {drReadiness.backup_age_minutes ?? "-"}m</div>
@@ -336,7 +337,7 @@ export function AdminOpsDiagnosticsPage() {
             {syntheticHealth ? (
               <>
                 <div>
-                  Status: <strong>{syntheticHealth.status}</strong> (checked{" "}
+                  Status: <strong>{formatEnumLabel(syntheticHealth.status)}</strong> (checked{" "}
                   {new Date(syntheticHealth.checked_at).toLocaleString()})
                 </div>
                 <table className="data-table">
@@ -377,7 +378,7 @@ export function AdminOpsDiagnosticsPage() {
                   <ul>
                     {queueSlo.alerts.map((a) => (
                       <li key={`${a.code}-${a.message}`}>
-                        [{a.severity}] {a.message}
+                        [{formatEnumLabel(a.severity)}] {a.message}
                       </li>
                     ))}
                   </ul>
@@ -453,7 +454,7 @@ export function AdminOpsDiagnosticsPage() {
                     <td>{new Date(s.started_at).toLocaleString()}</td>
                     <td>{s.actor_user_email}</td>
                     <td>{s.target_user_email}</td>
-                    <td>{s.scope.join(", ")}</td>
+                    <td>{s.scope.map((value) => formatEnumLabel(value)).join(", ")}</td>
                     <td>{s.reason}</td>
                     <td>{new Date(s.expires_at).toLocaleString()}</td>
                     <td>{s.revoked_at ? "Revoked" : "Active"}</td>
@@ -497,10 +498,10 @@ export function AdminOpsDiagnosticsPage() {
                   )
                 }
               >
-                <option value="LOW">LOW</option>
-                <option value="MEDIUM">MEDIUM</option>
-                <option value="HIGH">HIGH</option>
-                <option value="CRITICAL">CRITICAL</option>
+                <option value="LOW">{formatEnumLabel("LOW")}</option>
+                <option value="MEDIUM">{formatEnumLabel("MEDIUM")}</option>
+                <option value="HIGH">{formatEnumLabel("HIGH")}</option>
+                <option value="CRITICAL">{formatEnumLabel("CRITICAL")}</option>
               </select>
               <button
                 className="btn btn--secondary"
@@ -530,8 +531,8 @@ export function AdminOpsDiagnosticsPage() {
                     <tr key={incident.id}>
                       <td>{new Date(incident.started_at).toLocaleString()}</td>
                       <td>{incident.title}</td>
-                      <td>{incident.severity}</td>
-                      <td>{incident.status}</td>
+                      <td><span className={badgeClass(incident.severity)}>{formatEnumLabel(incident.severity)}</span></td>
+                      <td><span className={badgeClass(incident.status)}>{formatEnumLabel(incident.status)}</span></td>
                       <td>{incident.summary}</td>
                       <td>
                         <div className="form-row">
@@ -556,9 +557,9 @@ export function AdminOpsDiagnosticsPage() {
                             }
                           >
                             <option value="">Keep Status</option>
-                            <option value="OPEN">OPEN</option>
-                            <option value="MONITORING">MONITORING</option>
-                            <option value="RESOLVED">RESOLVED</option>
+                            <option value="OPEN">{formatEnumLabel("OPEN")}</option>
+                            <option value="MONITORING">{formatEnumLabel("MONITORING")}</option>
+                            <option value="RESOLVED">{formatEnumLabel("RESOLVED")}</option>
                           </select>
                           <button
                             className="btn btn--secondary"
@@ -593,8 +594,8 @@ export function AdminOpsDiagnosticsPage() {
               <tbody>
                 {integrationHealth.map((h) => (
                   <tr key={h.id}>
-                    <td>{h.provider}</td>
-                    <td>{h.status}</td>
+                    <td>{formatEnumLabel(h.provider)}</td>
+                    <td><span className={badgeClass(h.status)}>{formatEnumLabel(h.status)}</span></td>
                     <td>{h.lag_minutes ?? "-"}</td>
                     <td>{h.last_success_at ? new Date(h.last_success_at).toLocaleString() : "-"}</td>
                     <td>{h.last_failure_at ? new Date(h.last_failure_at).toLocaleString() : "-"}</td>
@@ -626,8 +627,8 @@ export function AdminOpsDiagnosticsPage() {
               <tbody>
                 {data.integrations.providers.map((p) => (
                   <tr key={p.id}>
-                    <td>{p.provider}</td>
-                    <td>{p.status}</td>
+                    <td>{formatEnumLabel(p.provider)}</td>
+                    <td><span className={badgeClass(p.status)}>{formatEnumLabel(p.status)}</span></td>
                     <td>{p.enabled ? "Yes" : "No"}</td>
                     <td>{p.last_sync_at ? new Date(p.last_sync_at).toLocaleString() : "-"}</td>
                     <td>{p.last_error ?? "-"}</td>
@@ -652,9 +653,9 @@ export function AdminOpsDiagnosticsPage() {
                 {data.recent_audit_events.map((a) => (
                   <tr key={a.id}>
                     <td>{new Date(a.created_at).toLocaleString()}</td>
-                    <td>{a.category}</td>
-                    <td>{a.action}</td>
-                    <td>{a.severity}</td>
+                    <td>{formatEnumLabel(a.category)}</td>
+                    <td>{formatEnumLabel(a.action)}</td>
+                    <td><span className={badgeClass(a.severity)}>{formatEnumLabel(a.severity)}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -679,7 +680,7 @@ export function AdminOpsDiagnosticsPage() {
                 <tbody>
                   {deadLetterRuns.map((r) => (
                     <tr key={r.id}>
-                      <td>{r.provider}</td>
+                      <td>{formatEnumLabel(r.provider)}</td>
                       <td>{new Date(r.started_at).toLocaleString()}</td>
                       <td>{r.error_message ?? "-"}</td>
                       <td>{r.failure_count}</td>
@@ -706,10 +707,10 @@ export function AdminOpsDiagnosticsPage() {
                 value={backfillProvider}
                 onChange={(e) => setBackfillProvider(e.target.value)}
               >
-                <option value="GONG">GONG</option>
-                <option value="GRAIN">GRAIN</option>
-                <option value="SALESFORCE">SALESFORCE</option>
-                <option value="MERGE_DEV">MERGE_DEV</option>
+                <option value="GONG">{formatEnumLabel("GONG")}</option>
+                <option value="GRAIN">{formatEnumLabel("GRAIN")}</option>
+                <option value="SALESFORCE">{formatEnumLabel("SALESFORCE")}</option>
+                <option value="MERGE_DEV">{formatEnumLabel("MERGE_DEV")}</option>
               </select>
               <input
                 type="datetime-local"
@@ -739,8 +740,8 @@ export function AdminOpsDiagnosticsPage() {
               <tbody>
                 {backfills.map((r) => (
                   <tr key={r.id}>
-                    <td>{r.provider}</td>
-                    <td>{r.status}</td>
+                    <td>{formatEnumLabel(r.provider)}</td>
+                    <td><span className={badgeClass(r.status)}>{formatEnumLabel(r.status)}</span></td>
                     <td>{new Date(r.started_at).toLocaleString()}</td>
                     <td>{r.processed_count}</td>
                     <td>{r.failure_count}</td>

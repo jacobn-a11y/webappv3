@@ -9,6 +9,7 @@ import {
   type StoryLineageResponse,
   type StoryQualityFeedbackRow,
 } from "../lib/api";
+import { badgeClass, formatEnumLabel } from "../lib/format";
 
 export function AdminDataQualityPage() {
   const [overview, setOverview] = useState<DataQualityOverview | null>(null);
@@ -111,7 +112,9 @@ export function AdminDataQualityPage() {
         <section className="card card--elevated">
           <div>Stories Total: {overview.stories_total}</div>
           <div>Confidence 30d: {overview.confidence.avg_30d}</div>
-          <div>Drift: {overview.confidence.drift_status} ({overview.confidence.drift_delta})</div>
+          <div>
+            Drift: {formatEnumLabel(overview.confidence.drift_status)} ({overview.confidence.drift_delta})
+          </div>
           <div>Lineage Claims 30d: {overview.lineage.claims_30d}</div>
           <div>Lineage Coverage: {overview.lineage.coverage_ratio}</div>
           <div>Sync Failures 30d: {overview.sync_errors.failures_30d}</div>
@@ -138,7 +141,7 @@ export function AdminDataQualityPage() {
             <ul>
               {lineage.claims.slice(0, 20).map((claim) => (
                 <li key={claim.id}>
-                  [{claim.claim_type}] {claim.claim_text.slice(0, 120)}
+                  [{formatEnumLabel(claim.claim_type)}] {claim.claim_text.slice(0, 120)}
                 </li>
               ))}
             </ul>
@@ -163,10 +166,10 @@ export function AdminDataQualityPage() {
               }))
             }
           >
-            <option value="CORRECTION">CORRECTION</option>
-            <option value="DISPUTE">DISPUTE</option>
-            <option value="MISSING_EVIDENCE">MISSING_EVIDENCE</option>
-            <option value="LINEAGE_FIX">LINEAGE_FIX</option>
+            <option value="CORRECTION">{formatEnumLabel("CORRECTION")}</option>
+            <option value="DISPUTE">{formatEnumLabel("DISPUTE")}</option>
+            <option value="MISSING_EVIDENCE">{formatEnumLabel("MISSING_EVIDENCE")}</option>
+            <option value="LINEAGE_FIX">{formatEnumLabel("LINEAGE_FIX")}</option>
           </select>
           <select
             value={newFeedback.target_type}
@@ -174,9 +177,9 @@ export function AdminDataQualityPage() {
               setNewFeedback((s) => ({ ...s, target_type: e.target.value as "STORY" | "QUOTE" | "CLAIM" }))
             }
           >
-            <option value="STORY">STORY</option>
-            <option value="QUOTE">QUOTE</option>
-            <option value="CLAIM">CLAIM</option>
+            <option value="STORY">{formatEnumLabel("STORY")}</option>
+            <option value="QUOTE">{formatEnumLabel("QUOTE")}</option>
+            <option value="CLAIM">{formatEnumLabel("CLAIM")}</option>
           </select>
           <input
             value={newFeedback.corrected_value}
@@ -222,9 +225,9 @@ export function AdminDataQualityPage() {
             {feedback.map((row) => (
               <tr key={row.id}>
                 <td>{new Date(row.created_at).toLocaleString()}</td>
-                <td>{row.status}</td>
+                <td><span className={badgeClass(row.status)}>{formatEnumLabel(row.status)}</span></td>
                 <td>{row.story.title}</td>
-                <td>{row.feedback_type}</td>
+                <td>{formatEnumLabel(row.feedback_type)}</td>
                 <td>{row.notes || "-"}</td>
                 <td>
                   <button className="btn btn--secondary" onClick={() => reviewFeedback(row.id, "ACCEPTED")}>

@@ -4,6 +4,7 @@ import {
   reviewPublishApproval,
   type PublishApprovalRequestRow,
 } from "../lib/api";
+import { badgeClass, formatEnumLabel } from "../lib/format";
 
 export function AdminPublishApprovalsPage() {
   const [rows, setRows] = useState<PublishApprovalRequestRow[]>([]);
@@ -79,7 +80,7 @@ export function AdminPublishApprovalsPage() {
                 return (
                   <tr key={r.id}>
                     <td>{new Date(r.created_at).toLocaleString()}</td>
-                    <td>{r.status}</td>
+                    <td><span className={badgeClass(r.status)}>{formatEnumLabel(r.status)}</span></td>
                     <td>{r.target_id}</td>
                     <td>{r.requested_by.name || r.requested_by.email}</td>
                     <td>{payload.current_step_order ?? "-"}</td>

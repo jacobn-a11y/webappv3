@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Link, Navigate, useLocation, useNavigate 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/Toast";
+import { Breadcrumb } from "./components/Breadcrumb";
 import { AccountDetailPage } from "./pages/AccountDetailPage";
 import { LandingPageEditorPage } from "./pages/LandingPageEditorPage";
 import { AdminAccountAccessPage } from "./pages/AdminAccountAccessPage";
@@ -230,7 +231,9 @@ function buildNav(persona: RoleAwareHome["persona"] | null, userRole: AuthUser["
   }
   coreItems.push({ to: "/stories", label: "Stories", icon: IconBook });
   coreItems.push({ to: "/dashboard/pages", label: "Pages", icon: IconPages });
-  coreItems.push({ to: "/analytics", label: "Analytics", icon: IconAnalytics });
+  if (!isMember) {
+    coreItems.push({ to: "/analytics", label: "Analytics", icon: IconAnalytics });
+  }
 
   if (isAdmin || isMarketing || isSales) {
     coreItems.push({ to: "/chat", label: "Chat", icon: IconChat });
@@ -262,7 +265,7 @@ function buildNav(persona: RoleAwareHome["persona"] | null, userRole: AuthUser["
   // Non-admin roles: no admin items
 
   // Workspace items — not for VIEWER or EXEC
-  if (!isViewer && !isExec) {
+  if (!isViewer && !isExec && !isMember) {
     workItems.push({ to: "/workspaces", label: "Workspaces", icon: IconFolder });
     if (isAdmin || isMarketing || isSales) {
       workItems.push({ to: "/writebacks", label: "Writebacks", icon: IconRefresh });
@@ -447,6 +450,7 @@ function AuthenticatedApp({
   onLogout: () => Promise<void>;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [persona, setPersona] = useState<RoleAwareHome["persona"] | null>(null);
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === "true"; } catch { return false; }
@@ -496,6 +500,64 @@ function AuthenticatedApp({
   }, [storyPickerOpen, storyPickerSearch, user.role]);
 
   const nav = useMemo(() => buildNav(persona, user.role), [persona, user.role]);
+  const appBreadcrumbItems = useMemo(() => {
+    const path = location.pathname;
+    if (path === "/") return null;
+    if (/^\/accounts\/[^/]+(\/journey)?$/.test(path)) return null;
+    if (/^\/pages\/[^/]+\/edit$/.test(path)) return null;
+
+    const labelMap: Record<string, string> = {
+      admin: "Administration",
+      account: "Account",
+      "account-access": "Account Access",
+      permissions: "Permissions",
+      roles: "Roles",
+      "story-context": "Story Context",
+      "audit-logs": "Audit Logs",
+      ops: "Operations",
+      security: "Security",
+      governance: "Governance",
+      "publish-approvals": "Publish Approvals",
+      "data-quality": "Data Quality",
+      setup: "Setup",
+      billing: "Billing",
+      accounts: "Accounts",
+      stories: "Stories",
+      dashboard: "Dashboard",
+      pages: "Pages",
+      chat: "Chat",
+      analytics: "Analytics",
+      calls: "Calls",
+      transcript: "Transcript",
+      workspaces: "Workspaces",
+      writebacks: "Writebacks",
+      automations: "Automations",
+      status: "Status",
+      platform: "Platform",
+      "account-settings": "Account Settings",
+      settings: "Settings",
+      auth: "Auth",
+      invite: "Invite",
+    };
+
+    const segments = path.split("/").filter(Boolean);
+    let builtPath = "";
+    const items: Array<{ label: string; to?: string }> = [{ label: "Home", to: "/" }];
+
+    for (let index = 0; index < segments.length; index += 1) {
+      const segment = segments[index] ?? "";
+      builtPath += `/${segment}`;
+      const isLast = index === segments.length - 1;
+      const isLikelyId = /^[a-z0-9-]{10,}$/i.test(segment);
+      const label = isLikelyId ? "Details" : (labelMap[segment] ?? segment);
+      items.push({
+        label,
+        to: isLast ? undefined : builtPath,
+      });
+    }
+
+    return items;
+  }, [location.pathname]);
 
   const toggleCollapse = useCallback(() => {
     setCollapsed((prev) => {
@@ -646,6 +708,7 @@ function AuthenticatedApp({
             </button>
           </div>
         )}
+        {appBreadcrumbItems && <Breadcrumb items={appBreadcrumbItems} />}
         <ErrorBoundary>
           <Routes>
             <Route path="/" element={<HomePage />} />
