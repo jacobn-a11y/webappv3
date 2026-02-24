@@ -1,18 +1,18 @@
 {
   "version": 1,
-  "generatedAt": "2026-02-22T23:38:30.369Z",
+  "generatedAt": "2026-02-24T03:39:44.512Z",
   "files": [
     {
       "file": "prisma/schema.prisma",
-      "sha256": "134a4d8037502325bbc0a8f38b290216787a1faf83c7158d1f14da3f80a623f2"
+      "sha256": "1fe2f0d86f52c17925df35f7911eb8ddf2f6d340d9dad2749eb2f98f52d82a54"
     },
     {
       "file": "src/api/dashboard-routes.ts",
-      "sha256": "514ebfa09b855342024945c1f8dea7fecd987f9bc11c03dc5aa334641af52f84"
+      "sha256": "5b98542bfcb0e12a2de9e7aa201d9c2962cd14078644a8e2585072d9e9936fa2"
     },
     {
       "file": "src/api/landing-page-routes.ts",
-      "sha256": "aab178e1dce666e98a45ad287db175349317ff0563a74e46740f52129aa96f2b"
+      "sha256": "71464d7fbc626f04b7ad51820c6c3051962afacf0d2a4a02ca036d27260f0dbf"
     },
     {
       "file": "src/api/integration-routes.ts",
@@ -24,7 +24,7 @@
     },
     {
       "file": "src/middleware/permissions.ts",
-      "sha256": "7d9e7b3761ca5b383d063b935506822f59fb389bbe4ed2852f4b05ef67cc10f3"
+      "sha256": "c83bb0faaccf8fdc47fca857e75c16f878fe5fac58dac6bb0ac54693396ee22b"
     },
     {
       "file": "src/services/policy-engine.ts",
