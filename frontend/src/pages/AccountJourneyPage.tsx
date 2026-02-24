@@ -294,7 +294,7 @@ export function AccountJourneyPage() {
       <div className="journey__breadcrumb">
         <Breadcrumb items={[
           { label: "Home", to: "/" },
-          { label: "Accounts", to: "/accounts/acc_meridian" },
+          { label: "Accounts", to: "/accounts" },
           { label: account.name, to: `/accounts/${accountId}` },
           { label: "Journey" },
         ]} />

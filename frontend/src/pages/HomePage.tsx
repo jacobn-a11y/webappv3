@@ -21,7 +21,7 @@ const PERSONA_LABELS: Record<RoleAwareHome["persona"], string> = {
 function mapActionToLink(action: string): string | null {
   const lower = action.toLowerCase();
   if (lower.includes("approv")) return "/admin/publish-approvals";
-  if (lower.includes("story") || lower.includes("stories")) return "/accounts/acc_meridian";
+  if (lower.includes("story") || lower.includes("stories")) return "/accounts";
   if (lower.includes("page")) return "/dashboard/pages";
   if (lower.includes("integration") || lower.includes("connect")) return "/admin/ops";
   if (lower.includes("security") || lower.includes("mfa")) return "/admin/security";
@@ -175,12 +175,12 @@ function ExecDashboard({
               Score: {csHealth.overall_score}
             </span>
           </div>
-          <div className="kpi-grid" style={{ marginBottom: 20 }}>
+          <div className="kpi-grid kpi-grid--spaced">
             <div className="kpi-card">
               <div className="kpi-card__content">
                 <div className="kpi-card__label">Onboarding</div>
                 <div className="kpi-card__value">{csHealth.onboarding_progress_pct}%</div>
-                <div className="progress-bar" style={{ marginTop: 8 }}>
+                <div className="progress-bar progress-bar--spaced">
                   <div className="progress-bar__fill" style={{ width: `${csHealth.onboarding_progress_pct}%` }} />
                 </div>
               </div>
@@ -189,7 +189,7 @@ function ExecDashboard({
               <div className="kpi-card__content">
                 <div className="kpi-card__label">Adoption Rate</div>
                 <div className="kpi-card__value">{csHealth.adoption_rate_pct}%</div>
-                <div className="progress-bar" style={{ marginTop: 8 }}>
+                <div className="progress-bar progress-bar--spaced">
                   <div className={`progress-bar__fill${csHealth.adoption_rate_pct >= 70 ? " progress-bar__fill--success" : csHealth.adoption_rate_pct >= 40 ? " progress-bar__fill--warning" : " progress-bar__fill--error"}`} style={{ width: `${csHealth.adoption_rate_pct}%` }} />
                 </div>
               </div>
@@ -237,9 +237,9 @@ function ExecDashboard({
             </div>
           </div>
           {renewal.headline && (
-            <div className="callout callout--accent" style={{ marginTop: 16 }}>
+            <div className="callout callout--accent callout--mt">
               <div className="callout__title">{renewal.headline}</div>
-              {renewal.roi_narrative && <p style={{ margin: "4px 0 0", fontSize: 13, opacity: 0.85 }}>{renewal.roi_narrative}</p>}
+              {renewal.roi_narrative && <p className="callout__detail">{renewal.roi_narrative}</p>}
             </div>
           )}
         </div>
@@ -257,7 +257,7 @@ function ExecDashboard({
           </div>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9,18 15,12 9,6" /></svg>
         </Link>
-        <Link to="/accounts/acc_meridian" className="home-cta">
+        <Link to="/accounts" className="home-cta">
           <div className="home-cta__icon">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
           </div>
@@ -307,12 +307,12 @@ function CsmDashboard({
             </span>
           </div>
 
-          <div className="kpi-grid" style={{ marginBottom: 20 }}>
+          <div className="kpi-grid kpi-grid--spaced">
             <div className="kpi-card">
               <div className="kpi-card__content">
                 <div className="kpi-card__label">Onboarding</div>
                 <div className="kpi-card__value">{csHealth.onboarding_progress_pct}%</div>
-                <div className="progress-bar" style={{ marginTop: 8 }}>
+                <div className="progress-bar progress-bar--spaced">
                   <div className="progress-bar__fill" style={{ width: `${csHealth.onboarding_progress_pct}%` }} />
                 </div>
               </div>
@@ -321,7 +321,7 @@ function CsmDashboard({
               <div className="kpi-card__content">
                 <div className="kpi-card__label">Adoption Rate</div>
                 <div className="kpi-card__value">{csHealth.adoption_rate_pct}%</div>
-                <div className="progress-bar" style={{ marginTop: 8 }}>
+                <div className="progress-bar progress-bar--spaced">
                   <div className={`progress-bar__fill${csHealth.adoption_rate_pct >= 70 ? " progress-bar__fill--success" : csHealth.adoption_rate_pct >= 40 ? " progress-bar__fill--warning" : " progress-bar__fill--error"}`} style={{ width: `${csHealth.adoption_rate_pct}%` }} />
                 </div>
               </div>
@@ -365,11 +365,11 @@ function CsmDashboard({
           </div>
 
           {csHealth.risk_indicators.length > 0 && (
-            <div className="callout callout--warning" style={{ marginTop: 16 }}>
+            <div className="callout callout--warning callout--mt">
               <div className="callout__title">Risk Indicators</div>
-              <ul style={{ margin: "8px 0 0 16px", fontSize: 13 }}>
+              <ul className="callout__list">
                 {csHealth.risk_indicators.map((item) => (
-                  <li key={item} style={{ marginBottom: 4 }}>{item}</li>
+                  <li key={item} className="callout__list-item">{item}</li>
                 ))}
               </ul>
             </div>
@@ -390,7 +390,7 @@ function CsmDashboard({
             </span>
           </div>
 
-          <div className="kpi-grid" style={{ marginBottom: 20 }}>
+          <div className="kpi-grid kpi-grid--spaced">
             <div className="kpi-card">
               <div className="kpi-card__content">
                 <div className="kpi-card__label">Stories (90d)</div>
@@ -412,9 +412,9 @@ function CsmDashboard({
           </div>
 
           {renewal.headline && (
-            <div className="callout callout--accent" style={{ marginBottom: 12 }}>
+            <div className="callout callout--accent callout--mb">
               <div className="callout__title">{renewal.headline}</div>
-              {renewal.roi_narrative && <p style={{ margin: "4px 0 0", fontSize: 13, opacity: 0.85 }}>{renewal.roi_narrative}</p>}
+              {renewal.roi_narrative && <p className="callout__detail">{renewal.roi_narrative}</p>}
             </div>
           )}
         </div>
@@ -422,7 +422,7 @@ function CsmDashboard({
 
       {/* Quick Actions */}
       <div className="home-cta-row">
-        <Link to="/accounts/acc_meridian" className="home-cta home-cta--primary">
+        <Link to="/accounts" className="home-cta home-cta--primary">
           <div className="home-cta__icon">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
           </div>
@@ -498,7 +498,7 @@ function MemberDashboard({
 
       {/* Quick Actions — Primary CTA */}
       <div className="home-cta-row">
-        <Link to="/accounts/acc_meridian" className="home-cta home-cta--primary">
+        <Link to="/accounts" className="home-cta home-cta--primary">
           <div className="home-cta__icon">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
           </div>
@@ -678,12 +678,12 @@ function AdminDashboard({
               Score: {csHealth.overall_score}
             </span>
           </div>
-          <div className="kpi-grid" style={{ marginBottom: 20 }}>
+          <div className="kpi-grid kpi-grid--spaced">
             <div className="kpi-card">
               <div className="kpi-card__content">
                 <div className="kpi-card__label">Onboarding</div>
                 <div className="kpi-card__value">{csHealth.onboarding_progress_pct}%</div>
-                <div className="progress-bar" style={{ marginTop: 8 }}>
+                <div className="progress-bar progress-bar--spaced">
                   <div className="progress-bar__fill" style={{ width: `${csHealth.onboarding_progress_pct}%` }} />
                 </div>
               </div>
@@ -692,7 +692,7 @@ function AdminDashboard({
               <div className="kpi-card__content">
                 <div className="kpi-card__label">Adoption Rate</div>
                 <div className="kpi-card__value">{csHealth.adoption_rate_pct}%</div>
-                <div className="progress-bar" style={{ marginTop: 8 }}>
+                <div className="progress-bar progress-bar--spaced">
                   <div className={`progress-bar__fill${csHealth.adoption_rate_pct >= 70 ? " progress-bar__fill--success" : csHealth.adoption_rate_pct >= 40 ? " progress-bar__fill--warning" : " progress-bar__fill--error"}`} style={{ width: `${csHealth.adoption_rate_pct}%` }} />
                 </div>
               </div>
@@ -733,11 +733,11 @@ function AdminDashboard({
             </table>
           </div>
           {csHealth.risk_indicators.length > 0 && (
-            <div className="callout callout--warning" style={{ marginTop: 16 }}>
+            <div className="callout callout--warning callout--mt">
               <div className="callout__title">Risk Indicators</div>
-              <ul style={{ margin: "8px 0 0 16px", fontSize: 13 }}>
+              <ul className="callout__list">
                 {csHealth.risk_indicators.map((item) => (
-                  <li key={item} style={{ marginBottom: 4 }}>{item}</li>
+                  <li key={item} className="callout__list-item">{item}</li>
                 ))}
               </ul>
             </div>
@@ -757,7 +757,7 @@ function AdminDashboard({
               {formatEnumLabel(renewal.renewal_health)}
             </span>
           </div>
-          <div className="kpi-grid" style={{ marginBottom: 20 }}>
+          <div className="kpi-grid kpi-grid--spaced">
             <div className="kpi-card">
               <div className="kpi-card__content">
                 <div className="kpi-card__label">Stories (90d)</div>
@@ -778,9 +778,9 @@ function AdminDashboard({
             </div>
           </div>
           {renewal.headline && (
-            <div className="callout callout--accent" style={{ marginBottom: 12 }}>
+            <div className="callout callout--accent callout--mb">
               <div className="callout__title">{renewal.headline}</div>
-              {renewal.roi_narrative && <p style={{ margin: "4px 0 0", fontSize: 13, opacity: 0.85 }}>{renewal.roi_narrative}</p>}
+              {renewal.roi_narrative && <p className="callout__detail">{renewal.roi_narrative}</p>}
             </div>
           )}
         </div>

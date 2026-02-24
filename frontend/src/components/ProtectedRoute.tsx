@@ -1,4 +1,3 @@
-import { Navigate } from "react-router-dom";
 import type { AuthUser } from "../lib/api";
 
 interface ProtectedRouteProps {
@@ -16,7 +15,7 @@ export function ProtectedRoute({
 }: ProtectedRouteProps) {
   if (requiredRole && !requiredRole.includes(user.role)) {
     if (fallback) return <>{fallback}</>;
-    return <Navigate to="/" replace />;
+    return <AccessDenied />;
   }
   return <>{children}</>;
 }
