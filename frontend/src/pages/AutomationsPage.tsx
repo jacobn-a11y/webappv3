@@ -77,7 +77,7 @@ export function AutomationsPage({ userRole }: { userRole?: string }) {
         <div className="card__header">
           <div className="card__title">Create Rule</div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="form-grid-2">
           <div className="form-group">
             <label className="form-group__label">Rule Name</label>
             <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Alert on high failure rate" />
@@ -104,14 +104,14 @@ export function AutomationsPage({ userRole }: { userRole?: string }) {
             </>
           )}
           {triggerType === "SCHEDULE" && (
-            <div className="form-group" style={{ gridColumn: "1 / -1" }}>
+            <div className="form-group form-group--full">
               <label className="form-group__label">Cron Expression</label>
               <input className="form-input" value={scheduleCron} onChange={(e) => setScheduleCron(e.target.value)} placeholder="0 9 * * 1" />
               <span className="form-group__hint">Standard cron format (minute hour day month weekday)</span>
             </div>
           )}
           {triggerType === "EVENT" && (
-            <div className="form-group" style={{ gridColumn: "1 / -1" }}>
+            <div className="form-group form-group--full">
               <label className="form-group__label">Event Type</label>
               <input className="form-input" value={eventType} onChange={(e) => setEventType(e.target.value)} placeholder="Event type" />
             </div>
@@ -130,7 +130,7 @@ export function AutomationsPage({ userRole }: { userRole?: string }) {
             <input className="form-input" value={deliveryTarget} onChange={(e) => setDeliveryTarget(e.target.value)} placeholder={deliveryType === "EMAIL" ? "team@company.com" : deliveryType === "SLACK" ? "#channel" : "https://..."} />
           </div>
         </div>
-        <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+        <div className="form-actions-end">
           <button className="btn btn--primary" onClick={create}>Create Rule</button>
         </div>
       </div>}
@@ -141,7 +141,7 @@ export function AutomationsPage({ userRole }: { userRole?: string }) {
           <div className="card__title">Configured Rules</div>
           <span className="badge badge--accent">{rules.length} rules</span>
         </div>
-        <div className="table-container" style={{ border: "none", borderRadius: 0 }}>
+        <div className="table-container table-container--flush">
           <table className="data-table">
             <thead>
               <tr>
@@ -156,7 +156,7 @@ export function AutomationsPage({ userRole }: { userRole?: string }) {
             <tbody>
               {rules.length === 0 ? (
                 <tr><td colSpan={6} className="data-table__empty">
-                  <div className="state-view" style={{ minHeight: 120 }}>
+                  <div className="state-view state-view--sm">
                     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-border)" strokeWidth="1.5" aria-hidden="true"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10 13,2" /></svg>
                     <div className="state-view__title">No automation rules configured</div>
                     <div className="state-view__message">Create rules to automatically trigger actions based on story events.</div>
@@ -168,19 +168,19 @@ export function AutomationsPage({ userRole }: { userRole?: string }) {
                     <td><strong>{r.name}</strong></td>
                     <td><span className="badge badge--accent">{formatEnumLabel(r.trigger_type)}</span></td>
                     <td><span className="badge badge--info">{formatEnumLabel(r.delivery_type)}</span></td>
-                    <td>{r.last_run_at ? formatDate(r.last_run_at) : <span style={{ color: "var(--color-text-muted)" }}>Never</span>}</td>
+                    <td>{r.last_run_at ? formatDate(r.last_run_at) : <span className="text-muted">Never</span>}</td>
                     <td>
                       {r.last_run_status
                         ? <span className={badgeClass(r.last_run_status)}>{formatEnumLabel(r.last_run_status)}</span>
-                        : <span style={{ color: "var(--color-text-muted)" }}>-</span>
+                        : <span className="text-muted">-</span>
                       }
                     </td>
                     <td>
-                      <div style={{ display: "flex", gap: 6 }}>
+                      <div className="table-actions">
                         <button className="btn btn--ghost btn--sm" onClick={async () => { await runAutomationRule(r.id); showToast("Rule executed", "success"); await load(); }}>
                           Run
                         </button>
-                        <button className="btn btn--ghost btn--sm" style={{ color: "var(--color-error)" }} onClick={async () => { await deleteAutomationRule(r.id); showToast("Rule deleted", "info"); await load(); }}>
+                        <button className="btn btn--ghost btn--sm btn--danger-text" onClick={async () => { await deleteAutomationRule(r.id); showToast("Rule deleted", "info"); await load(); }}>
                           Delete
                         </button>
                       </div>

@@ -400,7 +400,7 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
         {userRole !== "VIEWER" && (
           <button
             className="btn btn--primary"
-            onClick={() => navigate("/accounts/acc_meridian")}
+            onClick={() => navigate("/accounts")}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
             Create New Page
@@ -662,14 +662,14 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
             {filteredPages.length === 0 ? (
               <tr>
                 <td colSpan={8} className="dash-pages__empty-state">
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", padding: "40px 20px" }}>
+                  <div className="dash-pages__empty-content">
                     <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-border)" strokeWidth="1.5" aria-hidden="true">
                       <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
                     </svg>
-                    <span style={{ fontSize: "15px", fontWeight: 300, color: "var(--white)" }}>
+                    <span className="dash-pages__empty-title">
                       {hasActiveFilters ? "No pages match your filters" : "No landing pages yet"}
                     </span>
-                    <span style={{ fontSize: "13px", color: "var(--color-text-secondary)", maxWidth: 360, textAlign: "center" }}>
+                    <span className="dash-pages__empty-subtitle">
                       {hasActiveFilters
                         ? "Try adjusting your search or filter criteria."
                         : "Create your first landing page to get started."}

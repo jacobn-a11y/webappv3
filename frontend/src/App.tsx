@@ -24,6 +24,7 @@ import { AdminBillingReadinessPage } from "./pages/AdminBillingReadinessPage";
 import { HomePage } from "./pages/HomePage";
 import { PlatformOwnerDashboardPage } from "./pages/PlatformOwnerDashboardPage";
 import { AccountSettingsPage } from "./pages/AccountSettingsPage";
+import { AccountsIndexPage } from "./pages/AccountsIndexPage";
 import {
   clearAuthState,
   getAuthMe,
@@ -212,7 +213,7 @@ function buildNav(persona: RoleAwareHome["persona"] | null, userRole: AuthUser["
   const workItems: NavItem[] = [];
 
   const isAdminRole = userRole === "OWNER" || userRole === "ADMIN";
-  const isAdmin = isAdminRole && (!persona || persona === "REVOPS_ADMIN");
+  const isAdmin = isAdminRole;
   const isMarketing = persona === "MARKETING_ANALYST";
   const isSales = persona === "SALES_MANAGER";
   const isCSM = persona === "CSM";
@@ -222,7 +223,7 @@ function buildNav(persona: RoleAwareHome["persona"] | null, userRole: AuthUser["
 
   // Core items — Accounts available to MEMBER (content creators), SALES, CSM
   if (isSales || isCSM || isMember || isAdmin) {
-    coreItems.push({ to: "/accounts/acc_meridian", label: "Accounts", icon: IconAccounts });
+    coreItems.push({ to: "/accounts", label: "Accounts", icon: IconAccounts });
   }
   coreItems.push({ to: "/dashboard/pages", label: "Pages", icon: IconPages });
   coreItems.push({ to: "/analytics", label: "Analytics", icon: IconAnalytics });
@@ -258,15 +259,10 @@ function buildNav(persona: RoleAwareHome["persona"] | null, userRole: AuthUser["
 
   // Workspace items — not for VIEWER or EXEC
   if (!isViewer && !isExec) {
-    if (!isCSM || isAdmin || isMarketing || isSales) {
-      workItems.push({ to: "/workspaces", label: "Workspaces", icon: IconFolder });
-    }
+    workItems.push({ to: "/workspaces", label: "Workspaces", icon: IconFolder });
     if (isAdmin || isMarketing || isSales) {
       workItems.push({ to: "/writebacks", label: "Writebacks", icon: IconRefresh });
       workItems.push({ to: "/automations", label: "Automations", icon: IconZap });
-    }
-    if (isCSM) {
-      workItems.push({ to: "/workspaces", label: "Workspaces", icon: IconFolder });
     }
   }
 
@@ -504,6 +500,7 @@ function AuthenticatedApp({
         <ErrorBoundary>
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/accounts" element={<AccountsIndexPage />} />
             <Route path="/accounts/:accountId" element={<AccountDetailPage userRole={user.role} />} />
             <Route path="/accounts/:accountId/journey" element={<AccountJourneyPage />} />
             <Route path="/pages/:pageId/edit" element={<LandingPageEditorPage />} />
@@ -571,7 +568,11 @@ function AuthenticatedApp({
             <Route path="/writebacks" element={<WritebacksPage userRole={user.role} />} />
             <Route path="/automations" element={<AutomationsPage userRole={user.role} />} />
             <Route path="/status" element={<StatusPage userOrgId={user.organizationId} />} />
-            <Route path="/platform" element={<PlatformOwnerDashboardPage />} />
+            <Route path="/platform" element={
+              <ProtectedRoute requiredRole={["OWNER"]} user={user} fallback={<AccessDenied />}>
+                <PlatformOwnerDashboardPage />
+              </ProtectedRoute>
+            } />
             <Route path="/account-settings" element={
               <ProtectedRoute requiredRole={["OWNER"]} user={user}>
                 <AccountSettingsPage />

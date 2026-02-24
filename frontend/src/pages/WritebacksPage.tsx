@@ -71,7 +71,7 @@ export function WritebacksPage({ userRole }: { userRole?: string }) {
         <div className="card__header">
           <div className="card__title">Request Writeback</div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="form-grid-2">
           <div className="form-group">
             <label className="form-group__label">Account ID</label>
             <input className="form-input" value={accountId} onChange={(e) => setAccountId(e.target.value)} placeholder="acc_..." />
@@ -94,7 +94,7 @@ export function WritebacksPage({ userRole }: { userRole?: string }) {
             <input className="form-input" value={body} onChange={(e) => setBody(e.target.value)} placeholder="Optional description" />
           </div>
         </div>
-        <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+        <div className="form-actions-end">
           <button className="btn btn--primary" onClick={submit}>Request Writeback</button>
         </div>
       </div>}
@@ -106,7 +106,7 @@ export function WritebacksPage({ userRole }: { userRole?: string }) {
             <div className="card__title">Pending Approval</div>
             <span className="badge badge--draft">{pending.length} pending</span>
           </div>
-          <div className="table-container" style={{ border: "none", borderRadius: 0 }}>
+          <div className="table-container table-container--flush">
             <table className="data-table">
               <thead>
                 <tr>
@@ -120,14 +120,14 @@ export function WritebacksPage({ userRole }: { userRole?: string }) {
                 {pending.map((w) => (
                   <tr key={w.id}>
                     <td>{formatDate(w.created_at)}</td>
-                    <td><code style={{ fontSize: 12 }}>{w.target_id}</code></td>
+                    <td><code className="code--sm">{w.target_id}</code></td>
                     <td><span className={badgeClass(w.status)}>{formatEnumLabel(w.status)}</span></td>
                     <td>
-                      <div style={{ display: "flex", gap: 6 }}>
+                      <div className="table-actions">
                         <button className="btn btn--primary btn--sm" onClick={async () => { await reviewWriteback(w.id, { decision: "APPROVE" }); showToast("Approved", "success"); await load(); }}>
                           Approve
                         </button>
-                        <button className="btn btn--ghost btn--sm" style={{ color: "var(--color-error)" }} onClick={async () => { await reviewWriteback(w.id, { decision: "REJECT" }); showToast("Rejected", "info"); await load(); }}>
+                        <button className="btn btn--ghost btn--sm btn--danger-text" onClick={async () => { await reviewWriteback(w.id, { decision: "REJECT" }); showToast("Rejected", "info"); await load(); }}>
                           Reject
                         </button>
                       </div>
@@ -146,7 +146,7 @@ export function WritebacksPage({ userRole }: { userRole?: string }) {
           <div className="card__title">All Writebacks</div>
           <span className="badge badge--accent">{writebacks.length} total</span>
         </div>
-        <div className="table-container" style={{ border: "none", borderRadius: 0 }}>
+        <div className="table-container table-container--flush">
           <table className="data-table">
             <thead>
               <tr>
@@ -159,7 +159,7 @@ export function WritebacksPage({ userRole }: { userRole?: string }) {
             <tbody>
               {writebacks.length === 0 ? (
                 <tr><td colSpan={4} className="data-table__empty">
-                  <div className="state-view" style={{ minHeight: 120 }}>
+                  <div className="state-view state-view--sm">
                     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-border)" strokeWidth="1.5" aria-hidden="true"><polyline points="23,4 23,10 17,10" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg>
                     <div className="state-view__title">No writebacks yet</div>
                     <div className="state-view__message">Writebacks will appear here when data is synced back to your CRM.</div>
@@ -170,14 +170,14 @@ export function WritebacksPage({ userRole }: { userRole?: string }) {
                   <tr key={w.id}>
                     <td>{formatDate(w.created_at)}</td>
                     <td><span className={badgeClass(w.status)}>{formatEnumLabel(w.status)}</span></td>
-                    <td><code style={{ fontSize: 12 }}>{w.target_id}</code></td>
+                    <td><code className="code--sm">{w.target_id}</code></td>
                     <td>
                       {w.status === "COMPLETED" ? (
                         <button className="btn btn--ghost btn--sm" onClick={async () => { await rollbackWriteback(w.id); showToast("Rolled back", "info"); await load(); }}>
                           Rollback
                         </button>
                       ) : (
-                        <span style={{ color: "var(--color-text-muted)" }}>-</span>
+                        <span className="text-muted">-</span>
                       )}
                     </td>
                   </tr>

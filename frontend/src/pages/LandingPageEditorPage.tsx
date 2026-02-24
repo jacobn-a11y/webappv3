@@ -299,7 +299,7 @@ export function LandingPageEditorPage() {
         <div className="page-editor__topbar-right">
           {saveMessage && <span className="page-editor__save-message">{saveMessage}</span>}
           {!saveMessage && lastSavedAt && !hasUnsavedChanges && (
-            <span className="page-editor__save-message" style={{ opacity: 0.6 }}>
+            <span className="page-editor__save-message page-editor__save-message--muted">
               Saved {lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </span>
           )}

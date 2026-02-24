@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { StoryGeneratorModal } from "../components/StoryGeneratorModal";
 import { Breadcrumb } from "../components/Breadcrumb";
-import { getAccountStories, type StorySummary } from "../lib/api";
+import { getAccountStories, getChatAccounts, type StorySummary } from "../lib/api";
 import { STORY_TYPE_LABELS } from "../types/taxonomy";
 
 export function AccountDetailPage({ userRole }: { userRole?: string }) {
@@ -11,16 +11,19 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
   const [showModal, setShowModal] = useState(false);
   const [stories, setStories] = useState<StorySummary[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // In a real app this would come from the account fetch.
-  // For now, derive a placeholder from the URL or use a generic label.
-  const accountName = "Account";
+  const [accountName, setAccountName] = useState("");
 
   useEffect(() => {
     if (!accountId) return;
     setLoading(true);
-    getAccountStories(accountId)
-      .then((res) => setStories(res.stories))
+    Promise.all([getAccountStories(accountId), getChatAccounts(accountId)])
+      .then(([storiesRes, accountsRes]) => {
+        setStories(storiesRes.stories);
+        const exact = accountsRes.accounts.find((account) => account.id === accountId);
+        if (exact?.name) {
+          setAccountName(exact.name);
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [accountId]);
@@ -42,19 +45,20 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
   }
 
   const isViewer = userRole === "VIEWER";
+  const displayAccountName = accountName || accountId;
 
   return (
     <div className="account-detail">
       <Breadcrumb items={[
         { label: "Home", to: "/" },
-        { label: "Accounts", to: "/accounts/acc_meridian" },
-        { label: "Account Detail" },
+        { label: "Accounts", to: "/accounts" },
+        { label: displayAccountName },
       ]} />
 
       {/* Page header */}
       <header className="account-detail__header">
         <div>
-          <h1 className="account-detail__title">Account Detail</h1>
+          <h1 className="account-detail__title">{displayAccountName}</h1>
           <p className="account-detail__id">ID: {accountId}</p>
         </div>
         <div className="account-detail__actions">
@@ -122,7 +126,7 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
       {showModal && (
         <StoryGeneratorModal
           accountId={accountId}
-          accountName={accountName}
+          accountName={displayAccountName}
           onClose={() => {
             setShowModal(false);
             refreshStories();

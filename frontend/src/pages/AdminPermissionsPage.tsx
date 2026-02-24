@@ -144,7 +144,7 @@ export function AdminPermissionsPage() {
             <p className="page__subtitle">Manage user permissions for your organization.</p>
           </div>
         </div>
-        <div className="state-view" style={{ minHeight: 200 }} role="status" aria-live="polite">
+        <div className="state-view admin-perm__state-view" role="status" aria-live="polite">
           <div className="spinner" />
           <div className="state-view__title">Loading permissions...</div>
         </div>
@@ -190,25 +190,25 @@ export function AdminPermissionsPage() {
         </div>
       </div>
 
-      <div className="admin-perms__table-container">
-        <table className="admin-perms__table">
+      <div className="admin-perm__table-container">
+        <table className="admin-perm__table">
           <thead>
             <tr>
-              <th className="admin-perms__th" style={{ minWidth: 200 }}>
+              <th className="admin-perm__th admin-perm__th--user">
                 User
               </th>
-              <th className="admin-perms__th" style={{ minWidth: 80 }}>
+              <th className="admin-perm__th admin-perm__th--role">
                 Role
               </th>
               {PERMISSION_COLUMNS.map((col) => (
                 <th
                   key={col.key}
-                  className="admin-perms__th admin-perms__th--perm"
+                  className="admin-perm__th admin-perm__th--perm"
                 >
-                  <div className="admin-perms__perm-header">
+                  <div className="admin-perm__perm-header">
                     <span>{col.label}</span>
                     {col.adminOnly && (
-                      <span className="admin-perms__admin-badge">
+                      <span className="admin-perm__admin-badge">
                         <svg
                           viewBox="0 0 24 24"
                           fill="none"
@@ -224,7 +224,7 @@ export function AdminPermissionsPage() {
                   </div>
                 </th>
               ))}
-              <th className="admin-perms__th" style={{ width: 50 }} />
+              <th className="admin-perm__th admin-perm__th--expand" />
             </tr>
           </thead>
           <tbody>
@@ -268,14 +268,14 @@ function UserRow({
 
   return (
     <>
-      <tr className="admin-perms__row">
-        <td className="admin-perms__td">
-          <span className="admin-perms__user-name">{displayName}</span>
-          <span className="admin-perms__user-email">{user.userEmail}</span>
+      <tr className="admin-perm__row">
+        <td className="admin-perm__td">
+          <span className="admin-perm__user-name">{displayName}</span>
+          <span className="admin-perm__user-email">{user.userEmail}</span>
         </td>
-        <td className="admin-perms__td">
+        <td className="admin-perm__td">
           <span
-            className={`admin-perms__role-badge admin-perms__role-badge--${user.role}`}
+            className={`admin-perm__role-badge admin-perm__role-badge--${user.role}`}
           >
             {formatEnumLabel(user.role)}
           </span>
@@ -289,14 +289,14 @@ function UserRow({
           return (
             <td
               key={col.key}
-              className="admin-perms__td admin-perms__td--perm"
+              className="admin-perm__td admin-perm__td--perm"
             >
-              <div className="admin-perms__toggle-wrap">
+              <div className="admin-perm__toggle-wrap">
                 <input
                   type="checkbox"
                   className={
-                    "admin-perms__toggle" +
-                    (isCellLoading ? " admin-perms__toggle--loading" : "")
+                    "admin-perm__toggle" +
+                    (isCellLoading ? " admin-perm__toggle--loading" : "")
                   }
                   checked={hasPermission}
                   disabled={isAdmin || isCellLoading}
@@ -313,13 +313,13 @@ function UserRow({
             </td>
           );
         })}
-        <td className="admin-perms__td">
+        <td className="admin-perm__td">
           {isExpandable && (
             <button
               type="button"
               className={
-                "admin-perms__expand-btn" +
-                (expanded ? " admin-perms__expand-btn--expanded" : "")
+                "admin-perm__expand-btn" +
+                (expanded ? " admin-perm__expand-btn--expanded" : "")
               }
               onClick={() => onExpand(user.userId)}
               aria-expanded={expanded}
@@ -342,7 +342,7 @@ function UserRow({
 
       {/* Expandable access grants row */}
       {isExpandable && expanded && (
-        <tr className="admin-perms__access-row">
+        <tr className="admin-perm__access-row">
           <td colSpan={TOTAL_COLUMNS}>
             <AccessPanel grants={user.accessGrants} />
           </td>
@@ -362,8 +362,8 @@ function AccessPanel({
   const hasGrants = grants && grants.length > 0;
 
   return (
-    <div className="admin-perms__access-panel">
-      <div className="admin-perms__access-panel-header">
+    <div className="admin-perm__access-panel">
+      <div className="admin-perm__access-panel-header">
         Account Access Grants
       </div>
       {hasGrants ? (
@@ -371,7 +371,7 @@ function AccessPanel({
           <AccessGrantRow key={grant.id} grant={grant} />
         ))
       ) : (
-        <div className="admin-perms__no-grants">
+        <div className="admin-perm__no-grants">
           No account access grants configured.
         </div>
       )}
@@ -385,13 +385,13 @@ function AccessGrantRow({ grant }: { grant: PermissionAccessGrant }) {
   const { iconClass, icon, title, detail } = getGrantDisplay(grant);
 
   return (
-    <div className="admin-perms__access-grant">
-      <div className={`admin-perms__access-grant-icon ${iconClass}`}>
+    <div className="admin-perm__access-grant">
+      <div className={`admin-perm__access-grant-icon ${iconClass}`}>
         {icon}
       </div>
-      <div className="admin-perms__access-grant-info">
-        <div className="admin-perms__access-grant-title">{title}</div>
-        <div className="admin-perms__access-grant-detail">{detail}</div>
+      <div className="admin-perm__access-grant-info">
+        <div className="admin-perm__access-grant-title">{title}</div>
+        <div className="admin-perm__access-grant-detail">{detail}</div>
       </div>
     </div>
   );
@@ -406,7 +406,7 @@ function getGrantDisplay(grant: PermissionAccessGrant): {
   switch (grant.scopeType) {
     case "ALL_ACCOUNTS":
       return {
-        iconClass: "admin-perms__access-grant-icon--all",
+        iconClass: "admin-perm__access-grant-icon--all",
         icon: (
           <svg
             viewBox="0 0 24 24"
@@ -424,7 +424,7 @@ function getGrantDisplay(grant: PermissionAccessGrant): {
 
     case "SINGLE_ACCOUNT":
       return {
-        iconClass: "admin-perms__access-grant-icon--single",
+        iconClass: "admin-perm__access-grant-icon--single",
         icon: (
           <svg
             viewBox="0 0 24 24"
@@ -444,7 +444,7 @@ function getGrantDisplay(grant: PermissionAccessGrant): {
 
     case "ACCOUNT_LIST":
       return {
-        iconClass: "admin-perms__access-grant-icon--list",
+        iconClass: "admin-perm__access-grant-icon--list",
         icon: (
           <svg
             viewBox="0 0 24 24"
@@ -466,7 +466,7 @@ function getGrantDisplay(grant: PermissionAccessGrant): {
 
     case "CRM_REPORT":
       return {
-        iconClass: "admin-perms__access-grant-icon--crm",
+        iconClass: "admin-perm__access-grant-icon--crm",
         icon: (
           <svg
             viewBox="0 0 24 24"
@@ -494,7 +494,7 @@ function getGrantDisplay(grant: PermissionAccessGrant): {
 
     default:
       return {
-        iconClass: "admin-perms__access-grant-icon--single",
+        iconClass: "admin-perm__access-grant-icon--single",
         icon: (
           <svg
             viewBox="0 0 24 24"
