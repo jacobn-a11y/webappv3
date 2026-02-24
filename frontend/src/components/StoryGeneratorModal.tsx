@@ -18,9 +18,12 @@ import {
   STORY_OUTLINE_LABELS,
 } from "../types/taxonomy";
 import {
+  buildStoryStream,
   buildStory,
   createLandingPage,
+  downloadStoryExport,
   getStoryContextSettings,
+  savePageDraft,
   type BuildStoryResponse,
   type StoryContextSettings,
 } from "../lib/api";
@@ -47,6 +50,7 @@ interface PersistedStorySettings {
 }
 
 const PERSIST_KEY = "story_generator_preferences_v1";
+const ONBOARDING_KEY = "story_generator_onboarding_seen_v1";
 
 const FUNNEL_STAGE_OPTIONS = (
   Object.entries(FUNNEL_STAGE_LABELS) as [FunnelStage, string][]
@@ -62,6 +66,62 @@ const STORY_LENGTH_OPTIONS = Object.entries(
 const STORY_OUTLINE_OPTIONS = Object.entries(
   STORY_OUTLINE_LABELS
 ) as [StoryOutline, string][];
+
+const STORY_TEMPLATES = [
+  {
+    id: "roi_snapshot",
+    label: "Quick ROI Snapshot",
+    description: "Short, quantified outcome summary for late-stage deals.",
+    values: {
+      storyLength: "SHORT" as StoryLength,
+      storyOutline: "BY_THE_NUMBERS" as StoryOutline,
+      storyType: "roi_financial_outcomes" as StoryTypeInput,
+      storyFormat: "by_the_numbers_snapshot" as StoryFormat,
+    },
+  },
+  {
+    id: "full_journey",
+    label: "Full Customer Journey",
+    description: "End-to-end journey with context, actions, and outcomes.",
+    values: {
+      storyLength: "MEDIUM" as StoryLength,
+      storyOutline: "CHRONOLOGICAL_JOURNEY" as StoryOutline,
+      storyType: "FULL_ACCOUNT_JOURNEY" as StoryTypeInput,
+      storyFormat: "before_after_transformation" as StoryFormat,
+    },
+  },
+  {
+    id: "exec_brief",
+    label: "Executive Brief",
+    description: "Concise high-level readout for leadership updates.",
+    values: {
+      storyLength: "EXECUTIVE" as StoryLength,
+      storyOutline: "EXECUTIVE_BRIEF" as StoryOutline,
+      storyType: "executive_strategic_impact" as StoryTypeInput,
+      storyFormat: "analyst_validated_study" as StoryFormat,
+    },
+  },
+];
+
+const PROGRESS_TO_PERCENT: Record<string, number> = {
+  STARTED: 8,
+  MERGING_TRANSCRIPTS: 20,
+  GATHERING_SEGMENTS: 38,
+  GENERATING_NARRATIVE: 68,
+  EXTRACTING_QUOTES: 84,
+  SAVING_STORY: 94,
+  DONE: 100,
+};
+
+const PROGRESS_COPY: Record<string, string> = {
+  STARTED: "Preparing story generation.",
+  MERGING_TRANSCRIPTS: "Merging account transcripts into a unified timeline.",
+  GATHERING_SEGMENTS: "Gathering tagged evidence from transcript segments.",
+  GENERATING_NARRATIVE: "Generating draft narrative from transcript evidence.",
+  EXTRACTING_QUOTES: "Extracting quantified high-value quotes.",
+  SAVING_STORY: "Saving your story and quote lineage.",
+  DONE: "Finalizing story output.",
+};
 
 function buildTopicOptions(selectedStages: FunnelStage[]) {
   const stages =
@@ -102,6 +162,17 @@ function sanitizeFileName(input: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
+}
+
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
 }
 
 function countWords(markdown: string): number {
@@ -158,10 +229,19 @@ export function StoryGeneratorModal({
 
   const [phase, setPhase] = useState<ModalPhase>("form");
   const [result, setResult] = useState<BuildStoryResponse | null>(null);
+  const [previewMarkdown, setPreviewMarkdown] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [streamedMarkdown, setStreamedMarkdown] = useState("");
+  const [lastProgressStep, setLastProgressStep] = useState("STARTED");
   const [error, setError] = useState("");
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [creatingPage, setCreatingPage] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<"pdf" | "docx" | null>(
+    null
+  );
   const [loadingProgress, setLoadingProgress] = useState(8);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
   const [orgDefaults, setOrgDefaults] = useState<StoryContextSettings | null>(
     null
   );
@@ -181,14 +261,18 @@ export function StoryGeneratorModal({
   }, [storyTypeSearch]);
 
   const storyStats = useMemo(() => {
-    if (!result) return null;
-    const wordCount = countWords(result.markdown);
+    const markdown = result ? previewMarkdown : "";
+    if (!markdown) return null;
+    const wordCount = countWords(markdown);
     const readingMinutes = Math.max(1, Math.round(wordCount / 220));
     return { wordCount, readingMinutes };
-  }, [result]);
+  }, [result, previewMarkdown]);
 
   const loadingStep =
     loadingProgress < 34 ? 0 : loadingProgress < 67 ? 1 : 2;
+  const activeMarkdown = result ? previewMarkdown : "";
+  const loadingMessage =
+    PROGRESS_COPY[lastProgressStep] ?? PROGRESS_COPY.STARTED;
 
   const isLengthDefault = orgDefaults?.default_story_length === storyLength;
   const isOutlineDefault = orgDefaults?.default_story_outline === storyOutline;
@@ -280,6 +364,14 @@ export function StoryGeneratorModal({
   }, []);
 
   useEffect(() => {
+    try {
+      setShowOnboarding(localStorage.getItem(ONBOARDING_KEY) !== "1");
+    } catch {
+      setShowOnboarding(false);
+    }
+  }, []);
+
+  useEffect(() => {
     if (phase !== "loading") {
       return;
     }
@@ -307,26 +399,48 @@ export function StoryGeneratorModal({
   const runGeneration = useCallback(async () => {
     setPhase("loading");
     setError("");
+    setLoadingProgress(8);
+    setLastProgressStep("STARTED");
+    setStreamedMarkdown("");
+    setPreviewMarkdown("");
+    setEditMode(false);
     const controller = new AbortController();
     requestControllerRef.current = controller;
 
+    const requestBody = {
+      account_id: accountId,
+      funnel_stages: selectedStages.length > 0 ? selectedStages : undefined,
+      filter_topics: selectedTopics.length > 0 ? selectedTopics : undefined,
+      title: customTitle.trim() || undefined,
+      format: selectedFormat || undefined,
+      story_length: storyLength,
+      story_outline: storyOutline,
+      story_type: storyType,
+    };
+
     try {
-      const res = await buildStory(
+      const res = await buildStoryStream(
+        requestBody,
         {
-          account_id: accountId,
-          funnel_stages: selectedStages.length > 0 ? selectedStages : undefined,
-          filter_topics: selectedTopics.length > 0 ? selectedTopics : undefined,
-          title: customTitle.trim() || undefined,
-          format: selectedFormat || undefined,
-          story_length: storyLength,
-          story_outline: storyOutline,
-          story_type: storyType,
+          onProgress: (step) => {
+            setLastProgressStep(step);
+            const mapped = PROGRESS_TO_PERCENT[step];
+            if (mapped != null) {
+              setLoadingProgress((prev) => Math.max(prev, mapped));
+            }
+          },
+          onToken: (token) => {
+            setStreamedMarkdown((prev) => prev + token);
+            setLoadingProgress((prev) => Math.max(prev, 72));
+          },
         },
         { signal: controller.signal }
       );
 
       setLoadingProgress(100);
+      setLastProgressStep("DONE");
       setResult(res);
+      setPreviewMarkdown(res.markdown);
       setPhase("preview");
     } catch (err) {
       const isAbort =
@@ -337,7 +451,38 @@ export function StoryGeneratorModal({
         setError("");
         return;
       }
-      setError(err instanceof Error ? err.message : "Failed to generate story");
+
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to generate story";
+
+      const canFallback =
+        errorMessage.toLowerCase().includes("stream") ||
+        errorMessage.toLowerCase().includes("event") ||
+        errorMessage.toLowerCase().includes("browser");
+
+      if (canFallback) {
+        try {
+          const fallbackRes = await buildStory(requestBody, {
+            signal: controller.signal,
+          });
+          setLoadingProgress(100);
+          setLastProgressStep("DONE");
+          setResult(fallbackRes);
+          setPreviewMarkdown(fallbackRes.markdown);
+          setPhase("preview");
+          return;
+        } catch (fallbackErr) {
+          const fallbackMessage =
+            fallbackErr instanceof Error
+              ? fallbackErr.message
+              : "Failed to generate story";
+          setError(fallbackMessage);
+          setPhase("error");
+          return;
+        }
+      }
+
+      setError(errorMessage);
       setPhase("error");
     } finally {
       requestControllerRef.current = null;
@@ -356,19 +501,19 @@ export function StoryGeneratorModal({
   const handleCancelGeneration = useCallback(() => {
     requestControllerRef.current?.abort();
     requestControllerRef.current = null;
-    setPhase("form");
-    setLoadingProgress(8);
-  }, []);
+    onClose();
+  }, [onClose]);
 
   const handleCopyToClipboard = useCallback(async () => {
     if (!result) return;
+    const content = previewMarkdown;
     try {
-      await navigator.clipboard.writeText(result.markdown);
+      await navigator.clipboard.writeText(content);
       setCopyFeedback(true);
       setTimeout(() => setCopyFeedback(false), 2000);
     } catch {
       const textarea = document.createElement("textarea");
-      textarea.value = result.markdown;
+      textarea.value = content;
       textarea.style.position = "fixed";
       textarea.style.opacity = "0";
       document.body.appendChild(textarea);
@@ -378,21 +523,33 @@ export function StoryGeneratorModal({
       setCopyFeedback(true);
       setTimeout(() => setCopyFeedback(false), 2000);
     }
-  }, [result]);
+  }, [result, previewMarkdown]);
 
   const handleDownloadMarkdown = useCallback(() => {
     if (!result) return;
+    const content = previewMarkdown;
     const title = sanitizeFileName(result.title || `${accountName}-story`);
-    const blob = new Blob([result.markdown], { type: "text/markdown;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${title || "story"}.md`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
-  }, [result, accountName]);
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    saveBlob(blob, `${title || "story"}.md`);
+  }, [previewMarkdown, result, accountName]);
+
+  const handleDownloadExport = useCallback(
+    async (format: "pdf" | "docx") => {
+      if (!result?.story_id) return;
+      const title = sanitizeFileName(result.title || `${accountName}-story`);
+      setExportingFormat(format);
+      try {
+        const blob = await downloadStoryExport(result.story_id, format);
+        saveBlob(blob, `${title || "story"}.${format}`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to export story");
+        setPhase("error");
+      } finally {
+        setExportingFormat(null);
+      }
+    },
+    [result, accountName]
+  );
 
   const handleCreateLandingPage = useCallback(async () => {
     if (!result?.story_id) {
@@ -408,6 +565,10 @@ export function StoryGeneratorModal({
         title: result.title,
       });
 
+      if (previewMarkdown && previewMarkdown !== result.markdown) {
+        await savePageDraft(page.id, previewMarkdown);
+      }
+
       onLandingPageCreated?.(page.id, page.slug);
     } catch (err) {
       setError(
@@ -417,12 +578,39 @@ export function StoryGeneratorModal({
     } finally {
       setCreatingPage(false);
     }
-  }, [result, onLandingPageCreated]);
+  }, [previewMarkdown, result, onLandingPageCreated]);
 
   const handleBackToForm = () => {
     setPhase("form");
     setError("");
   };
+
+  const handleDismissOnboarding = useCallback(() => {
+    setShowOnboarding(false);
+    try {
+      localStorage.setItem(ONBOARDING_KEY, "1");
+    } catch {
+      // Ignore storage errors in restricted environments.
+    }
+  }, []);
+
+  const handleApplyTemplate = useCallback(
+    (templateId: string) => {
+      const template = STORY_TEMPLATES.find((item) => item.id === templateId);
+      if (!template) return;
+
+      setActiveTemplateId(template.id);
+      setStoryLength(template.values.storyLength);
+      setStoryOutline(template.values.storyOutline);
+      setStoryType(template.values.storyType);
+      setSelectedFormat(template.values.storyFormat);
+      setStoryTypeMode(
+        template.values.storyType === "FULL_ACCOUNT_JOURNEY" ? "FULL" : "TOPIC"
+      );
+      setIsAdvanced(true);
+    },
+    []
+  );
 
   useEffect(() => {
     if (storyTypeMode === "FULL") {
@@ -433,6 +621,17 @@ export function StoryGeneratorModal({
       setStoryType(STORY_TYPE_TOPIC_OPTIONS[0]?.[0] ?? "industry_trend_validation");
     }
   }, [storyTypeMode, storyType]);
+
+  useEffect(() => {
+    const matched = STORY_TEMPLATES.find(
+      (template) =>
+        template.values.storyLength === storyLength &&
+        template.values.storyOutline === storyOutline &&
+        template.values.storyType === storyType &&
+        template.values.storyFormat === selectedFormat
+    );
+    setActiveTemplateId(matched?.id ?? null);
+  }, [selectedFormat, storyLength, storyOutline, storyType]);
 
   return (
     <div className="modal-overlay" role="presentation" onClick={onClose}>
@@ -467,6 +666,41 @@ export function StoryGeneratorModal({
                 <p className="story-form__helper">
                   Generate in one click using your saved settings and org defaults.
                 </p>
+                {showOnboarding && (
+                  <div className="story-onboarding" role="note" aria-live="polite">
+                    <div>
+                      <strong>First run:</strong> choose a template or use defaults,
+                      then generate. You can edit inline before creating a page.
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={handleDismissOnboarding}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+                <div className="story-template-grid" role="list" aria-label="Story templates">
+                  {STORY_TEMPLATES.map((template) => {
+                    const selected = activeTemplateId === template.id;
+                    return (
+                      <button
+                        key={template.id}
+                        type="button"
+                        role="listitem"
+                        className={`story-template ${selected ? "story-template--active" : ""}`}
+                        onClick={() => handleApplyTemplate(template.id)}
+                        aria-pressed={selected}
+                      >
+                        <span className="story-template__title">{template.label}</span>
+                        <span className="story-template__description">
+                          {template.description}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
                 <div className="story-form__quick-actions">
                   <button type="button" className="btn btn--primary" onClick={runGeneration}>
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -664,6 +898,7 @@ export function StoryGeneratorModal({
               <p className="loading-state__text">
                 Analyzing transcripts, extracting insights, and composing a structured narrative.
               </p>
+              <p className="loading-state__hint">{loadingMessage}</p>
               <div className="loading-state__steps">
                 <div className={`loading-state__step ${loadingStep > 0 ? "loading-state__step--complete" : loadingStep === 0 ? "loading-state__step--active" : ""}`}>
                   <span className="loading-state__step-dot" />
@@ -685,6 +920,16 @@ export function StoryGeneratorModal({
               >
                 Cancel generation
               </button>
+              {streamedMarkdown.trim().length > 0 && (
+                <div className="loading-state__live">
+                  <div className="loading-state__live-title">Live draft preview</div>
+                  <article className="markdown-body loading-state__live-markdown">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {`${streamedMarkdown}▍`}
+                    </ReactMarkdown>
+                  </article>
+                </div>
+              )}
             </div>
           )}
 
@@ -712,6 +957,22 @@ export function StoryGeneratorModal({
                   </button>
                   <button
                     type="button"
+                    className="btn btn--ghost"
+                    onClick={() => setEditMode((prev) => !prev)}
+                  >
+                    {editMode ? "Preview Mode" : "Edit Inline"}
+                  </button>
+                  {editMode && previewMarkdown !== result.markdown && (
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      onClick={() => setPreviewMarkdown(result.markdown)}
+                    >
+                      Reset Edits
+                    </button>
+                  )}
+                  <button
+                    type="button"
                     className={`btn btn--secondary ${copyFeedback ? "btn--success" : ""}`}
                     onClick={handleCopyToClipboard}
                   >
@@ -723,6 +984,22 @@ export function StoryGeneratorModal({
                     onClick={handleDownloadMarkdown}
                   >
                     Download .md
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={() => void handleDownloadExport("pdf")}
+                    disabled={!result.story_id || exportingFormat !== null}
+                  >
+                    {exportingFormat === "pdf" ? "Exporting..." : "PDF"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={() => void handleDownloadExport("docx")}
+                    disabled={!result.story_id || exportingFormat !== null}
+                  >
+                    {exportingFormat === "docx" ? "Exporting..." : "DOCX"}
                   </button>
                   <button
                     type="button"
@@ -748,11 +1025,25 @@ export function StoryGeneratorModal({
 
               <div className="story-preview__layout">
                 <div className="story-preview__content">
-                  <article className="markdown-body">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {result.markdown}
-                    </ReactMarkdown>
-                  </article>
+                  {editMode ? (
+                    <div className="story-preview__editor">
+                      <label className="form-field__label" htmlFor="story-inline-editor">
+                        Edit Story
+                      </label>
+                      <textarea
+                        id="story-inline-editor"
+                        className="story-preview__editor-input"
+                        value={activeMarkdown}
+                        onChange={(e) => setPreviewMarkdown(e.target.value)}
+                      />
+                    </div>
+                  ) : (
+                    <article className="markdown-body">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {activeMarkdown}
+                      </ReactMarkdown>
+                    </article>
+                  )}
                 </div>
 
                 {result.quotes.length > 0 && (

@@ -6,6 +6,8 @@ import { StoryGeneratorModal } from "../components/StoryGeneratorModal";
 import { Breadcrumb } from "../components/Breadcrumb";
 import {
   createLandingPage,
+  deleteStory,
+  downloadStoryExport,
   getAccountStories,
   getChatAccounts,
   type StorySummary,
@@ -18,6 +20,17 @@ const STORY_STATUS_LABELS: Record<StorySummary["story_status"], string> = {
   PUBLISHED: "Published",
   ARCHIVED: "Archived",
 };
+
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
 
 export function AccountDetailPage({ userRole }: { userRole?: string }) {
   const { accountId } = useParams<{ accountId: string }>();
@@ -109,6 +122,7 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
           <p className="account-detail__id">ID: {accountId}</p>
         </div>
         <div className="account-detail__actions">
+          {isViewer && <span className="account-detail__viewer-tag">View Only</span>}
           {!isViewer && (
             <button
               type="button"
@@ -221,6 +235,9 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
                     story={story}
                     canEdit={!isViewer}
                     onOpenPage={(pageId) => navigate(`/pages/${pageId}/edit`)}
+                    onDeleted={(storyId) =>
+                      setStories((prev) => prev.filter((entry) => entry.id !== storyId))
+                    }
                   />
                 ))}
               </div>
@@ -248,14 +265,20 @@ function StoryCard({
   story,
   canEdit,
   onOpenPage,
+  onDeleted,
 }: {
   story: StorySummary;
   canEdit: boolean;
   onOpenPage: (pageId: string) => void;
+  onDeleted: (storyId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [creatingPage, setCreatingPage] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<"pdf" | "docx" | null>(
+    null
+  );
+  const [deleting, setDeleting] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
 
   const handleCopy = async () => {
@@ -275,14 +298,25 @@ function StoryCard({
       .replace(/^-+|-+$/g, "")
       .slice(0, 80);
     const blob = new Blob([story.markdown], { type: "text/markdown;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${safeTitle || "story"}.md`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
+    saveBlob(blob, `${safeTitle || "story"}.md`);
+  };
+
+  const handleDownloadExport = async (format: "pdf" | "docx") => {
+    const safeTitle = story.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80);
+    setExportingFormat(format);
+    setPageError(null);
+    try {
+      const blob = await downloadStoryExport(story.id, format);
+      saveBlob(blob, `${safeTitle || "story"}.${format}`);
+    } catch (err) {
+      setPageError(err instanceof Error ? err.message : "Failed to export story");
+    } finally {
+      setExportingFormat(null);
+    }
   };
 
   const handlePageAction = async () => {
@@ -300,6 +334,24 @@ function StoryCard({
       setPageError(err instanceof Error ? err.message : "Failed to create page");
     } finally {
       setCreatingPage(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!canEdit) return;
+    const confirmed = window.confirm(
+      `Delete story "${story.title}"? This cannot be undone.`
+    );
+    if (!confirmed) return;
+    setDeleting(true);
+    setPageError(null);
+    try {
+      await deleteStory(story.id);
+      onDeleted(story.id);
+    } catch (err) {
+      setPageError(err instanceof Error ? err.message : "Failed to delete story");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -338,18 +390,45 @@ function StoryCard({
           <button type="button" className="btn btn--sm btn--ghost" onClick={handleDownload}>
             Download .md
           </button>
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            onClick={() => void handleDownloadExport("pdf")}
+            disabled={exportingFormat !== null}
+          >
+            {exportingFormat === "pdf" ? "Exporting..." : "PDF"}
+          </button>
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            onClick={() => void handleDownloadExport("docx")}
+            disabled={exportingFormat !== null}
+          >
+            {exportingFormat === "docx" ? "Exporting..." : "DOCX"}
+          </button>
           {canEdit && (
             <button
               type="button"
               className="btn btn--sm btn--secondary"
               onClick={handlePageAction}
-              disabled={creatingPage}
+              disabled={creatingPage || exportingFormat !== null || deleting}
             >
               {creatingPage
                 ? "Opening..."
                 : story.landing_page?.id
                   ? "Edit Page"
                   : "Create Landing Page"}
+            </button>
+          )}
+          {canEdit && (
+            <button
+              type="button"
+              className="btn btn--sm btn--danger"
+              onClick={() => void handleDelete()}
+              disabled={deleting || creatingPage || exportingFormat !== null || !!story.landing_page}
+              title={story.landing_page ? "Delete page first to remove this story" : "Delete story"}
+            >
+              {deleting ? "Deleting..." : "Delete"}
             </button>
           )}
           <button

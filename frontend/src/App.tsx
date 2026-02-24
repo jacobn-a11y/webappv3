@@ -25,6 +25,7 @@ import { HomePage } from "./pages/HomePage";
 import { PlatformOwnerDashboardPage } from "./pages/PlatformOwnerDashboardPage";
 import { AccountSettingsPage } from "./pages/AccountSettingsPage";
 import { AccountsIndexPage } from "./pages/AccountsIndexPage";
+import { StoryLibraryPage } from "./pages/StoryLibraryPage";
 import {
   clearAuthState,
   getAuthMe,
@@ -227,6 +228,7 @@ function buildNav(persona: RoleAwareHome["persona"] | null, userRole: AuthUser["
   if (isSales || isCSM || isMember || isAdmin) {
     coreItems.push({ to: "/accounts", label: "Accounts", icon: IconAccounts });
   }
+  coreItems.push({ to: "/stories", label: "Stories", icon: IconBook });
   coreItems.push({ to: "/dashboard/pages", label: "Pages", icon: IconPages });
   coreItems.push({ to: "/analytics", label: "Analytics", icon: IconAnalytics });
 
@@ -648,6 +650,7 @@ function AuthenticatedApp({
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/accounts" element={<AccountsIndexPage />} />
+            <Route path="/stories" element={<StoryLibraryPage userRole={user.role} />} />
             <Route path="/accounts/:accountId" element={<AccountDetailPage userRole={user.role} />} />
             <Route path="/accounts/:accountId/journey" element={<AccountJourneyPage />} />
             <Route path="/pages/:pageId/edit" element={<LandingPageEditorPage />} />

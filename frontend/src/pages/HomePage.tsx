@@ -4,11 +4,14 @@ import {
   getCustomerSuccessHealth,
   getRenewalValueReport,
   getRoleAwareHome,
+  getStoryLibrary,
+  type StoryLibraryItem,
   type CustomerSuccessHealth,
   type RenewalValueReport,
   type RoleAwareHome,
 } from "../lib/api";
 import { formatEnumLabel, formatNumber, badgeClass } from "../lib/format";
+import { STORY_TYPE_LABELS } from "../types/taxonomy";
 
 const PERSONA_LABELS: Record<RoleAwareHome["persona"], string> = {
   REVOPS_ADMIN: "RevOps Admin",
@@ -45,6 +48,7 @@ export function HomePage() {
   const [data, setData] = useState<RoleAwareHome | null>(null);
   const [csHealth, setCsHealth] = useState<CustomerSuccessHealth | null>(null);
   const [renewal, setRenewal] = useState<RenewalValueReport | null>(null);
+  const [recentStories, setRecentStories] = useState<StoryLibraryItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -54,6 +58,19 @@ export function HomePage() {
       .then((home) => {
         if (cancelled) return;
         setData(home);
+        if (home.user.base_role === "OWNER" || home.user.base_role === "ADMIN") {
+          void getStoryLibrary({ page: 1, limit: 5 })
+            .then((res) => {
+              if (cancelled) return;
+              setRecentStories(res.stories);
+            })
+            .catch(() => {
+              if (cancelled) return;
+              setRecentStories([]);
+            });
+        } else {
+          setRecentStories([]);
+        }
 
         const needsHealthPanels =
           home.persona === "EXEC" ||
@@ -137,7 +154,15 @@ export function HomePage() {
   }
 
   // Default: REVOPS_ADMIN / SALES_MANAGER — full admin dashboard
-  return <AdminDashboard data={data} csHealth={csHealth} renewal={renewal} userName={userName} />;
+  return (
+    <AdminDashboard
+      data={data}
+      csHealth={csHealth}
+      renewal={renewal}
+      recentStories={recentStories}
+      userName={userName}
+    />
+  );
 }
 
 // ─── EXEC Dashboard (KPIs Only) ──────────────────────────────────────────────
@@ -623,11 +648,13 @@ function AdminDashboard({
   data,
   csHealth,
   renewal,
+  recentStories,
   userName,
 }: {
   data: RoleAwareHome;
   csHealth: CustomerSuccessHealth | null;
   renewal: RenewalValueReport | null;
+  recentStories: StoryLibraryItem[];
   userName: string;
 }) {
   return (
@@ -645,6 +672,46 @@ function AdminDashboard({
       {/* Recommended Actions — shown first for actionability */}
       {data.recommended_actions.length > 0 && (
         <RecommendedActions actions={data.recommended_actions} />
+      )}
+
+      {recentStories.length > 0 && (
+        <div className="card card--elevated">
+          <div className="card__header">
+            <div>
+              <div className="card__title">Recent Stories</div>
+              <div className="card__subtitle">Across all accessible accounts</div>
+            </div>
+            <Link to="/stories" className="btn btn--ghost btn--sm">
+              View All
+            </Link>
+          </div>
+          <div className="table-container">
+            <table className="data-table data-table--compact">
+              <thead>
+                <tr>
+                  <th>Story</th>
+                  <th>Account</th>
+                  <th>Type</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentStories.map((story) => (
+                  <tr key={story.id}>
+                    <td>
+                      <strong>{story.title}</strong>
+                    </td>
+                    <td>
+                      <Link to={`/accounts/${story.account.id}`}>{story.account.name}</Link>
+                    </td>
+                    <td>{STORY_TYPE_LABELS[story.story_type] ?? story.story_type}</td>
+                    <td>{new Date(story.generated_at).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {/* KPI Cards */}

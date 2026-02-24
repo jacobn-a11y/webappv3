@@ -49,6 +49,16 @@ export interface StoryBuilderOptions {
   storyOutline?: StoryOutline;
   /** Explicit story type selector (full journey or topic-driven type). */
   storyType?: StoryTypeInput;
+  /** Optional callback fired with step-level progress updates. */
+  onProgress?: (step:
+    | "MERGING_TRANSCRIPTS"
+    | "GATHERING_SEGMENTS"
+    | "GENERATING_NARRATIVE"
+    | "EXTRACTING_QUOTES"
+    | "SAVING_STORY"
+    | "DONE") => void;
+  /** Optional callback fired as narrative tokens stream from the LLM. */
+  onNarrativeToken?: (token: string) => void;
 }
 
 interface TranscriptSegment {
@@ -135,6 +145,7 @@ export class StoryBuilder {
    *   3. Extract high-value quotes
    */
   async buildStory(options: StoryBuilderOptions): Promise<StoryResult> {
+    options.onProgress?.("MERGING_TRANSCRIPTS");
     const [account, orgSettings] = await Promise.all([
       this.prisma.account.findUniqueOrThrow({
         where: { id: options.accountId },
@@ -171,9 +182,11 @@ export class StoryBuilder {
     }
 
     // ── Step 2: Also gather tagged segments for filtering & quotes ───
+    options.onProgress?.("GATHERING_SEGMENTS");
     const segments = await this.gatherSegments(options);
 
     // ── Step 3: Generate journey narrative from merged transcript ─────
+    options.onProgress?.("GENERATING_NARRATIVE");
     const markdown = await this.generateNarrativeFromMerged(
       account.name,
       mergeResult.markdown,
@@ -181,13 +194,16 @@ export class StoryBuilder {
       mergeResult.truncated,
       segments,
       savedContext,
-      effectiveSettings
+      effectiveSettings,
+      options.onNarrativeToken
     );
 
     // ── Step 4: Extract high-value quotes ────────────────────────────
+    options.onProgress?.("EXTRACTING_QUOTES");
     const quotes = await this.extractQuotes(segments);
 
     // ── Persist the story ────────────────────────────────────────────
+    options.onProgress?.("SAVING_STORY");
     const title =
       options.title ?? this.generateTitle(account.name, options.filterTopics);
 
@@ -264,6 +280,7 @@ export class StoryBuilder {
       });
     }
 
+    options.onProgress?.("DONE");
     return { storyId: story.id, title, markdownBody: markdown, quotes };
   }
 
@@ -346,7 +363,8 @@ export class StoryBuilder {
     wasTruncated: boolean,
     segments: TranscriptSegment[],
     context: StoryContextSettings,
-    settings: EffectiveStoryGenerationSettings
+    settings: EffectiveStoryGenerationSettings,
+    onNarrativeToken?: (token: string) => void
   ): Promise<string> {
     // Build topic summary from tagged segments for additional context
     const topicSummary = this.buildTopicSummary(segments);
@@ -355,27 +373,48 @@ export class StoryBuilder {
       ? "\n\nNOTE: Some calls were excluded to fit within context limits. The included calls represent the most relevant portion of the account journey."
       : "";
 
+    const messages = [
+      {
+        role: "system" as const,
+        content: this.buildStorySystemPrompt(context, settings),
+      },
+      {
+        role: "user" as const,
+        content: this.buildStoryUserPrompt({
+          accountName,
+          callCount,
+          topicSummary,
+          truncationNote,
+          mergedMarkdown,
+          settings,
+        }),
+      },
+    ];
+
+    if (onNarrativeToken) {
+      const stream = await this.openai.chat.completions.create({
+        model: this.model,
+        temperature: 0.3,
+        max_tokens: 4000,
+        stream: true,
+        messages,
+      });
+
+      let content = "";
+      for await (const chunk of stream) {
+        const token = chunk.choices[0]?.delta?.content ?? "";
+        if (token.length === 0) continue;
+        content += token;
+        onNarrativeToken(token);
+      }
+      return content || "# Story generation failed";
+    }
+
     const response = await this.openai.chat.completions.create({
       model: this.model,
       temperature: 0.3,
       max_tokens: 4000,
-      messages: [
-        {
-          role: "system",
-          content: this.buildStorySystemPrompt(context, settings),
-        },
-        {
-          role: "user",
-          content: this.buildStoryUserPrompt({
-            accountName,
-            callCount,
-            topicSummary,
-            truncationNote,
-            mergedMarkdown,
-            settings,
-          }),
-        },
-      ],
+      messages,
     });
 
     return response.choices[0]?.message?.content ?? "# Story generation failed";

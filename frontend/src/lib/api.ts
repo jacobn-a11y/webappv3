@@ -77,6 +77,14 @@ export interface StorySummary {
   quotes: StoryQuote[];
 }
 
+export interface StoryLibraryItem extends StorySummary {
+  account: {
+    id: string;
+    name: string;
+    domain: string | null;
+  };
+}
+
 export interface AccountsListItem {
   id: string;
   name: string;
@@ -1206,7 +1214,20 @@ async function request<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
-  const headers = new Headers(options?.headers ?? {});
+  const headers = buildRequestHeaders(options?.headers);
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...options,
+    headers,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error ?? `Request failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+function buildRequestHeaders(existing?: HeadersInit): Headers {
+  const headers = new Headers(existing ?? {});
   headers.set("Content-Type", "application/json");
   headers.set("Accept", "application/json");
   const sessionToken = getSessionToken();
@@ -1217,16 +1238,7 @@ async function request<T>(
   if (supportToken) {
     headers.set("x-support-impersonation-token", supportToken);
   }
-
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error ?? `Request failed: ${res.status}`);
-  }
-  return res.json();
+  return headers;
 }
 
 export function setSupportImpersonationToken(token: string | null): void {
@@ -1387,10 +1399,161 @@ export async function buildStory(
   });
 }
 
+export async function buildStoryStream(
+  req: BuildStoryRequest,
+  handlers: {
+    onProgress?: (step: string) => void;
+    onToken?: (token: string) => void;
+    onComplete?: (payload: BuildStoryResponse) => void;
+  },
+  options?: {
+    signal?: AbortSignal;
+  }
+): Promise<BuildStoryResponse> {
+  const headers = buildRequestHeaders();
+  const response = await fetch(`${BASE_URL}/stories/build/stream`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(req),
+    signal: options?.signal,
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(body.error ?? `Request failed: ${response.status}`);
+  }
+
+  if (!response.body) {
+    throw new Error("Streaming not supported by this browser.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let currentEvent = "message";
+  let finalPayload: BuildStoryResponse | null = null;
+
+  const flushBlock = (block: string) => {
+    const lines = block.split("\n");
+    let event = currentEvent;
+    let data = "";
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        event = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        data += line.slice(5).trim();
+      }
+    }
+
+    if (!data) return;
+    const parsed = JSON.parse(data) as Record<string, unknown>;
+
+    if (event === "progress" && typeof parsed.step === "string") {
+      handlers.onProgress?.(parsed.step);
+      return;
+    }
+
+    if (event === "token" && typeof parsed.token === "string") {
+      handlers.onToken?.(parsed.token);
+      return;
+    }
+
+    if (event === "complete") {
+      const payload = parsed as unknown as BuildStoryResponse;
+      finalPayload = payload;
+      handlers.onComplete?.(payload);
+      return;
+    }
+
+    if (event === "error") {
+      throw new Error(
+        typeof parsed.error === "string" ? parsed.error : "Streaming request failed"
+      );
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() ?? "";
+    for (const block of blocks) {
+      if (block.trim().length === 0) continue;
+      flushBlock(block);
+    }
+  }
+
+  if (buffer.trim().length > 0) {
+    flushBlock(buffer);
+  }
+
+  if (!finalPayload) {
+    throw new Error("Story stream ended without a final payload.");
+  }
+
+  return finalPayload;
+}
+
 export async function getAccountStories(
   accountId: string
 ): Promise<{ stories: StorySummary[] }> {
   return request<{ stories: StorySummary[] }>(`/stories/${accountId}`);
+}
+
+export async function getStoryLibrary(params?: {
+  search?: string;
+  story_type?: string;
+  status?: "DRAFT" | "PAGE_CREATED" | "PUBLISHED" | "ARCHIVED";
+  page?: number;
+  limit?: number;
+}): Promise<{
+  stories: StoryLibraryItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    totalCount: number;
+    totalPages: number;
+  };
+}> {
+  const qs = new URLSearchParams();
+  if (params?.search) qs.set("search", params.search);
+  if (params?.story_type) qs.set("story_type", params.story_type);
+  if (params?.status) qs.set("status", params.status);
+  if (params?.page != null) qs.set("page", String(params.page));
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  const query = qs.toString();
+  return request<{
+    stories: StoryLibraryItem[];
+    pagination: {
+      page: number;
+      limit: number;
+      totalCount: number;
+      totalPages: number;
+    };
+  }>(`/stories/library${query ? `?${query}` : ""}`);
+}
+
+export async function deleteStory(storyId: string): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/stories/${storyId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function downloadStoryExport(
+  storyId: string,
+  format: "pdf" | "docx"
+): Promise<Blob> {
+  const headers = buildRequestHeaders();
+  const response = await fetch(`${BASE_URL}/stories/${encodeURIComponent(storyId)}/export?format=${format}`, {
+    method: "GET",
+    headers,
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(body.error ?? `Request failed: ${response.status}`);
+  }
+  return response.blob();
 }
 
 export async function createLandingPage(
