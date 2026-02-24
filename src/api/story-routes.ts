@@ -132,6 +132,7 @@ export function createStoryRoutes(
       });
 
       res.json({
+        story_id: result.storyId,
         title: result.title,
         markdown: result.markdownBody,
         quotes: result.quotes.map((q) => ({
@@ -202,12 +203,30 @@ export function createStoryRoutes(
         },
         include: {
           quotes: true,
+          landingPages: {
+            select: {
+              id: true,
+              status: true,
+              publishedAt: true,
+              createdAt: true,
+            },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
         },
         orderBy: { generatedAt: "desc" },
       });
 
       res.json({
         stories: stories.map((s) => ({
+          story_status:
+            s.landingPages.length === 0
+              ? "DRAFT"
+              : s.landingPages[0]?.status === "PUBLISHED"
+                ? "PUBLISHED"
+                : s.landingPages[0]?.status === "ARCHIVED"
+                  ? "ARCHIVED"
+                  : "PAGE_CREATED",
           id: s.id,
           title: s.title,
           story_type: s.storyType,
@@ -215,12 +234,21 @@ export function createStoryRoutes(
           filter_tags: s.filterTags,
           generated_at: s.generatedAt.toISOString(),
           markdown: s.markdownBody,
+          landing_page:
+            s.landingPages[0] == null
+              ? null
+              : {
+                  id: s.landingPages[0].id,
+                  status: s.landingPages[0].status,
+                  published_at: s.landingPages[0].publishedAt?.toISOString() ?? null,
+                },
           quotes: (s as unknown as { quotes: HighValueQuote[] }).quotes.map((q: HighValueQuote) => ({
             speaker: q.speaker,
             quote_text: q.quoteText,
             context: q.context,
             metric_type: q.metricType,
             metric_value: q.metricValue,
+            call_id: q.callId ?? undefined,
           })),
         })),
       });

@@ -28,9 +28,16 @@ export interface StoryQuote {
 }
 
 export interface BuildStoryResponse {
+  story_id: string | null;
   title: string;
   markdown: string;
   quotes: StoryQuote[];
+}
+
+export interface StoryLandingPageSummary {
+  id: string;
+  status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
+  published_at: string | null;
 }
 
 export interface AuthUser {
@@ -61,11 +68,39 @@ export interface StorySummary {
   id: string;
   title: string;
   story_type: string;
+  story_status: "DRAFT" | "PAGE_CREATED" | "PUBLISHED" | "ARCHIVED";
   funnel_stages: FunnelStage[];
   filter_tags: string[];
   generated_at: string;
   markdown: string;
+  landing_page: StoryLandingPageSummary | null;
   quotes: StoryQuote[];
+}
+
+export interface AccountsListItem {
+  id: string;
+  name: string;
+  domain: string | null;
+  industry: string | null;
+  totalCalls: number;
+  lastCallDate: string | null;
+  storyCount: number;
+  landingPageCount: number;
+  createdAt: string;
+  funnelStageDistribution: Array<{
+    stage: string;
+    count: number;
+  }>;
+}
+
+export interface AccountsListResponse {
+  accounts: AccountsListItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    totalCount: number;
+    totalPages: number;
+  };
 }
 
 export interface CreateLandingPageRequest {
@@ -1340,11 +1375,15 @@ export async function createSelfServePortal(): Promise<{ portalUrl: string }> {
 }
 
 export async function buildStory(
-  req: BuildStoryRequest
+  req: BuildStoryRequest,
+  options?: {
+    signal?: AbortSignal;
+  }
 ): Promise<BuildStoryResponse> {
   return request<BuildStoryResponse>("/stories/build", {
     method: "POST",
     body: JSON.stringify(req),
+    signal: options?.signal,
   });
 }
 
@@ -2320,6 +2359,32 @@ export async function deletePage(pageId: string): Promise<void> {
 export async function getChatAccounts(search?: string): Promise<{ accounts: ChatAccount[] }> {
   const qs = search ? `?search=${encodeURIComponent(search)}` : "";
   return request<{ accounts: ChatAccount[] }>(`/rag/accounts${qs}`);
+}
+
+export async function getAccountsList(params?: {
+  search?: string;
+  funnel_stage?: string;
+  page?: number;
+  limit?: number;
+  sort_by?:
+    | "name"
+    | "domain"
+    | "totalCalls"
+    | "lastCallDate"
+    | "storyCount"
+    | "landingPageCount"
+    | "createdAt";
+  sort_order?: "asc" | "desc";
+}): Promise<AccountsListResponse> {
+  const qs = new URLSearchParams();
+  if (params?.search) qs.set("search", params.search);
+  if (params?.funnel_stage) qs.set("funnel_stage", params.funnel_stage);
+  if (params?.page != null) qs.set("page", String(params.page));
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  if (params?.sort_by) qs.set("sort_by", params.sort_by);
+  if (params?.sort_order) qs.set("sort_order", params.sort_order);
+  const query = qs.toString();
+  return request<AccountsListResponse>(`/accounts${query ? `?${query}` : ""}`);
 }
 
 export async function sendChatMessage(body: {

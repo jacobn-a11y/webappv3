@@ -72,6 +72,7 @@ interface ExtractedQuote {
 }
 
 interface StoryResult {
+  storyId: string | null;
   title: string;
   markdownBody: string;
   quotes: ExtractedQuote[];
@@ -161,6 +162,7 @@ export class StoryBuilder {
 
     if (mergeResult.includedCalls === 0) {
       return {
+        storyId: null,
         title: options.title ?? "No Data Available",
         markdownBody:
           "No transcripts found for this account.",
@@ -262,7 +264,7 @@ export class StoryBuilder {
       });
     }
 
-    return { title, markdownBody: markdown, quotes };
+    return { storyId: story.id, title, markdownBody: markdown, quotes };
   }
 
   // ─── Step 1: Gather Segments ──────────────────────────────────────

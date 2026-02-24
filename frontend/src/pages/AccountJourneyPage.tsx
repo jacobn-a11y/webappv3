@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { Breadcrumb } from "../components/Breadcrumb";
 import {
   getAccountJourney,
@@ -388,7 +388,12 @@ export function AccountJourneyPage() {
 
       {/* Main Content */}
       <main className="journey__main">
-        <h1 className="journey__title">Account Journey</h1>
+        <div className="journey__header">
+          <h1 className="journey__title">Account Journey</h1>
+          <Link to={`/accounts/${accountId}?newStory=1`} className="btn btn--primary">
+            Generate Story
+          </Link>
+        </div>
 
         <div className="journey__timeline">
           <TimelineRenderer timeline={timeline} />

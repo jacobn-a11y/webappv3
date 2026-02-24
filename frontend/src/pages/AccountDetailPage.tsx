@@ -1,17 +1,37 @@
-import { useState, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useMemo, useState, useEffect } from "react";
+import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { StoryGeneratorModal } from "../components/StoryGeneratorModal";
 import { Breadcrumb } from "../components/Breadcrumb";
-import { getAccountStories, getChatAccounts, type StorySummary } from "../lib/api";
+import {
+  createLandingPage,
+  getAccountStories,
+  getChatAccounts,
+  type StorySummary,
+} from "../lib/api";
 import { STORY_TYPE_LABELS } from "../types/taxonomy";
+
+const STORY_STATUS_LABELS: Record<StorySummary["story_status"], string> = {
+  DRAFT: "Draft",
+  PAGE_CREATED: "Page Created",
+  PUBLISHED: "Published",
+  ARCHIVED: "Archived",
+};
 
 export function AccountDetailPage({ userRole }: { userRole?: string }) {
   const { accountId } = useParams<{ accountId: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showModal, setShowModal] = useState(false);
   const [stories, setStories] = useState<StorySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [accountName, setAccountName] = useState("");
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+
+  const isViewer = userRole === "VIEWER";
 
   useEffect(() => {
     if (!accountId) return;
@@ -24,9 +44,20 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
           setAccountName(exact.name);
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        setStories([]);
+      })
       .finally(() => setLoading(false));
   }, [accountId]);
+
+  useEffect(() => {
+    if (isViewer) return;
+    if (searchParams.get("newStory") !== "1") return;
+    setShowModal(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("newStory");
+    setSearchParams(next, { replace: true });
+  }, [isViewer, searchParams, setSearchParams]);
 
   const refreshStories = () => {
     if (!accountId) return;
@@ -40,11 +71,28 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
     navigate(`/pages/${pageId}/edit`);
   };
 
+  const uniqueTypes = useMemo(() => {
+    return Array.from(new Set(stories.map((story) => story.story_type))).sort();
+  }, [stories]);
+
+  const filteredStories = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return stories.filter((story) => {
+      const matchesQuery =
+        needle.length === 0 ||
+        story.title.toLowerCase().includes(needle) ||
+        story.markdown.toLowerCase().includes(needle);
+      const matchesType = typeFilter === "ALL" || story.story_type === typeFilter;
+      const matchesStatus =
+        statusFilter === "ALL" || story.story_status === statusFilter;
+      return matchesQuery && matchesType && matchesStatus;
+    });
+  }, [stories, query, typeFilter, statusFilter]);
+
   if (!accountId) {
     return <div className="page-error" role="alert">No account ID provided.</div>;
   }
 
-  const isViewer = userRole === "VIEWER";
   const displayAccountName = accountName || accountId;
 
   return (
@@ -55,7 +103,6 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
         { label: displayAccountName },
       ]} />
 
-      {/* Page header */}
       <header className="account-detail__header">
         <div>
           <h1 className="account-detail__title">{displayAccountName}</h1>
@@ -80,9 +127,15 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
         </div>
       </header>
 
-      {/* Previous stories */}
       <section className="account-detail__stories">
-        <h2 className="section-title">Generated Stories</h2>
+        <div className="account-detail__stories-header">
+          <h2 className="section-title">Generated Stories</h2>
+          {stories.length > 0 && (
+            <span className="account-detail__stories-count">
+              {filteredStories.length} of {stories.length}
+            </span>
+          )}
+        </div>
 
         {loading && (
           <div className="stories-loading" role="status" aria-live="polite">
@@ -100,7 +153,11 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
               </svg>
             </div>
             <h3>No stories yet</h3>
-            <p>{isViewer ? "No stories have been generated for this account." : "Generate your first story to see it here."}</p>
+            <p>
+              {isViewer
+                ? "No stories have been generated for this account."
+                : "Generate your first story in one click, then edit it directly as a landing page."}
+            </p>
             {!isViewer && (
               <button
                 type="button"
@@ -114,15 +171,64 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
         )}
 
         {!loading && stories.length > 0 && (
-          <div className="stories-grid">
-            {stories.map((story) => (
-              <StoryCard key={story.id} story={story} />
-            ))}
-          </div>
+          <>
+            <div className="story-filters">
+              <input
+                type="search"
+                className="form-field__input"
+                placeholder="Search stories by title or content"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label="Search stories"
+              />
+              <select
+                className="form-field__input"
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                aria-label="Filter by story type"
+              >
+                <option value="ALL">All Types</option>
+                {uniqueTypes.map((storyType) => (
+                  <option key={storyType} value={storyType}>
+                    {STORY_TYPE_LABELS[storyType] ?? storyType}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="form-field__input"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                aria-label="Filter by story status"
+              >
+                <option value="ALL">All Statuses</option>
+                <option value="DRAFT">Draft</option>
+                <option value="PAGE_CREATED">Page Created</option>
+                <option value="PUBLISHED">Published</option>
+                <option value="ARCHIVED">Archived</option>
+              </select>
+            </div>
+
+            {filteredStories.length === 0 ? (
+              <div className="stories-empty stories-empty--compact">
+                <h3>No stories match your filters</h3>
+                <p>Try a broader search or clear one of the filters.</p>
+              </div>
+            ) : (
+              <div className="stories-grid">
+                {filteredStories.map((story) => (
+                  <StoryCard
+                    key={story.id}
+                    story={story}
+                    canEdit={!isViewer}
+                    onOpenPage={(pageId) => navigate(`/pages/${pageId}/edit`)}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </section>
 
-      {/* Story Generator Modal */}
       {showModal && (
         <StoryGeneratorModal
           accountId={accountId}
@@ -138,11 +244,19 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
   );
 }
 
-// ─── Story Card ──────────────────────────────────────────────────────────────
-
-function StoryCard({ story }: { story: StorySummary }) {
+function StoryCard({
+  story,
+  canEdit,
+  onOpenPage,
+}: {
+  story: StorySummary;
+  canEdit: boolean;
+  onOpenPage: (pageId: string) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [creatingPage, setCreatingPage] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
 
   const handleCopy = async () => {
     try {
@@ -150,12 +264,48 @@ function StoryCard({ story }: { story: StorySummary }) {
       setCopyFeedback(true);
       setTimeout(() => setCopyFeedback(false), 2000);
     } catch {
-      /* ignore */
+      // Ignore clipboard failures.
     }
   };
 
-  const typeLabel =
-    STORY_TYPE_LABELS[story.story_type] ?? story.story_type;
+  const handleDownload = () => {
+    const safeTitle = story.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80);
+    const blob = new Blob([story.markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${safeTitle || "story"}.md`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  };
+
+  const handlePageAction = async () => {
+    if (story.landing_page?.id) {
+      onOpenPage(story.landing_page.id);
+      return;
+    }
+
+    setCreatingPage(true);
+    setPageError(null);
+    try {
+      const page = await createLandingPage({ story_id: story.id, title: story.title });
+      onOpenPage(page.id);
+    } catch (err) {
+      setPageError(err instanceof Error ? err.message : "Failed to create page");
+    } finally {
+      setCreatingPage(false);
+    }
+  };
+
+  const typeLabel = STORY_TYPE_LABELS[story.story_type] ?? story.story_type;
+  const statusLabel = STORY_STATUS_LABELS[story.story_status];
+  const previewId = `story-preview-${story.id}`;
 
   return (
     <div className="story-card">
@@ -164,6 +314,9 @@ function StoryCard({ story }: { story: StorySummary }) {
           <h3 className="story-card__title">{story.title}</h3>
           <div className="story-card__meta">
             <span className="story-card__badge">{typeLabel}</span>
+            <span className={`story-card__status story-card__status--${story.story_status.toLowerCase()}`}>
+              {statusLabel}
+            </span>
             <span className="story-card__date">
               {new Date(story.generated_at).toLocaleDateString()}
             </span>
@@ -180,21 +333,49 @@ function StoryCard({ story }: { story: StorySummary }) {
             className={`btn btn--sm btn--ghost ${copyFeedback ? "btn--success" : ""}`}
             onClick={handleCopy}
           >
-            {copyFeedback ? "Copied!" : "Copy MD"}
+            {copyFeedback ? "Copied!" : "Copy to Clipboard"}
           </button>
+          <button type="button" className="btn btn--sm btn--ghost" onClick={handleDownload}>
+            Download .md
+          </button>
+          {canEdit && (
+            <button
+              type="button"
+              className="btn btn--sm btn--secondary"
+              onClick={handlePageAction}
+              disabled={creatingPage}
+            >
+              {creatingPage
+                ? "Opening..."
+                : story.landing_page?.id
+                  ? "Edit Page"
+                  : "Create Landing Page"}
+            </button>
+          )}
           <button
             type="button"
             className="btn btn--sm btn--ghost"
             onClick={() => setExpanded(!expanded)}
+            aria-expanded={expanded}
+            aria-controls={previewId}
           >
             {expanded ? "Collapse" : "Preview"}
           </button>
         </div>
       </div>
 
+      <div className="sr-only" aria-live="polite" role="status">
+        {copyFeedback ? "Story copied to clipboard." : ""}
+      </div>
+      {pageError && <div className="story-card__error" role="alert">{pageError}</div>}
+
       {expanded && (
-        <div className="story-card__preview">
-          <pre className="story-card__markdown">{story.markdown}</pre>
+        <div className="story-card__preview" id={previewId}>
+          <article className="markdown-body">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {story.markdown}
+            </ReactMarkdown>
+          </article>
         </div>
       )}
     </div>
