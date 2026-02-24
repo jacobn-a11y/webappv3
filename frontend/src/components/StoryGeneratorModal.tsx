@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { MultiSelect } from "./MultiSelect";
@@ -15,18 +16,17 @@ import {
   TOPIC_LABELS,
   STORY_LENGTH_LABELS,
   STORY_OUTLINE_LABELS,
-  STORY_TYPE_INPUT_LABELS,
 } from "../types/taxonomy";
 import {
   buildStory,
   createLandingPage,
   getStoryContextSettings,
   type BuildStoryResponse,
+  type StoryContextSettings,
 } from "../lib/api";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
 type ModalPhase = "form" | "loading" | "preview" | "error";
+type StoryTypeMode = "FULL" | "TOPIC";
 
 interface StoryGeneratorModalProps {
   accountId: string;
@@ -35,11 +35,33 @@ interface StoryGeneratorModalProps {
   onLandingPageCreated?: (pageId: string, slug: string) => void;
 }
 
-// ─── Build options for MultiSelect ──────────────────────────────────────────
+interface PersistedStorySettings {
+  selectedStages: FunnelStage[];
+  selectedTopics: TaxonomyTopic[];
+  customTitle: string;
+  selectedFormat: StoryFormat | "";
+  storyLength: StoryLength;
+  storyOutline: StoryOutline;
+  storyType: StoryTypeInput;
+  isAdvanced: boolean;
+}
+
+const PERSIST_KEY = "story_generator_preferences_v1";
 
 const FUNNEL_STAGE_OPTIONS = (
   Object.entries(FUNNEL_STAGE_LABELS) as [FunnelStage, string][]
 ).map(([value, label]) => ({ value, label }));
+
+const STORY_TYPE_TOPIC_OPTIONS = Object.entries(TOPIC_LABELS) as [
+  TaxonomyTopic,
+  string,
+][];
+const STORY_LENGTH_OPTIONS = Object.entries(
+  STORY_LENGTH_LABELS
+) as [StoryLength, string][];
+const STORY_OUTLINE_OPTIONS = Object.entries(
+  STORY_OUTLINE_LABELS
+) as [StoryOutline, string][];
 
 function buildTopicOptions(selectedStages: FunnelStage[]) {
   const stages =
@@ -56,17 +78,40 @@ function buildTopicOptions(selectedStages: FunnelStage[]) {
   );
 }
 
-const STORY_TYPE_OPTIONS = Object.entries(
-  STORY_TYPE_INPUT_LABELS
-) as [StoryTypeInput, string][];
-const STORY_LENGTH_OPTIONS = Object.entries(
-  STORY_LENGTH_LABELS
-) as [StoryLength, string][];
-const STORY_OUTLINE_OPTIONS = Object.entries(
-  STORY_OUTLINE_LABELS
-) as [StoryOutline, string][];
+function loadPersistedSettings(): PersistedStorySettings | null {
+  try {
+    const raw = localStorage.getItem(PERSIST_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as PersistedStorySettings;
+  } catch {
+    return null;
+  }
+}
 
-// ─── Component ──────────────────────────────────────────────────────────────
+function savePersistedSettings(settings: PersistedStorySettings): void {
+  try {
+    localStorage.setItem(PERSIST_KEY, JSON.stringify(settings));
+  } catch {
+    // Ignore storage errors in restricted environments.
+  }
+}
+
+function sanitizeFileName(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+function countWords(markdown: string): number {
+  return markdown
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/[#[\]*_>|-]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
 
 export function StoryGeneratorModal({
   accountId,
@@ -74,34 +119,112 @@ export function StoryGeneratorModal({
   onClose,
   onLandingPageCreated,
 }: StoryGeneratorModalProps) {
-  // Form state
-  const [selectedStages, setSelectedStages] = useState<FunnelStage[]>([]);
-  const [selectedTopics, setSelectedTopics] = useState<TaxonomyTopic[]>([]);
-  const [customTitle, setCustomTitle] = useState("");
-  const [selectedFormat, setSelectedFormat] = useState<StoryFormat | "">("");
-  const [storyLength, setStoryLength] = useState<StoryLength>("MEDIUM");
-  const [storyOutline, setStoryOutline] = useState<StoryOutline>("CHRONOLOGICAL_JOURNEY");
-  const [storyType, setStoryType] = useState<StoryTypeInput>("FULL_ACCOUNT_JOURNEY");
+  const persistedRef = useRef<PersistedStorySettings | null>(
+    loadPersistedSettings()
+  );
 
-  // Focus trap refs
-  const modalRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const [selectedStages, setSelectedStages] = useState<FunnelStage[]>(
+    persistedRef.current?.selectedStages ?? []
+  );
+  const [selectedTopics, setSelectedTopics] = useState<TaxonomyTopic[]>(
+    persistedRef.current?.selectedTopics ?? []
+  );
+  const [customTitle, setCustomTitle] = useState(
+    persistedRef.current?.customTitle ?? ""
+  );
+  const [selectedFormat, setSelectedFormat] = useState<StoryFormat | "">(
+    persistedRef.current?.selectedFormat ?? ""
+  );
+  const [storyLength, setStoryLength] = useState<StoryLength>(
+    persistedRef.current?.storyLength ?? "MEDIUM"
+  );
+  const [storyOutline, setStoryOutline] = useState<StoryOutline>(
+    persistedRef.current?.storyOutline ?? "CHRONOLOGICAL_JOURNEY"
+  );
+  const [storyType, setStoryType] = useState<StoryTypeInput>(
+    persistedRef.current?.storyType ?? "FULL_ACCOUNT_JOURNEY"
+  );
+  const [isAdvanced, setIsAdvanced] = useState<boolean>(
+    persistedRef.current?.isAdvanced ?? false
+  );
 
-  // Flow state
+  const [storyTypeMode, setStoryTypeMode] = useState<StoryTypeMode>(
+    (persistedRef.current?.storyType ?? "FULL_ACCOUNT_JOURNEY") ===
+      "FULL_ACCOUNT_JOURNEY"
+      ? "FULL"
+      : "TOPIC"
+  );
+  const [storyTypeSearch, setStoryTypeSearch] = useState("");
+
   const [phase, setPhase] = useState<ModalPhase>("form");
   const [result, setResult] = useState<BuildStoryResponse | null>(null);
   const [error, setError] = useState("");
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [creatingPage, setCreatingPage] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(8);
+  const [orgDefaults, setOrgDefaults] = useState<StoryContextSettings | null>(
+    null
+  );
+
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const requestControllerRef = useRef<AbortController | null>(null);
 
   const topicOptions = buildTopicOptions(selectedStages);
 
-  // Capture previous focus and manage focus trap
+  const filteredStoryTypeOptions = useMemo(() => {
+    const needle = storyTypeSearch.trim().toLowerCase();
+    if (!needle) return STORY_TYPE_TOPIC_OPTIONS;
+    return STORY_TYPE_TOPIC_OPTIONS.filter(([, label]) =>
+      label.toLowerCase().includes(needle)
+    );
+  }, [storyTypeSearch]);
+
+  const storyStats = useMemo(() => {
+    if (!result) return null;
+    const wordCount = countWords(result.markdown);
+    const readingMinutes = Math.max(1, Math.round(wordCount / 220));
+    return { wordCount, readingMinutes };
+  }, [result]);
+
+  const loadingStep =
+    loadingProgress < 34 ? 0 : loadingProgress < 67 ? 1 : 2;
+
+  const isLengthDefault = orgDefaults?.default_story_length === storyLength;
+  const isOutlineDefault = orgDefaults?.default_story_outline === storyOutline;
+  const isTypeDefault = orgDefaults?.default_story_type === storyType;
+  const isFormatDefault = orgDefaults?.default_story_format === selectedFormat;
+
+  useEffect(() => {
+    savePersistedSettings({
+      selectedStages,
+      selectedTopics,
+      customTitle,
+      selectedFormat,
+      storyLength,
+      storyOutline,
+      storyType,
+      isAdvanced,
+    });
+  }, [
+    selectedStages,
+    selectedTopics,
+    customTitle,
+    selectedFormat,
+    storyLength,
+    storyOutline,
+    storyType,
+    isAdvanced,
+  ]);
+
   useEffect(() => {
     previousFocusRef.current = document.activeElement as HTMLElement;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (phase === "loading") {
+          requestControllerRef.current?.abort();
+        }
         onClose();
         return;
       }
@@ -117,78 +240,107 @@ export function StoryGeneratorModal({
             e.preventDefault();
             last.focus();
           }
-        } else {
-          if (document.activeElement === last) {
-            e.preventDefault();
-            first.focus();
-          }
+        } else if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
         }
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
 
-    // Focus the modal on open
     const timer = requestAnimationFrame(() => {
       modalRef.current?.focus();
     });
 
     return () => {
+      requestControllerRef.current?.abort();
       document.removeEventListener("keydown", handleKeyDown);
       cancelAnimationFrame(timer);
-      // Restore focus to the element that opened the modal
       previousFocusRef.current?.focus();
     };
-  }, [onClose]);
+  }, [onClose, phase]);
 
   useEffect(() => {
     getStoryContextSettings()
       .then((settings) => {
-        setStoryLength(settings.default_story_length ?? "MEDIUM");
-        setStoryOutline(
-          settings.default_story_outline ?? "CHRONOLOGICAL_JOURNEY"
-        );
-        setStoryType(settings.default_story_type ?? "FULL_ACCOUNT_JOURNEY");
-        setSelectedFormat(settings.default_story_format ?? "");
+        setOrgDefaults(settings);
+        if (!persistedRef.current) {
+          setStoryLength(settings.default_story_length ?? "MEDIUM");
+          setStoryOutline(
+            settings.default_story_outline ?? "CHRONOLOGICAL_JOURNEY"
+          );
+          setStoryType(settings.default_story_type ?? "FULL_ACCOUNT_JOURNEY");
+          setSelectedFormat(settings.default_story_format ?? "");
+        }
       })
       .catch(() => {
-        // Use local defaults if org settings are unavailable.
+        // Keep local defaults when org settings are unavailable.
       });
   }, []);
 
-  // When stages change, remove any selected topics that no longer belong
+  useEffect(() => {
+    if (phase !== "loading") {
+      return;
+    }
+
+    setLoadingProgress(8);
+    const id = window.setInterval(() => {
+      setLoadingProgress((prev) => Math.min(prev + 4, 94));
+    }, 700);
+
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [phase]);
+
   const handleStagesChange = (stages: string[]) => {
     const newStages = stages as FunnelStage[];
     setSelectedStages(newStages);
 
     if (newStages.length > 0) {
       const validTopics = new Set(newStages.flatMap((s) => STAGE_TOPICS[s]));
-      setSelectedTopics((prev) =>
-        prev.filter((t) => validTopics.has(t))
-      );
+      setSelectedTopics((prev) => prev.filter((t) => validTopics.has(t)));
     }
   };
 
-  const handleSubmit = useCallback(async () => {
+  const runGeneration = useCallback(async () => {
     setPhase("loading");
     setError("");
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
 
     try {
-      const res = await buildStory({
-        account_id: accountId,
-        funnel_stages: selectedStages.length > 0 ? selectedStages : undefined,
-        filter_topics: selectedTopics.length > 0 ? selectedTopics : undefined,
-        title: customTitle.trim() || undefined,
-        format: selectedFormat || undefined,
-        story_length: storyLength,
-        story_outline: storyOutline,
-        story_type: storyType,
-      });
+      const res = await buildStory(
+        {
+          account_id: accountId,
+          funnel_stages: selectedStages.length > 0 ? selectedStages : undefined,
+          filter_topics: selectedTopics.length > 0 ? selectedTopics : undefined,
+          title: customTitle.trim() || undefined,
+          format: selectedFormat || undefined,
+          story_length: storyLength,
+          story_outline: storyOutline,
+          story_type: storyType,
+        },
+        { signal: controller.signal }
+      );
+
+      setLoadingProgress(100);
       setResult(res);
       setPhase("preview");
     } catch (err) {
+      const isAbort =
+        (err instanceof DOMException && err.name === "AbortError") ||
+        (err instanceof Error && err.name === "AbortError");
+      if (isAbort) {
+        setPhase("form");
+        setError("");
+        return;
+      }
       setError(err instanceof Error ? err.message : "Failed to generate story");
       setPhase("error");
+    } finally {
+      requestControllerRef.current = null;
     }
   }, [
     accountId,
@@ -201,14 +353,20 @@ export function StoryGeneratorModal({
     storyType,
   ]);
 
-  const handleCopyMarkdown = useCallback(async () => {
+  const handleCancelGeneration = useCallback(() => {
+    requestControllerRef.current?.abort();
+    requestControllerRef.current = null;
+    setPhase("form");
+    setLoadingProgress(8);
+  }, []);
+
+  const handleCopyToClipboard = useCallback(async () => {
     if (!result) return;
     try {
       await navigator.clipboard.writeText(result.markdown);
       setCopyFeedback(true);
       setTimeout(() => setCopyFeedback(false), 2000);
     } catch {
-      // Fallback for older browsers
       const textarea = document.createElement("textarea");
       textarea.value = result.markdown;
       textarea.style.position = "fixed";
@@ -222,23 +380,31 @@ export function StoryGeneratorModal({
     }
   }, [result]);
 
-  const handleCreateLandingPage = useCallback(async () => {
+  const handleDownloadMarkdown = useCallback(() => {
     if (!result) return;
+    const title = sanitizeFileName(result.title || `${accountName}-story`);
+    const blob = new Blob([result.markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${title || "story"}.md`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  }, [result, accountName]);
+
+  const handleCreateLandingPage = useCallback(async () => {
+    if (!result?.story_id) {
+      setError("Could not find generated story id. Please regenerate and try again.");
+      setPhase("error");
+      return;
+    }
+
     setCreatingPage(true);
     try {
-      // We need the story ID — for now we use the latest story for this account.
-      // The buildStory response doesn't include an ID directly, so we create
-      // the landing page by re-fetching stories and using the most recent one.
-      const storiesRes = await fetch(`/api/stories/${accountId}`);
-      const storiesData = await storiesRes.json();
-      const latestStory = storiesData.stories?.[0];
-
-      if (!latestStory) {
-        throw new Error("Could not find the generated story");
-      }
-
       const page = await createLandingPage({
-        story_id: latestStory.id,
+        story_id: result.story_id,
         title: result.title,
       });
 
@@ -247,15 +413,26 @@ export function StoryGeneratorModal({
       setError(
         err instanceof Error ? err.message : "Failed to create landing page"
       );
+      setPhase("error");
     } finally {
       setCreatingPage(false);
     }
-  }, [result, accountId, onLandingPageCreated]);
+  }, [result, onLandingPageCreated]);
 
   const handleBackToForm = () => {
     setPhase("form");
     setError("");
   };
+
+  useEffect(() => {
+    if (storyTypeMode === "FULL") {
+      setStoryType("FULL_ACCOUNT_JOURNEY");
+      return;
+    }
+    if (storyType === "FULL_ACCOUNT_JOURNEY") {
+      setStoryType(STORY_TYPE_TOPIC_OPTIONS[0]?.[0] ?? "industry_trend_validation");
+    }
+  }, [storyTypeMode, storyType]);
 
   return (
     <div className="modal-overlay" role="presentation" onClick={onClose}>
@@ -268,7 +445,6 @@ export function StoryGeneratorModal({
         aria-label="Generate Story"
         tabIndex={-1}
       >
-        {/* Header */}
         <div className="modal__header">
           <div>
             <h2 className="modal__title">
@@ -276,152 +452,242 @@ export function StoryGeneratorModal({
             </h2>
             <p className="modal__subtitle">{accountName}</p>
           </div>
-          <button
-            className="modal__close"
-            onClick={onClose}
-            aria-label="Close"
-          >
+          <button className="modal__close" onClick={onClose} aria-label="Close">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <path d="M5 5l10 10M15 5l-10 10" />
             </svg>
           </button>
         </div>
 
-        {/* Body */}
         <div className="modal__body">
-          {/* ── FORM PHASE ──────────────────────────────────────────── */}
           {phase === "form" && (
             <div className="story-form">
-              <MultiSelect
-                label="Funnel Stages"
-                options={FUNNEL_STAGE_OPTIONS}
-                selected={selectedStages}
-                onChange={handleStagesChange}
-                placeholder="All stages (no filter)"
-              />
+              <section className="story-form__quick">
+                <h3 className="story-form__group-title">Quick Generate</h3>
+                <p className="story-form__helper">
+                  Generate in one click using your saved settings and org defaults.
+                </p>
+                <div className="story-form__quick-actions">
+                  <button type="button" className="btn btn--primary" onClick={runGeneration}>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M8 2v12M2 8h12" />
+                    </svg>
+                    Generate Story
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    onClick={() => setIsAdvanced((prev) => !prev)}
+                    aria-expanded={isAdvanced}
+                  >
+                    {isAdvanced ? "Hide Customization" : "Customize Settings"}
+                  </button>
+                </div>
+              </section>
 
-              <MultiSelect
-                label="Topics"
-                options={topicOptions}
-                selected={selectedTopics}
-                onChange={(v) => setSelectedTopics(v as TaxonomyTopic[])}
-                placeholder="All topics (no filter)"
-                grouped
-              />
+              {isAdvanced && (
+                <>
+                  <section className="story-form__group">
+                    <h4 className="story-form__group-title">Step 1: Focus</h4>
+                    <p className="story-form__helper">
+                      Leave these blank to use all available transcript context.
+                    </p>
+                    <MultiSelect
+                      label="Funnel Stages"
+                      options={FUNNEL_STAGE_OPTIONS}
+                      selected={selectedStages}
+                      onChange={handleStagesChange}
+                      placeholder="All stages (no filter)"
+                    />
 
-              <div className="form-field">
-                <label className="form-field__label">
-                  Custom Title
-                  <span className="form-field__hint">Optional</span>
-                </label>
-                <input
-                  type="text"
-                  className="form-field__input"
-                  value={customTitle}
-                  onChange={(e) => setCustomTitle(e.target.value)}
-                  placeholder="Auto-generated if left blank"
-                />
-              </div>
+                    <MultiSelect
+                      label="Topics"
+                      options={topicOptions}
+                      selected={selectedTopics}
+                      onChange={(v) => setSelectedTopics(v as TaxonomyTopic[])}
+                      placeholder="All topics (no filter)"
+                      grouped
+                    />
 
-              <FormatSelector
-                value={selectedFormat}
-                onChange={setSelectedFormat}
-              />
+                    <div className="form-field">
+                      <label className="form-field__label" htmlFor="story-custom-title">
+                        Custom Title
+                        <span className="form-field__hint">Optional</span>
+                      </label>
+                      <input
+                        id="story-custom-title"
+                        type="text"
+                        className="form-field__input"
+                        value={customTitle}
+                        onChange={(e) => setCustomTitle(e.target.value)}
+                        placeholder="Auto-generated if left blank"
+                      />
+                    </div>
+                  </section>
 
-              <div className="form-field">
-                <label className="form-field__label">Story Length</label>
-                <select
-                  className="form-field__input"
-                  value={storyLength}
-                  onChange={(e) => setStoryLength(e.target.value as StoryLength)}
-                >
-                  {STORY_LENGTH_OPTIONS.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  <section className="story-form__group">
+                    <h4 className="story-form__group-title">Step 2: Format</h4>
+                    <FormatSelector value={selectedFormat} onChange={setSelectedFormat} />
+                    {isFormatDefault && <span className="form-default-badge">Default</span>}
 
-              <div className="form-field">
-                <label className="form-field__label">Story Outline</label>
-                <select
-                  className="form-field__input"
-                  value={storyOutline}
-                  onChange={(e) => setStoryOutline(e.target.value as StoryOutline)}
-                >
-                  {STORY_OUTLINE_OPTIONS.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                    <div className="form-field">
+                      <label className="form-field__label" htmlFor="story-length">
+                        Story Length
+                        {isLengthDefault && <span className="form-default-badge">Default</span>}
+                      </label>
+                      <select
+                        id="story-length"
+                        className="form-field__input"
+                        value={storyLength}
+                        onChange={(e) => setStoryLength(e.target.value as StoryLength)}
+                      >
+                        {STORY_LENGTH_OPTIONS.map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-              <div className="form-field">
-                <label className="form-field__label">Story Type</label>
-                <select
-                  className="form-field__input"
-                  value={storyType}
-                  onChange={(e) => setStoryType(e.target.value as StoryTypeInput)}
-                >
-                  {STORY_TYPE_OPTIONS.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                    <div className="form-field">
+                      <label className="form-field__label" htmlFor="story-outline">
+                        Story Outline
+                        {isOutlineDefault && <span className="form-default-badge">Default</span>}
+                      </label>
+                      <select
+                        id="story-outline"
+                        className="form-field__input"
+                        value={storyOutline}
+                        onChange={(e) =>
+                          setStoryOutline(e.target.value as StoryOutline)
+                        }
+                      >
+                        {STORY_OUTLINE_OPTIONS.map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </section>
 
-              <div className="story-form__actions">
-                <button
-                  type="button"
-                  className="btn btn--secondary"
-                  onClick={onClose}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  onClick={handleSubmit}
-                >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    <path d="M8 2v12M2 8h12" />
-                  </svg>
-                  Generate Story
-                </button>
-              </div>
+                  <section className="story-form__group">
+                    <h4 className="story-form__group-title">Step 3: Type</h4>
+                    <p className="story-form__helper">
+                      Pick full-journey mode or search for a topic-specific story.
+                    </p>
+
+                    <div className="story-type-toggle" role="radiogroup" aria-label="Story type mode">
+                      <button
+                        type="button"
+                        className={`story-type-toggle__option ${storyTypeMode === "FULL" ? "story-type-toggle__option--active" : ""}`}
+                        onClick={() => setStoryTypeMode("FULL")}
+                        role="radio"
+                        aria-checked={storyTypeMode === "FULL"}
+                      >
+                        Full Account Journey
+                      </button>
+                      <button
+                        type="button"
+                        className={`story-type-toggle__option ${storyTypeMode === "TOPIC" ? "story-type-toggle__option--active" : ""}`}
+                        onClick={() => setStoryTypeMode("TOPIC")}
+                        role="radio"
+                        aria-checked={storyTypeMode === "TOPIC"}
+                      >
+                        Topic-Specific Story
+                      </button>
+                    </div>
+
+                    {storyTypeMode === "TOPIC" && (
+                      <div className="story-type-picker">
+                        <label className="form-field__label" htmlFor="story-type-search">
+                          Search Topics
+                        </label>
+                        <input
+                          id="story-type-search"
+                          type="search"
+                          className="form-field__input"
+                          value={storyTypeSearch}
+                          onChange={(e) => setStoryTypeSearch(e.target.value)}
+                          placeholder="Search by topic name"
+                        />
+                        <label className="form-field__label" htmlFor="story-type-select">
+                          Story Topic
+                          {isTypeDefault && <span className="form-default-badge">Default</span>}
+                        </label>
+                        <select
+                          id="story-type-select"
+                          className="form-field__input"
+                          value={storyType === "FULL_ACCOUNT_JOURNEY" ? "" : storyType}
+                          onChange={(e) => setStoryType(e.target.value as StoryTypeInput)}
+                        >
+                          {filteredStoryTypeOptions.map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </section>
+
+                  <div className="story-form__actions">
+                    <button type="button" className="btn btn--secondary" onClick={onClose}>
+                      Cancel
+                    </button>
+                    <button type="button" className="btn btn--primary" onClick={runGeneration}>
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M8 2v12M2 8h12" />
+                      </svg>
+                      Generate Story
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
-          {/* ── LOADING PHASE ──────────────────────────────────────── */}
           {phase === "loading" && (
             <div className="loading-state" role="status" aria-live="polite">
+              <div
+                className="loading-state__progress"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={loadingProgress}
+                aria-label="Story generation progress"
+              >
+                <div className="loading-state__progress-fill" style={{ width: `${loadingProgress}%` }} />
+              </div>
               <div className="loading-state__spinner" aria-hidden="true" />
               <h3 className="loading-state__title">Generating your story...</h3>
               <p className="loading-state__text">
-                Analyzing transcripts, extracting insights, and composing a
-                structured narrative. This typically takes 15-30 seconds.
+                Analyzing transcripts, extracting insights, and composing a structured narrative.
               </p>
               <div className="loading-state__steps">
-                <div className="loading-state__step loading-state__step--active">
+                <div className={`loading-state__step ${loadingStep > 0 ? "loading-state__step--complete" : loadingStep === 0 ? "loading-state__step--active" : ""}`}>
                   <span className="loading-state__step-dot" />
                   Gathering transcript segments
                 </div>
-                <div className="loading-state__step">
+                <div className={`loading-state__step ${loadingStep > 1 ? "loading-state__step--complete" : loadingStep === 1 ? "loading-state__step--active" : ""}`}>
                   <span className="loading-state__step-dot" />
                   Building journey narrative
                 </div>
-                <div className="loading-state__step">
+                <div className={`loading-state__step ${loadingStep === 2 ? "loading-state__step--active" : ""}`}>
                   <span className="loading-state__step-dot" />
                   Extracting high-value quotes
                 </div>
               </div>
+              <button
+                type="button"
+                className="btn btn--ghost loading-state__cancel"
+                onClick={handleCancelGeneration}
+              >
+                Cancel generation
+              </button>
             </div>
           )}
 
-          {/* ── PREVIEW PHASE ──────────────────────────────────────── */}
           {phase === "preview" && result && (
             <div className="story-preview">
               <div className="story-preview__toolbar">
@@ -435,28 +701,28 @@ export function StoryGeneratorModal({
                   </svg>
                   Back
                 </button>
+                {storyStats && (
+                  <div className="story-preview__stats" aria-label="Story length details">
+                    {storyStats.wordCount.toLocaleString()} words · {storyStats.readingMinutes} min read
+                  </div>
+                )}
                 <div className="story-preview__toolbar-actions">
+                  <button type="button" className="btn btn--ghost" onClick={runGeneration}>
+                    Regenerate
+                  </button>
                   <button
                     type="button"
                     className={`btn btn--secondary ${copyFeedback ? "btn--success" : ""}`}
-                    onClick={handleCopyMarkdown}
+                    onClick={handleCopyToClipboard}
                   >
-                    {copyFeedback ? (
-                      <>
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                          <path d="M3 8l3 3 7-7" />
-                        </svg>
-                        Copied!
-                      </>
-                    ) : (
-                      <>
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                          <rect x="5" y="5" width="8" height="8" rx="1" />
-                          <path d="M3 11V3h8" />
-                        </svg>
-                        Copy Markdown
-                      </>
-                    )}
+                    {copyFeedback ? "Copied!" : "Copy to Clipboard"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={handleDownloadMarkdown}
+                  >
+                    Download .md
                   </button>
                   <button
                     type="button"
@@ -467,22 +733,19 @@ export function StoryGeneratorModal({
                     {creatingPage ? (
                       <>
                         <span className="btn__spinner" />
-                        Creating...
+                        Opening editor...
                       </>
                     ) : (
-                      <>
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                          <rect x="2" y="2" width="12" height="12" rx="2" />
-                          <path d="M5 6h6M5 8h6M5 10h4" />
-                        </svg>
-                        Create Landing Page
-                      </>
+                      "Edit as Landing Page"
                     )}
                   </button>
                 </div>
               </div>
 
-              {/* Quotes sidebar + Markdown preview */}
+              <div className="sr-only" role="status" aria-live="polite">
+                {copyFeedback ? "Story copied to clipboard." : ""}
+              </div>
+
               <div className="story-preview__layout">
                 <div className="story-preview__content">
                   <article className="markdown-body">
@@ -503,9 +766,7 @@ export function StoryGeneratorModal({
                           "{q.quote_text}"
                         </blockquote>
                         {q.speaker && (
-                          <p className="quote-card__speaker">
-                            &mdash; {q.speaker}
-                          </p>
+                          <p className="quote-card__speaker">- {q.speaker}</p>
                         )}
                         {q.metric_value && (
                           <div className="quote-card__metric">
@@ -519,6 +780,11 @@ export function StoryGeneratorModal({
                             )}
                           </div>
                         )}
+                        {q.call_id && (
+                          <Link to={`/calls/${q.call_id}/transcript`} className="quote-card__source-link">
+                            View transcript source
+                          </Link>
+                        )}
                       </div>
                     ))}
                   </aside>
@@ -527,7 +793,6 @@ export function StoryGeneratorModal({
             </div>
           )}
 
-          {/* ── ERROR PHASE ────────────────────────────────────────── */}
           {phase === "error" && (
             <div className="error-state" role="alert">
               <div className="error-state__icon">
@@ -539,18 +804,10 @@ export function StoryGeneratorModal({
               <h3 className="error-state__title">Generation Failed</h3>
               <p className="error-state__message">{error}</p>
               <div className="error-state__actions">
-                <button
-                  type="button"
-                  className="btn btn--secondary"
-                  onClick={handleBackToForm}
-                >
+                <button type="button" className="btn btn--secondary" onClick={handleBackToForm}>
                   Back to Form
                 </button>
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  onClick={handleSubmit}
-                >
+                <button type="button" className="btn btn--primary" onClick={runGeneration}>
                   Retry
                 </button>
               </div>

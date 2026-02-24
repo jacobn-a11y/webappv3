@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useId } from "react";
 
 interface Option {
   value: string;
@@ -25,6 +25,7 @@ export function MultiSelect({
 }: MultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const idPrefix = useId();
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -98,6 +99,7 @@ export function MultiSelect({
         aria-expanded={open}
         aria-label={label}
         aria-haspopup="listbox"
+        aria-controls={`${idPrefix}-listbox`}
       >
         <span className="multi-select__placeholder">
           {selected.length === 0
@@ -119,7 +121,7 @@ export function MultiSelect({
       </button>
 
       {open && (
-        <div className="multi-select__dropdown">
+        <div className="multi-select__dropdown" id={`${idPrefix}-listbox`} role="listbox">
           <input
             type="text"
             className="multi-select__search"
@@ -130,10 +132,16 @@ export function MultiSelect({
             aria-label={`Search ${label} options`}
           />
           <div className="multi-select__options">
-            {Object.entries(groups).map(([groupName, groupOptions]) => (
-              <div key={groupName}>
+            {Object.entries(groups).map(([groupName, groupOptions]) => {
+              const groupLabelId = `${idPrefix}-group-${groupName.replace(/\s+/g, "-").toLowerCase()}`;
+              return (
+              <div
+                key={groupName}
+                role={grouped && groupName ? "group" : undefined}
+                aria-labelledby={grouped && groupName ? groupLabelId : undefined}
+              >
                 {grouped && groupName && (
-                  <div className="multi-select__group-label">{groupName}</div>
+                  <div className="multi-select__group-label" id={groupLabelId}>{groupName}</div>
                 )}
                 {groupOptions.map((opt) => (
                   <label
@@ -149,7 +157,8 @@ export function MultiSelect({
                   </label>
                 ))}
               </div>
-            ))}
+            );
+            })}
             {filtered.length === 0 && (
               <div className="multi-select__empty">No matches</div>
             )}

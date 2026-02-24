@@ -48,15 +48,52 @@ export function HomePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getRoleAwareHome(), getCustomerSuccessHealth(), getRenewalValueReport()])
-      .then(([home, health, report]) => {
+    let cancelled = false;
+
+    getRoleAwareHome()
+      .then((home) => {
+        if (cancelled) return;
         setData(home);
-        setCsHealth(health);
-        setRenewal(report);
+
+        const needsHealthPanels =
+          home.persona === "EXEC" ||
+          home.persona === "CSM" ||
+          home.persona === "REVOPS_ADMIN" ||
+          home.persona === "SALES_MANAGER";
+
+        if (!needsHealthPanels) {
+          setCsHealth(null);
+          setRenewal(null);
+          return;
+        }
+
+        void Promise.allSettled([
+          getCustomerSuccessHealth(),
+          getRenewalValueReport(),
+        ]).then((results) => {
+          if (cancelled) return;
+          const [healthResult, renewalResult] = results;
+
+          if (healthResult.status === "fulfilled") {
+            setCsHealth(healthResult.value);
+          } else {
+            setCsHealth(null);
+          }
+
+          if (renewalResult.status === "fulfilled") {
+            setRenewal(renewalResult.value);
+          } else {
+            setRenewal(null);
+          }
+        });
       })
       .catch((err) =>
         setError(err instanceof Error ? err.message : "Failed to load home")
       );
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (error) {
@@ -69,6 +106,8 @@ export function HomePage() {
         <div className="state-view__message">{error}</div>
         <div className="state-view__actions">
           <button className="btn btn--primary" onClick={() => window.location.reload()}>Retry</button>
+          <Link className="btn btn--secondary" to="/accounts">Go to Accounts</Link>
+          <Link className="btn btn--secondary" to="/dashboard/pages">Go to Pages</Link>
         </div>
       </div>
     );

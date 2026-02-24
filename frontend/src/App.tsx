@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Link, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/Toast";
@@ -28,10 +28,12 @@ import { AccountsIndexPage } from "./pages/AccountsIndexPage";
 import {
   clearAuthState,
   getAuthMe,
+  getChatAccounts,
   getRoleAwareHome,
   getStoredAuthUser,
   logoutSelfService,
   subscribeAuthChanges,
+  type ChatAccount,
   type RoleAwareHome,
   type AuthUser,
 } from "./lib/api";
@@ -442,17 +444,54 @@ function AuthenticatedApp({
   user: AuthUser;
   onLogout: () => Promise<void>;
 }) {
+  const navigate = useNavigate();
   const [persona, setPersona] = useState<RoleAwareHome["persona"] | null>(null);
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === "true"; } catch { return false; }
   });
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [storyPickerOpen, setStoryPickerOpen] = useState(false);
+  const [storyPickerSearch, setStoryPickerSearch] = useState("");
+  const [storyPickerAccounts, setStoryPickerAccounts] = useState<ChatAccount[]>([]);
+  const [storyPickerLoading, setStoryPickerLoading] = useState(false);
+  const [storyPickerError, setStoryPickerError] = useState<string | null>(null);
 
   useEffect(() => {
     getRoleAwareHome()
       .then((res) => setPersona(res.persona))
       .catch(() => setPersona(null));
   }, []);
+
+  useEffect(() => {
+    if (!storyPickerOpen || user.role === "VIEWER") return;
+    let cancelled = false;
+    setStoryPickerLoading(true);
+    setStoryPickerError(null);
+    const timeout = window.setTimeout(() => {
+      void getChatAccounts(storyPickerSearch.trim() || undefined)
+        .then((res) => {
+          if (cancelled) return;
+          setStoryPickerAccounts(res.accounts);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setStoryPickerError(
+            err instanceof Error ? err.message : "Failed to load accounts"
+          );
+          setStoryPickerAccounts([]);
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setStoryPickerLoading(false);
+          }
+        });
+    }, 220);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [storyPickerOpen, storyPickerSearch, user.role]);
 
   const nav = useMemo(() => buildNav(persona, user.role), [persona, user.role]);
 
@@ -468,6 +507,26 @@ function AuthenticatedApp({
     void onLogout();
   }, [onLogout]);
 
+  const openStoryPicker = useCallback(() => {
+    if (user.role === "VIEWER") return;
+    setStoryPickerOpen(true);
+    setStoryPickerSearch("");
+    setStoryPickerError(null);
+  }, [user.role]);
+
+  const closeStoryPicker = useCallback(() => {
+    setStoryPickerOpen(false);
+  }, []);
+
+  const handleSelectStoryAccount = useCallback(
+    (accountId: string) => {
+      setStoryPickerOpen(false);
+      setStoryPickerSearch("");
+      navigate(`/accounts/${accountId}?newStory=1`);
+    },
+    [navigate]
+  );
+
   return (
     <div className={`app-shell${collapsed ? " app-shell--collapsed" : ""}`}>
       <a href="#main-content" className="skip-to-content">Skip to main content</a>
@@ -478,6 +537,15 @@ function AuthenticatedApp({
           <IconMenu />
         </button>
         <Link to="/" className="mobile-header__logo">StoryEngine</Link>
+        {user.role !== "VIEWER" && (
+          <button
+            type="button"
+            className="mobile-header__new-story"
+            onClick={openStoryPicker}
+          >
+            New Story
+          </button>
+        )}
       </div>
 
       {/* Mobile overlay */}
@@ -495,8 +563,87 @@ function AuthenticatedApp({
         onClose={mobileOpen ? () => setMobileOpen(false) : undefined}
       />
 
+      {storyPickerOpen && (
+        <div className="modal-overlay" role="presentation" onClick={closeStoryPicker}>
+          <div className="modal story-picker" role="dialog" aria-modal="true" aria-label="Pick account for story creation" onClick={(e) => e.stopPropagation()}>
+            <div className="modal__header">
+              <div>
+                <h2 className="modal__title">New Story</h2>
+                <p className="modal__subtitle">Select an account to start generating</p>
+              </div>
+              <button className="modal__close" onClick={closeStoryPicker} aria-label="Close">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="M5 5l10 10M15 5l-10 10" />
+                </svg>
+              </button>
+            </div>
+            <div className="modal__body story-picker__body">
+              <input
+                type="search"
+                className="form-field__input"
+                placeholder="Search accounts"
+                value={storyPickerSearch}
+                onChange={(e) => setStoryPickerSearch(e.target.value)}
+                aria-label="Search accounts for story generation"
+              />
+
+              {storyPickerLoading && (
+                <div className="state-view" role="status" aria-live="polite">
+                  <div className="spinner" />
+                  <div className="state-view__title">Loading accounts...</div>
+                </div>
+              )}
+
+              {!storyPickerLoading && storyPickerError && (
+                <div className="state-view state-view--error" role="alert">
+                  <div className="state-view__title">Unable to load accounts</div>
+                  <div className="state-view__message">{storyPickerError}</div>
+                </div>
+              )}
+
+              {!storyPickerLoading && !storyPickerError && (
+                <div className="story-picker__list">
+                  {storyPickerAccounts.map((account) => (
+                    <button
+                      type="button"
+                      key={account.id}
+                      className="story-picker__item"
+                      onClick={() => handleSelectStoryAccount(account.id)}
+                    >
+                      <span className="story-picker__item-title">{account.name}</span>
+                      <span className="story-picker__item-meta">
+                        {account.domain ?? "No domain"} · {account.call_count} calls
+                      </span>
+                    </button>
+                  ))}
+                  {storyPickerAccounts.length === 0 && (
+                    <div className="story-picker__empty">No accounts match your search.</div>
+                  )}
+                </div>
+              )}
+
+              <div className="story-picker__footer">
+                <Link className="btn btn--ghost" to="/accounts" onClick={closeStoryPicker}>
+                  Browse full account list
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main content */}
       <main className="app-content" id="main-content">
+        {user.role !== "VIEWER" && (
+          <div className="app-topbar">
+            <button type="button" className="btn btn--primary" onClick={openStoryPicker}>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path d="M8 2v12M2 8h12" />
+              </svg>
+              New Story
+            </button>
+          </div>
+        )}
         <ErrorBoundary>
           <Routes>
             <Route path="/" element={<HomePage />} />
