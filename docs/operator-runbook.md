@@ -2,6 +2,10 @@
 
 This runbook captures operational actions for the current enterprise app behavior.
 
+Related:
+- Demo/staging deployment playbook: `docs/demo-staging-playbook.md`
+- Call-processing dead-letter SOP: `docs/call-processing-dead-letter-runbook.md`
+
 ## 1) Pre-Deploy Checks
 
 1. Install dependencies and build:
@@ -65,6 +69,10 @@ This runbook captures operational actions for the current enterprise app behavio
    - `/api/integrations/ops/dead-letter`
    - `/api/integrations/ops/dead-letter/:runId/replay`
 3. Trigger and monitor backfills if data gaps are detected.
+4. For call-processing dead-letter handling, use:
+   - `/api/admin/queues`
+   - `/api/admin/queues/call-processing/dead-letter/replay`
+   - Runbook: `docs/call-processing-dead-letter-runbook.md`
 
 ## 5) Data Governance Operations
 

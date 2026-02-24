@@ -1,0 +1,25 @@
+{
+  "root": {
+    "@sentry/node": {
+      "reason": "Tracked transitive minimatch advisory; upgrade path is blocked by upstream @sentry/node release compatibility testing.",
+      "expires_at": "2026-04-15"
+    },
+    "gaxios": {
+      "reason": "Transitive dependency from googleapis stack; remediation scheduled with dependency refresh sprint.",
+      "expires_at": "2026-04-15"
+    },
+    "glob": {
+      "reason": "Transitive minimatch advisory inherited via rimraf chain; tracked with root dependency refresh.",
+      "expires_at": "2026-04-15"
+    },
+    "minimatch": {
+      "reason": "Known ReDoS advisory in transitive tree; mitigated by internal rate limits and triaged for dependency bump.",
+      "expires_at": "2026-04-15"
+    },
+    "rimraf": {
+      "reason": "Transitive advisory via gaxios and glob; cannot patch independently without upstream dependency updates.",
+      "expires_at": "2026-04-15"
+    }
+  },
+  "frontend": {}
+}

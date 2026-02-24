@@ -99,6 +99,13 @@ export interface ResolvedAccess {
   allowedModels: string[];
 }
 
+export interface ResolvedAIClient {
+  client: AIClient;
+  isPlatformBilled: boolean;
+  provider: AIProviderName;
+  model?: string;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 export class AIConfigService {
@@ -124,7 +131,7 @@ export class AIConfigService {
     userId: string,
     userRole: UserRole,
     overrides?: { provider?: AIProviderName; model?: string }
-  ): Promise<{ client: AIClient; isPlatformBilled: boolean }> {
+  ): Promise<ResolvedAIClient> {
     const orgSettings = await this.prisma.orgAISettings.findUnique({
       where: { organizationId },
     });
@@ -184,12 +191,80 @@ export class AIConfigService {
         targetProvider,
         targetModel
       );
-      return { client, isPlatformBilled: false };
+      return {
+        client,
+        isPlatformBilled: false,
+        provider: targetProvider,
+        model: targetModel,
+      };
     }
 
     // No org key for this provider — use platform key, platform billing applies
     const client = await this.resolvePlatformClient(targetProvider, targetModel);
-    return { client, isPlatformBilled: true };
+    return {
+      client,
+      isPlatformBilled: true,
+      provider: targetProvider,
+      model: targetModel,
+    };
+  }
+
+  async resolveClientWithFailover(
+    organizationId: string,
+    userId: string,
+    userRole: UserRole,
+    overrides?: { provider?: AIProviderName; model?: string }
+  ): Promise<{
+    primary: ResolvedAIClient;
+    fallback: ResolvedAIClient | null;
+    retryBudget: number;
+  }> {
+    const [primary, retryBudget, access] = await Promise.all([
+      this.resolveClient(organizationId, userId, userRole, overrides),
+      this.resolveRetryBudget(organizationId),
+      this.resolveUserAccess(organizationId, userId, userRole),
+    ]);
+
+    const allProviders: AIProviderName[] = ["openai", "anthropic", "google"];
+    const allowedProviders =
+      access.allowedProviders.length > 0 ? access.allowedProviders : allProviders;
+    const fallbackOrder = allProviders.filter(
+      (provider) => provider !== primary.provider
+    );
+
+    for (const candidate of fallbackOrder) {
+      if (!allowedProviders.includes(candidate)) continue;
+
+      // eslint-disable-next-line no-await-in-loop
+      const available = await this.isProviderAvailableForOrg(
+        organizationId,
+        candidate
+      );
+      if (!available) continue;
+
+      try {
+        // Model override is intentionally omitted for fallback providers to avoid
+        // cross-provider model mismatches.
+        // eslint-disable-next-line no-await-in-loop
+        const fallback = await this.resolveClient(
+          organizationId,
+          userId,
+          userRole,
+          { provider: candidate }
+        );
+        if (fallback.provider !== primary.provider) {
+          return { primary, fallback, retryBudget };
+        }
+      } catch {
+        // Try next candidate provider.
+      }
+    }
+
+    return {
+      primary,
+      fallback: null,
+      retryBudget,
+    };
   }
 
   /**
@@ -588,6 +663,51 @@ export class AIConfigService {
         error: err instanceof Error ? err.message : "Unknown error",
       };
     }
+  }
+
+  async resolveRetryBudget(organizationId: string): Promise<number> {
+    const envDefault = Number(process.env.AI_RETRY_BUDGET_DEFAULT ?? 2);
+    const defaultBudget = Number.isFinite(envDefault)
+      ? Math.max(1, Math.min(5, Math.floor(envDefault)))
+      : 2;
+
+    const settings = await this.prisma.orgSettings.findUnique({
+      where: { organizationId },
+      select: { dataGovernancePolicy: true },
+    });
+    const rawPolicy = settings?.dataGovernancePolicy;
+    const policy =
+      rawPolicy && typeof rawPolicy === "object" && !Array.isArray(rawPolicy)
+        ? (rawPolicy as Record<string, unknown>)
+        : {};
+    const orgBudget = policy.ai_retry_budget;
+    if (typeof orgBudget !== "number" || !Number.isFinite(orgBudget)) {
+      return defaultBudget;
+    }
+    return Math.max(1, Math.min(5, Math.floor(orgBudget)));
+  }
+
+  private async isProviderAvailableForOrg(
+    organizationId: string,
+    provider: AIProviderName
+  ): Promise<boolean> {
+    const [orgConfig, platformProvider] = await Promise.all([
+      this.prisma.aIProviderConfig.findUnique({
+        where: {
+          organizationId_provider: {
+            organizationId,
+            provider: toPrismaType(provider),
+          },
+        },
+        select: { isActive: true },
+      }),
+      this.prisma.platformAIProvider.findUnique({
+        where: { provider: toPrismaType(provider) },
+        select: { isActive: true },
+      }),
+    ]);
+
+    return Boolean(orgConfig?.isActive || platformProvider?.isActive);
   }
 }
 

@@ -18,6 +18,7 @@ import { AITagger } from "./ai-tagger.js";
 import { RAGEngine } from "./rag-engine.js";
 import { AIConfigService } from "./ai-config.js";
 import { AIUsageTracker } from "./ai-usage-tracker.js";
+import { FailoverAIClient } from "./ai-resilience.js";
 import { maskPII } from "../middleware/pii-masker.js";
 import logger from "../lib/logger.js";
 import { metrics } from "../lib/metrics.js";
@@ -41,7 +42,7 @@ const CHUNK_OVERLAP = 200;      // overlap to preserve context across boundaries
 /**
  * Splits transcript text into overlapping chunks, preserving sentence boundaries.
  */
-function chunkTranscript(
+export function chunkTranscript(
   text: string
 ): Array<{ text: string; index: number }> {
   const sentences = text.match(/[^.!?]+[.!?]+\s*/g) ?? [text];
@@ -135,14 +136,28 @@ export class TranscriptProcessor {
     // ── Step 4: Resolve AI client for this org ───────────────────────
     // Use OWNER role to bypass user-level access checks for background jobs.
     // If a specific user triggered this, we could use their context instead.
-    const _aiClient = await this.resolveOrgAIClient(
+    const aiConfig = await this.resolveOrgAIClient(
       organizationId,
       job.userId
+    );
+    const aiClient = new FailoverAIClient(
+      aiConfig.primary.client,
+      aiConfig.fallback?.client ?? null,
+      {
+        failureThreshold: 3,
+        cooldownMs: 60_000,
+        maxAttempts: aiConfig.retryBudget,
+        circuitKey: `transcript-tagging:${aiConfig.primary.provider}:${aiConfig.primary.client.modelName}`,
+      }
     );
 
     // ── Step 5: Tag with AI ──────────────────────────────────────────
     const taggingResults = await this.tagger.tagCallTranscript(
-      callId
+      callId,
+      {
+        aiClient,
+        idempotencyKeyPrefix: `tag:${organizationId}:${callId}`,
+      }
     );
 
     // ── Step 6: Generate embeddings and index ────────────────────────
@@ -183,12 +198,12 @@ export class TranscriptProcessor {
   ) {
     // Resolve the AI client using the org's default configuration.
     // OWNER role bypasses all user-level access checks.
-    const { client } = await this.configService.resolveClient(
+    const resolved = await this.configService.resolveClientWithFailover(
       organizationId,
       userId ?? "system",
       "OWNER" as UserRole
     );
 
-    return client;
+    return resolved;
   }
 }

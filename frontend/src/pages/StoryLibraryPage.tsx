@@ -29,8 +29,10 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
   const [status, setStatus] = useState<"ALL" | StoryLibraryItem["story_status"]>("ALL");
   const [storyType, setStoryType] = useState("ALL");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [serverLimit, setServerLimit] = useState(20);
   const [busyStoryId, setBusyStoryId] = useState<string | null>(null);
 
   const isViewer = userRole === "VIEWER";
@@ -50,7 +52,7 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
 
     void getStoryLibrary({
       page,
-      limit: 20,
+      limit: pageSize,
       search: search || undefined,
       story_type: storyType === "ALL" ? undefined : storyType,
       status: status === "ALL" ? undefined : status,
@@ -58,6 +60,7 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
       .then((res) => {
         if (cancelled) return;
         setStories(res.stories);
+        setServerLimit(res.pagination.limit);
         setTotalPages(Math.max(res.pagination.totalPages, 1));
         setTotalCount(res.pagination.totalCount);
       })
@@ -73,11 +76,13 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     return () => {
       cancelled = true;
     };
-  }, [page, search, status, storyType]);
+  }, [page, pageSize, search, status, storyType]);
 
   const uniqueStoryTypes = useMemo(() => {
     return Array.from(new Set(stories.map((s) => s.story_type))).sort();
   }, [stories]);
+  const rangeStart = totalCount === 0 ? 0 : (page - 1) * serverLimit + 1;
+  const rangeEnd = totalCount === 0 ? 0 : Math.min(rangeStart + serverLimit - 1, totalCount);
 
   const saveBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
@@ -189,10 +194,25 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
           <option value="PUBLISHED">Published</option>
           <option value="ARCHIVED">Archived</option>
         </select>
+        <select
+          className="form-field__input"
+          value={pageSize}
+          onChange={(event) => {
+            setPageSize(Number(event.target.value));
+            setPage(1);
+          }}
+          aria-label="Stories per page"
+        >
+          <option value={20}>20 / page</option>
+          <option value={50}>50 / page</option>
+          <option value={100}>100 / page</option>
+        </select>
       </div>
 
       <div className="story-library__count" aria-live="polite">
-        {loading ? "Loading..." : `${totalCount} stor${totalCount === 1 ? "y" : "ies"}`}
+        {loading
+          ? "Loading..."
+          : `${rangeStart}-${rangeEnd} of ${totalCount} stor${totalCount === 1 ? "y" : "ies"}`}
       </div>
 
       {loading && (

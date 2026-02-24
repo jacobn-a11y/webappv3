@@ -25,6 +25,9 @@ function createMockPrisma() {
     call: {
       update: vi.fn().mockResolvedValue({}),
     },
+    notification: {
+      create: vi.fn().mockResolvedValue({}),
+    },
   } as unknown as PrismaClient;
 }
 
@@ -714,7 +717,7 @@ describe("EntityResolver.resolveAndLinkContacts", () => {
     );
   });
 
-  it("does not upsert contacts or link call when match is none", async () => {
+  it("routes unresolved matches to manual-review automation hook", async () => {
     // All lookups return nothing
     (prisma.account.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     (prisma.accountDomain.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
@@ -729,7 +732,25 @@ describe("EntityResolver.resolveAndLinkContacts", () => {
 
     expect(result.matchMethod).toBe("none");
     expect(prisma.contact.upsert).not.toHaveBeenCalled();
-    expect(prisma.call.update).not.toHaveBeenCalled();
+    expect(prisma.call.update).toHaveBeenCalledWith({
+      where: { id: "call-001" },
+      data: {
+        accountId: null,
+        matchMethod: "NONE",
+        matchConfidence: 0,
+      },
+    });
+    expect(prisma.notification.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        organizationId: ORG_ID,
+        userId: null,
+        type: "SYSTEM_ALERT",
+        metadata: expect.objectContaining({
+          callId: "call-001",
+          automation_hook: "entity_resolution_manual_review_v1",
+        }),
+      }),
+    });
   });
 
   it("passes null for name when participant has no name", async () => {

@@ -572,6 +572,27 @@ export interface SetupPlanCatalog {
   }>;
 }
 
+export interface SetupMvpAccountRow {
+  name: string;
+  count: number;
+}
+
+export interface SetupMvpQuickstartStatus {
+  gong_configured: boolean;
+  gong_base_url: string;
+  gong_status: string;
+  gong_last_sync_at: string | null;
+  gong_last_error: string | null;
+  openai_configured: boolean;
+  selected_account_names: string[];
+  account_index: {
+    generated_at: string | null;
+    total_calls_indexed: number;
+    total_accounts: number;
+    accounts: SetupMvpAccountRow[];
+  };
+}
+
 export interface BillingReadiness {
   organization: {
     plan: string;
@@ -1233,6 +1254,7 @@ function buildRequestHeaders(existing?: HeadersInit): Headers {
   const sessionToken = getSessionToken();
   if (sessionToken) {
     headers.set("x-session-token", sessionToken);
+    headers.set("x-csrf-token", sessionToken);
   }
   const supportToken = getSupportImpersonationToken();
   if (supportToken) {
@@ -1823,6 +1845,66 @@ export async function revokeSupportImpersonationSession(
     `/dashboard/support/impersonation/${sessionId}/revoke`,
     { method: "POST" }
   );
+}
+
+export async function getSetupMvpQuickstartStatus(): Promise<SetupMvpQuickstartStatus> {
+  return request<SetupMvpQuickstartStatus>("/setup/mvp/quickstart");
+}
+
+export async function saveSetupMvpQuickstartKeys(body: {
+  gong_api_key: string;
+  openai_api_key: string;
+  gong_base_url?: string;
+}): Promise<{ saved: boolean; status: SetupMvpQuickstartStatus }> {
+  return request<{ saved: boolean; status: SetupMvpQuickstartStatus }>(
+    "/setup/mvp/quickstart",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    }
+  );
+}
+
+export async function indexSetupMvpGongAccounts(body?: {
+  refresh?: boolean;
+  max_scan_calls?: number;
+}): Promise<{
+  generated_at: string;
+  total_calls_indexed: number;
+  total_accounts: number;
+  accounts: SetupMvpAccountRow[];
+  cached: boolean;
+}> {
+  return request<{
+    generated_at: string;
+    total_calls_indexed: number;
+    total_accounts: number;
+    accounts: SetupMvpAccountRow[];
+    cached: boolean;
+  }>("/setup/mvp/quickstart/gong/accounts/index", {
+    method: "POST",
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
+export async function saveSetupMvpGongAccountSelection(body: {
+  account_names: string[];
+  trigger_ingest?: boolean;
+}): Promise<{
+  saved: boolean;
+  selected_account_names: string[];
+  ingest_started: boolean;
+  idempotency_key: string | null;
+}> {
+  return request<{
+    saved: boolean;
+    selected_account_names: string[];
+    ingest_started: boolean;
+    idempotency_key: string | null;
+  }>("/setup/mvp/quickstart/gong/accounts/selection", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export async function getSetupStatus(): Promise<SetupStatus> {

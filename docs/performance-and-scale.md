@@ -24,6 +24,18 @@ Added indexes for heavy read paths:
 - `landing_pages(organizationId, updatedAt DESC)`
 - `integration_runs(organizationId, runType, startedAt DESC)`
 
+## Vector Retention Controls
+- Data retention sweep now prunes stale Pinecone vectors before deleting old records.
+- Enforcement path:
+  - `src/services/data-retention.ts` runs org retention policy and calls `ragEngine.pruneVectors(...)`.
+  - `src/services/rag-engine.ts` deletes vectors in bounded batches and clears `embeddingId` links.
+- Runtime controls:
+  - `RAG_VECTOR_RETENTION_DELETE_LIMIT` (default `1000`) caps vectors removed per org sweep run.
+  - Existing retention policy window (`retention_days`) determines age cutoff.
+- Safety behavior:
+  - Vector deletions are scoped by `organizationId`.
+  - Deletions run in batches to avoid large one-shot API calls.
+
 ## Perf Budgets
 Budgets in `scripts/perf/perf-budget.config.json`:
 - Main frontend JS max: `850KB`

@@ -25,6 +25,11 @@ export interface ChatCompletionOptions {
   temperature?: number;
   maxTokens?: number;
   jsonMode?: boolean;
+  /**
+   * Optional caller-provided idempotency key used by usage/cost trackers.
+   * Provider clients ignore this field.
+   */
+  idempotencyKey?: string;
 }
 
 export interface ChatCompletionResult {

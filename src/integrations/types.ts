@@ -68,12 +68,21 @@ export interface NormalizedCall {
   participants: NormalizedParticipant[];
   /** Full transcript text, if available inline */
   transcript: string | null;
+  /** Provider-derived account candidates (highest-confidence first). */
+  accountHints?: string[];
+  primaryAccountHint?: string | null;
+  /** Optional provider summaries surfaced during initial ingest. */
+  summary?: string | null;
+  outline?: string[];
 }
 
 export interface NormalizedParticipant {
   email: string | null;
   name: string | null;
   isHost: boolean;
+  speakerId?: string | null;
+  title?: string | null;
+  affiliation?: string | null;
 }
 
 export interface NormalizedAccount {
@@ -139,7 +148,8 @@ export interface CallRecordingProvider {
   fetchCalls(
     credentials: ProviderCredentials,
     cursor: string | null,
-    since: Date | null
+    since: Date | null,
+    options?: { settings?: Record<string, unknown> | null }
   ): Promise<SyncResult<NormalizedCall>>;
 
   /**

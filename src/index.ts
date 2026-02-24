@@ -66,7 +66,7 @@ const services = createServices(prisma, queues.processingQueue, {
   appUrl: process.env.APP_URL ?? "http://localhost:3000",
 });
 
-const workers = createWorkers(REDIS_URL, services, prisma, stripe);
+const workers = createWorkers(REDIS_URL, queues, services, prisma, stripe);
 
 const app = createApp({
   prisma,
@@ -96,6 +96,7 @@ process.on("SIGTERM", async () => {
   workers.usageCron.stop();
   workers.auditRetentionCron.stop();
   workers.dataRetentionCron.stop();
+  workers.callProcessingDeadLetterReplayCron?.stop();
   services.mergeClient.stopPolling();
   await workers.callWorker.close();
   await workers.transcriptFetchWorker.close();

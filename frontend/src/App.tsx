@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Link, Navigate, useLocation, useNavigate } from "react-router-dom";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/Toast";
 import { Breadcrumb } from "./components/Breadcrumb";
@@ -31,11 +31,13 @@ import {
   clearAuthState,
   getAuthMe,
   getChatAccounts,
+  getStoryLibrary,
   getRoleAwareHome,
   getStoredAuthUser,
   logoutSelfService,
   subscribeAuthChanges,
   type ChatAccount,
+  type StoryLibraryItem,
   type RoleAwareHome,
   type AuthUser,
 } from "./lib/api";
@@ -188,19 +190,19 @@ function IconLogout() {
 
 // ─── Navigation Configuration ─────────────────────────────────────────────────
 
-interface NavItem {
+export interface NavItem {
   to: string;
   label: string;
   icon: () => JSX.Element;
 }
 
-interface NavGroup {
+export interface NavGroup {
   label: string;
   icon: () => JSX.Element;
   items: NavItem[];
 }
 
-type NavEntry = NavItem | NavGroup;
+export type NavEntry = NavItem | NavGroup;
 
 function isGroup(entry: NavEntry): entry is NavGroup {
   return "items" in entry;
@@ -295,19 +297,95 @@ function buildNav(persona: RoleAwareHome["persona"] | null, userRole: AuthUser["
 
 const COLLAPSE_KEY = "sidebar_collapsed";
 const GROUPS_KEY = "sidebar_groups";
+const CONTRAST_KEY = "a11y_high_contrast";
+const THEME_KEY = "ui_theme";
+type ThemePreference = "dark" | "light";
 
-function Sidebar({
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "textarea:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+
+function trapDialogFocus(
+  event: KeyboardEvent,
+  container: HTMLElement,
+  onClose?: () => void
+) {
+  if (event.key === "Escape") {
+    onClose?.();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = Array.from(
+    container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+  ).filter((el) => !el.hasAttribute("disabled"));
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (!first || !last) return;
+  const active = document.activeElement as HTMLElement | null;
+  if (event.shiftKey && active === first) {
+    event.preventDefault();
+    last.focus();
+    return;
+  }
+  if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function readLabelText(input: HTMLElement): string | null {
+  const explicitLabelId = input.getAttribute("aria-labelledby");
+  if (explicitLabelId) return explicitLabelId;
+  const ariaLabel = input.getAttribute("aria-label");
+  if (ariaLabel && ariaLabel.trim().length > 0) return ariaLabel;
+  const wrapperLabel = input.closest("label");
+  if (wrapperLabel?.textContent?.trim()) return wrapperLabel.textContent.trim();
+
+  const fieldGroup = input.closest(".form-group");
+  const siblingLabel = fieldGroup?.querySelector<HTMLElement>(
+    "label, .form-group__label"
+  );
+  if (siblingLabel?.textContent?.trim()) return siblingLabel.textContent.trim();
+  return null;
+}
+
+function ensureAccessibleFormLabels(container: ParentNode) {
+  const controls = container.querySelectorAll<HTMLElement>("input, select, textarea");
+  controls.forEach((control, index) => {
+    const current = readLabelText(control);
+    if (current) return;
+    const placeholder = control.getAttribute("placeholder")?.trim();
+    const fallback = placeholder && placeholder.length > 0 ? placeholder : `Field ${index + 1}`;
+    control.setAttribute("aria-label", fallback);
+  });
+}
+
+export function Sidebar({
   nav,
   user,
   collapsed,
+  theme,
+  highContrast,
   onToggleCollapse,
+  onToggleTheme,
+  onToggleHighContrast,
   onLogout,
   onClose,
 }: {
   nav: NavEntry[];
   user: AuthUser;
   collapsed: boolean;
+  theme: ThemePreference;
+  highContrast: boolean;
   onToggleCollapse: () => void;
+  onToggleTheme: () => void;
+  onToggleHighContrast: () => void;
   onLogout: () => void;
   onClose?: () => void;
 }) {
@@ -360,7 +438,7 @@ function Sidebar({
       </div>
 
       {/* Navigation */}
-      <nav className="sidebar__nav">
+      <nav className="sidebar__nav" aria-label="Primary">
         {nav.map((entry) => {
           if (isGroup(entry)) {
             const isOpen = openGroups.has(entry.label);
@@ -371,11 +449,15 @@ function Sidebar({
                   className="sidebar__group-toggle"
                   onClick={() => toggleGroup(entry.label)}
                   aria-expanded={isOpen}
+                  aria-label={collapsed ? entry.label : undefined}
                   title={collapsed ? entry.label : undefined}
                 >
-                  <span className="sidebar__link-icon"><entry.icon /></span>
+                  <span className="sidebar__link-icon" aria-hidden="true"><entry.icon /></span>
                   <span className="sidebar__link-label">{entry.label}</span>
-                  <span className={`sidebar__group-chevron${isOpen ? " sidebar__group-chevron--open" : ""}`}>
+                  <span
+                    className={`sidebar__group-chevron${isOpen ? " sidebar__group-chevron--open" : ""}`}
+                    aria-hidden="true"
+                  >
                     <IconChevron />
                   </span>
                 </button>
@@ -386,10 +468,11 @@ function Sidebar({
                       to={item.to}
                       className={`sidebar__link${isActive(item.to) ? " sidebar__link--active" : ""}`}
                       aria-current={isActive(item.to) ? "page" : undefined}
+                      aria-label={collapsed ? item.label : undefined}
                       title={collapsed ? item.label : undefined}
                       onClick={onClose}
                     >
-                      <span className="sidebar__link-icon"><item.icon /></span>
+                      <span className="sidebar__link-icon" aria-hidden="true"><item.icon /></span>
                       <span className="sidebar__link-label">{item.label}</span>
                     </Link>
                   ))}
@@ -404,10 +487,11 @@ function Sidebar({
               to={entry.to}
               className={`sidebar__link${isActive(entry.to) ? " sidebar__link--active" : ""}`}
               aria-current={isActive(entry.to) ? "page" : undefined}
+              aria-label={collapsed ? entry.label : undefined}
               title={collapsed ? entry.label : undefined}
               onClick={onClose}
             >
-              <span className="sidebar__link-icon"><entry.icon /></span>
+              <span className="sidebar__link-icon" aria-hidden="true"><entry.icon /></span>
               <span className="sidebar__link-label">{entry.label}</span>
             </Link>
           );
@@ -422,14 +506,38 @@ function Sidebar({
             <span className="sidebar__user-email">{user.email}</span>
             <span className="sidebar__user-role">{user.role === "OWNER" ? "Owner" : user.role === "ADMIN" ? "Admin" : user.role === "MEMBER" ? "Member" : "Viewer"}</span>
           </div>
-          <button className="btn btn--ghost btn--sm" onClick={onLogout} title="Logout" style={{ padding: "4px 6px", marginLeft: "auto" }}>
+          <button
+            className="btn btn--ghost btn--sm"
+            onClick={onLogout}
+            title="Logout"
+            aria-label="Logout"
+            style={{ padding: "4px 6px", marginLeft: "auto" }}
+          >
             <IconLogout />
           </button>
         </div>
         <button
           type="button"
+          className="sidebar__mode-btn"
+          onClick={onToggleTheme}
+          aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+        >
+          {theme === "dark" ? "Light Theme" : "Dark Theme"}
+        </button>
+        <button
+          type="button"
+          className="sidebar__contrast-btn"
+          onClick={onToggleHighContrast}
+          aria-pressed={highContrast}
+          aria-label={highContrast ? "Disable high contrast mode" : "Enable high contrast mode"}
+        >
+          {highContrast ? "Standard Contrast" : "High Contrast"}
+        </button>
+        <button
+          type="button"
           className="sidebar__collapse-btn"
           onClick={onToggleCollapse}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {collapsed ? <IconExpand /> : <IconCollapse />}
@@ -455,12 +563,37 @@ function AuthenticatedApp({
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === "true"; } catch { return false; }
   });
+  const [highContrast, setHighContrast] = useState(() => {
+    try { return localStorage.getItem(CONTRAST_KEY) === "true"; } catch { return false; }
+  });
+  const [theme, setTheme] = useState<ThemePreference>(() => {
+    try {
+      const stored = localStorage.getItem(THEME_KEY);
+      return stored === "light" || stored === "dark" ? stored : "dark";
+    } catch {
+      return "dark";
+    }
+  });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [storyPickerOpen, setStoryPickerOpen] = useState(false);
   const [storyPickerSearch, setStoryPickerSearch] = useState("");
   const [storyPickerAccounts, setStoryPickerAccounts] = useState<ChatAccount[]>([]);
   const [storyPickerLoading, setStoryPickerLoading] = useState(false);
   const [storyPickerError, setStoryPickerError] = useState<string | null>(null);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
+  const [commandAccounts, setCommandAccounts] = useState<ChatAccount[]>([]);
+  const [commandStories, setCommandStories] = useState<StoryLibraryItem[]>([]);
+  const [commandLoading, setCommandLoading] = useState(false);
+  const [routeAnnouncement, setRouteAnnouncement] = useState("");
+  const [commandAnnouncement, setCommandAnnouncement] = useState("");
+  const mainRef = useRef<HTMLElement | null>(null);
+  const commandInputRef = useRef<HTMLInputElement | null>(null);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const storyPickerDialogRef = useRef<HTMLDivElement | null>(null);
+  const commandDialogRef = useRef<HTMLDivElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const shouldRestoreMobileFocusRef = useRef(false);
 
   useEffect(() => {
     getRoleAwareHome()
@@ -498,6 +631,116 @@ function AuthenticatedApp({
       window.clearTimeout(timeout);
     };
   }, [storyPickerOpen, storyPickerSearch, user.role]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("theme-high-contrast", highContrast);
+    document.documentElement.lang = "en";
+    try {
+      localStorage.setItem(CONTRAST_KEY, String(highContrast));
+    } catch {
+      // Ignore storage failures in restricted environments.
+    }
+    return () => {
+      document.documentElement.classList.remove("theme-high-contrast");
+    };
+  }, [highContrast]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("theme-light", theme === "light");
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      // Ignore storage failures in restricted environments.
+    }
+    return () => {
+      document.documentElement.classList.remove("theme-light");
+    };
+  }, [theme]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        previousFocusRef.current = document.activeElement as HTMLElement | null;
+        setCommandOpen(true);
+        return;
+      }
+      if (event.key === "Escape") {
+        setCommandOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!commandOpen) return;
+    const timeout = window.setTimeout(() => {
+      commandInputRef.current?.focus();
+      commandInputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [commandOpen]);
+
+  useEffect(() => {
+    if (!storyPickerOpen) return;
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    const timeout = window.setTimeout(() => {
+      const firstFocusable = storyPickerDialogRef.current?.querySelector<HTMLElement>(
+        FOCUSABLE_SELECTOR
+      );
+      firstFocusable?.focus();
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [storyPickerOpen]);
+
+  useEffect(() => {
+    const container = storyPickerDialogRef.current;
+    if (!storyPickerOpen || !container) return;
+    const onKeydown = (event: KeyboardEvent) =>
+      trapDialogFocus(event, container, () => setStoryPickerOpen(false));
+    document.addEventListener("keydown", onKeydown);
+    return () => document.removeEventListener("keydown", onKeydown);
+  }, [storyPickerOpen]);
+
+  useEffect(() => {
+    const container = commandDialogRef.current;
+    if (!commandOpen || !container) return;
+    const onKeydown = (event: KeyboardEvent) =>
+      trapDialogFocus(event, container, () => setCommandOpen(false));
+    document.addEventListener("keydown", onKeydown);
+    return () => document.removeEventListener("keydown", onKeydown);
+  }, [commandOpen]);
+
+  useEffect(() => {
+    if (storyPickerOpen || commandOpen) return;
+    previousFocusRef.current?.focus();
+  }, [storyPickerOpen, commandOpen]);
+
+  useEffect(() => {
+    if (!mobileOpen) {
+      if (shouldRestoreMobileFocusRef.current) {
+        window.setTimeout(() => {
+          mobileMenuButtonRef.current?.focus();
+        }, 0);
+      }
+      shouldRestoreMobileFocusRef.current = false;
+      return;
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        shouldRestoreMobileFocusRef.current = true;
+        setMobileOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [mobileOpen]);
 
   const nav = useMemo(() => buildNav(persona, user.role), [persona, user.role]);
   const appBreadcrumbItems = useMemo(() => {
@@ -559,6 +802,93 @@ function AuthenticatedApp({
     return items;
   }, [location.pathname]);
 
+  const quickNavMatches = useMemo(() => {
+    const normalized = commandQuery.trim().toLowerCase();
+    if (!normalized) return [] as Array<{ to: string; label: string }>;
+    const flattened: Array<{ to: string; label: string }> = [];
+    for (const entry of nav) {
+      if (isGroup(entry)) {
+        for (const item of entry.items) {
+          flattened.push({ to: item.to, label: item.label });
+        }
+      } else {
+        flattened.push({ to: entry.to, label: entry.label });
+      }
+    }
+    return flattened
+      .filter((item) => item.label.toLowerCase().includes(normalized))
+      .slice(0, 10);
+  }, [commandQuery, nav]);
+
+  useEffect(() => {
+    shouldRestoreMobileFocusRef.current = false;
+    setMobileOpen(false);
+    setCommandOpen(false);
+    const heading = document.querySelector("main h1");
+    if (heading instanceof HTMLElement) {
+      heading.setAttribute("tabindex", "-1");
+      heading.focus();
+      setRouteAnnouncement(`Navigated to ${heading.textContent ?? "page"}.`);
+      return;
+    }
+    mainRef.current?.focus();
+    setRouteAnnouncement("Navigated to page.");
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!mainRef.current) return;
+    ensureAccessibleFormLabels(mainRef.current);
+  }, [location.pathname, storyPickerOpen, commandOpen]);
+
+  useEffect(() => {
+    if (!commandOpen) return;
+    const query = commandQuery.trim();
+    if (query.length < 2) {
+      setCommandAccounts([]);
+      setCommandStories([]);
+      setCommandLoading(false);
+      setCommandAnnouncement("Enter at least 2 characters for search results.");
+      return;
+    }
+
+    let cancelled = false;
+    setCommandLoading(true);
+    const timeout = window.setTimeout(() => {
+      void Promise.all([
+        getChatAccounts(query),
+        getStoryLibrary({ search: query, page: 1, limit: 6 }),
+      ])
+        .then(([accounts, stories]) => {
+          if (cancelled) return;
+          setCommandAccounts(accounts.accounts.slice(0, 6));
+          setCommandStories(stories.stories.slice(0, 6));
+          const totalResults =
+            quickNavMatches.length +
+            Math.min(accounts.accounts.length, 6) +
+            Math.min(stories.stories.length, 6);
+          setCommandAnnouncement(
+            totalResults > 0
+              ? `${totalResults} search results available.`
+              : "No search results."
+          );
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setCommandAccounts([]);
+          setCommandStories([]);
+          setCommandAnnouncement("Search failed. Try again.");
+        })
+        .finally(() => {
+          if (!cancelled) setCommandLoading(false);
+        });
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [commandOpen, commandQuery, quickNavMatches.length]);
+
   const toggleCollapse = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
@@ -567,16 +897,40 @@ function AuthenticatedApp({
     });
   }, []);
 
+  const toggleHighContrast = useCallback(() => {
+    setHighContrast((prev) => !prev);
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  }, []);
+
   const handleLogout = useCallback(() => {
     void onLogout();
   }, [onLogout]);
 
   const openStoryPicker = useCallback(() => {
     if (user.role === "VIEWER") return;
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
     setStoryPickerOpen(true);
     setStoryPickerSearch("");
     setStoryPickerError(null);
   }, [user.role]);
+
+  const openCommandPalette = useCallback(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    setCommandOpen(true);
+  }, []);
+
+  const openMobileNav = useCallback(() => {
+    shouldRestoreMobileFocusRef.current = true;
+    setMobileOpen(true);
+  }, []);
+
+  const closeMobileNav = useCallback((restoreFocus = true) => {
+    shouldRestoreMobileFocusRef.current = restoreFocus;
+    setMobileOpen(false);
+  }, []);
 
   const closeStoryPicker = useCallback(() => {
     setStoryPickerOpen(false);
@@ -591,16 +945,40 @@ function AuthenticatedApp({
     [navigate]
   );
 
+  const handleCommandNavigate = useCallback(
+    (to: string) => {
+      setCommandOpen(false);
+      setCommandQuery("");
+      navigate(to);
+    },
+    [navigate]
+  );
+
   return (
     <div className={`app-shell${collapsed ? " app-shell--collapsed" : ""}`}>
       <a href="#main-content" className="skip-to-content">Skip to main content</a>
 
       {/* Mobile header */}
-      <div className="mobile-header">
-        <button type="button" className="mobile-header__hamburger" onClick={() => setMobileOpen(true)} aria-label="Open navigation">
+      <header className="mobile-header">
+        <button
+          ref={mobileMenuButtonRef}
+          type="button"
+          className="mobile-header__hamburger"
+          onClick={openMobileNav}
+          aria-label="Open navigation"
+          aria-expanded={mobileOpen}
+        >
           <IconMenu />
         </button>
         <Link to="/" className="mobile-header__logo">StoryEngine</Link>
+        <button
+          type="button"
+          className="mobile-header__new-story"
+          onClick={openCommandPalette}
+          aria-label="Open global search"
+        >
+          Search
+        </button>
         {user.role !== "VIEWER" && (
           <button
             type="button"
@@ -610,11 +988,11 @@ function AuthenticatedApp({
             New Story
           </button>
         )}
-      </div>
+      </header>
 
       {/* Mobile overlay */}
       {mobileOpen && (
-        <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />
+        <div className="sidebar-overlay" onClick={() => closeMobileNav(true)} />
       )}
 
       {/* Sidebar */}
@@ -622,14 +1000,25 @@ function AuthenticatedApp({
         nav={nav}
         user={user}
         collapsed={collapsed}
+        theme={theme}
+        highContrast={highContrast}
         onToggleCollapse={toggleCollapse}
+        onToggleTheme={toggleTheme}
+        onToggleHighContrast={toggleHighContrast}
         onLogout={handleLogout}
-        onClose={mobileOpen ? () => setMobileOpen(false) : undefined}
+        onClose={mobileOpen ? () => closeMobileNav(false) : undefined}
       />
 
       {storyPickerOpen && (
         <div className="modal-overlay" role="presentation" onClick={closeStoryPicker}>
-          <div className="modal story-picker" role="dialog" aria-modal="true" aria-label="Pick account for story creation" onClick={(e) => e.stopPropagation()}>
+          <div
+            ref={storyPickerDialogRef}
+            className="modal story-picker"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Pick account for story creation"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal__header">
               <div>
                 <h2 className="modal__title">New Story</h2>
@@ -696,10 +1085,110 @@ function AuthenticatedApp({
         </div>
       )}
 
+      {commandOpen && (
+        <div
+          className="modal-overlay"
+          role="presentation"
+          onClick={() => setCommandOpen(false)}
+        >
+          <div
+            ref={commandDialogRef}
+            className="modal command-palette"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Global search"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="command-palette__header">
+              <input
+                ref={commandInputRef}
+                type="search"
+                className="form-field__input"
+                placeholder="Search pages, accounts, and stories"
+                value={commandQuery}
+                onChange={(event) => setCommandQuery(event.target.value)}
+                aria-label="Global search"
+              />
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => setCommandOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="command-palette__results" role="listbox" aria-label="Search results">
+              {quickNavMatches.map((item) => (
+                <button
+                  type="button"
+                  key={`nav:${item.to}`}
+                  className="command-palette__item"
+                  role="option"
+                  onClick={() => handleCommandNavigate(item.to)}
+                >
+                  <span className="command-palette__item-label">{item.label}</span>
+                  <span className="command-palette__item-meta">Page</span>
+                </button>
+              ))}
+              {commandAccounts.map((account) => (
+                <button
+                  type="button"
+                  key={`acct:${account.id}`}
+                  className="command-palette__item"
+                  role="option"
+                  onClick={() => handleCommandNavigate(`/accounts/${account.id}`)}
+                >
+                  <span className="command-palette__item-label">{account.name}</span>
+                  <span className="command-palette__item-meta">
+                    Account {account.domain ? `· ${account.domain}` : ""}
+                  </span>
+                </button>
+              ))}
+              {commandStories.map((story) => (
+                <button
+                  type="button"
+                  key={`story:${story.id}`}
+                  className="command-palette__item"
+                  role="option"
+                  onClick={() => handleCommandNavigate(`/stories`)}
+                >
+                  <span className="command-palette__item-label">{story.title}</span>
+                  <span className="command-palette__item-meta">
+                    Story · {story.account.name}
+                  </span>
+                </button>
+              ))}
+              {commandLoading && (
+                <div className="command-palette__empty" role="status" aria-live="polite">
+                  Searching...
+                </div>
+              )}
+              {!commandLoading &&
+                quickNavMatches.length === 0 &&
+                commandAccounts.length === 0 &&
+                commandStories.length === 0 && (
+                  <div className="command-palette__empty">
+                    Type at least 2 characters to search.
+                  </div>
+                )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main content */}
-      <main className="app-content" id="main-content">
+      <div className="sr-only" role="status" aria-live="polite">
+        {routeAnnouncement}
+      </div>
+      <div className="sr-only" role="status" aria-live="polite">
+        {commandAnnouncement}
+      </div>
+      <main className="app-content" id="main-content" ref={mainRef} tabIndex={-1}>
         {user.role !== "VIEWER" && (
           <div className="app-topbar">
+            <button type="button" className="btn btn--ghost" onClick={openCommandPalette}>
+              Search
+            </button>
             <button type="button" className="btn btn--primary" onClick={openStoryPicker}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M8 2v12M2 8h12" />

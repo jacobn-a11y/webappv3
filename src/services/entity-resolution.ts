@@ -168,11 +168,42 @@ export class EntityResolver {
   async resolveAndLinkContacts(
     organizationId: string,
     callId: string,
-    participants: CallParticipantInput[]
+    participants: CallParticipantInput[],
+    callTitle?: string
   ): Promise<ResolvedEntity> {
-    const resolution = await this.resolve(organizationId, participants);
+    const resolution = await this.resolve(organizationId, participants, callTitle);
 
-    if (resolution.matchMethod === "none") return resolution;
+    if (resolution.matchMethod === "none") {
+      await this.prisma.call.update({
+        where: { id: callId },
+        data: {
+          accountId: null,
+          matchMethod: "NONE",
+          matchConfidence: 0,
+        },
+      });
+
+      await this.prisma.notification.create({
+        data: {
+          organizationId,
+          userId: null,
+          type: "SYSTEM_ALERT",
+          title: "Entity resolution requires review",
+          body: "A call could not be matched to an account and was queued for manual entity resolution.",
+          metadata: {
+            callId,
+            automation_hook: "entity_resolution_manual_review_v1",
+          },
+        },
+      });
+
+      logger.warn("Queued unresolved call for manual entity-resolution review", {
+        organizationId,
+        callId,
+        automationHook: "entity_resolution_manual_review_v1",
+      });
+      return resolution;
+    }
 
     // Upsert contacts for participants that have emails
     for (const p of participants) {

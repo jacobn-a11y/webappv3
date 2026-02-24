@@ -14,6 +14,7 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import type { PrismaClient, PageVisibility, PageStatus } from "@prisma/client";
 import { CompanyScrubber } from "./company-scrubber.js";
+import { normalizeCompanyName } from "./entity-resolution.js";
 import { hashPagePassword, verifyPagePassword } from "../lib/page-password.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -85,6 +86,34 @@ export interface LandingPageSummary {
   publishedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export class ScrubValidationError extends Error {
+  leakedTerms: string[];
+
+  constructor(leakedTerms: string[]) {
+    super(
+      `Scrub validation failed: detected unsanitized account identifiers (${leakedTerms.join(", ")})`
+    );
+    this.name = "ScrubValidationError";
+    this.leakedTerms = leakedTerms;
+  }
+}
+
+export interface PublishValidationIssue {
+  field: string;
+  code: string;
+  message: string;
+}
+
+export class PublishValidationError extends Error {
+  issues: PublishValidationIssue[];
+
+  constructor(issues: PublishValidationIssue[]) {
+    super("Publish validation failed");
+    this.name = "PublishValidationError";
+    this.issues = issues;
+  }
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -217,6 +246,20 @@ export class LandingPageEditor {
     let scrubbedSubtitle: string | null;
     let scrubbedCallouts: CalloutBox[] | null = null;
 
+    const prePublishIssues = this.validatePublishSnapshot({
+      title: page.title,
+      body: page.editableBody,
+      calloutBoxes:
+        ((page.calloutBoxes as unknown as CalloutBox[] | null) ?? []).map((box) => ({
+          title: box.title,
+          body: box.body,
+        })),
+      fieldPrefix: "editable",
+    });
+    if (prePublishIssues.length > 0) {
+      throw new PublishValidationError(prePublishIssues);
+    }
+
     if (page.includeCompanyName) {
       scrubbedBody = page.editableBody;
       scrubbedTitle = page.title;
@@ -261,6 +304,34 @@ export class LandingPageEditor {
           });
         }
       }
+    }
+
+    if (!page.includeCompanyName) {
+      const leakageTerms = await this.detectScrubLeakage(
+        page.story.accountId,
+        [
+          scrubbedBody,
+          scrubbedTitle,
+          scrubbedSubtitle ?? "",
+          ...(scrubbedCallouts ?? []).flatMap((box) => [box.title, box.body]),
+        ]
+      );
+      if (leakageTerms.length > 0) {
+        throw new ScrubValidationError(leakageTerms);
+      }
+    }
+
+    const postScrubIssues = this.validatePublishSnapshot({
+      title: scrubbedTitle,
+      body: scrubbedBody,
+      calloutBoxes: (scrubbedCallouts ?? []).map((box) => ({
+        title: box.title,
+        body: box.body,
+      })),
+      fieldPrefix: "scrubbed",
+    });
+    if (postScrubIssues.length > 0) {
+      throw new PublishValidationError(postScrubIssues);
     }
 
     const publishedAt = new Date();
@@ -816,6 +887,109 @@ export class LandingPageEditor {
       });
     });
   }
+
+  private async detectScrubLeakage(
+    accountId: string,
+    textFragments: string[]
+  ): Promise<string[]> {
+    const account = await this.prisma.account.findUniqueOrThrow({
+      where: { id: accountId },
+      include: {
+        domainAliases: { select: { domain: true } },
+      },
+    });
+
+    const combined = textFragments.join("\n").toLowerCase();
+    const candidates = new Set<string>();
+
+    if (account.name) {
+      candidates.add(account.name.trim());
+      const normalized = normalizeCompanyName(account.name);
+      if (normalized) candidates.add(normalized);
+    }
+    if (account.domain) candidates.add(account.domain.trim());
+    for (const alias of account.domainAliases) {
+      if (alias.domain) candidates.add(alias.domain.trim());
+    }
+
+    const leaked: string[] = [];
+    for (const rawCandidate of candidates) {
+      const candidate = rawCandidate.toLowerCase();
+      if (candidate.length < 3) continue;
+      const regex = candidate.includes(".")
+        ? new RegExp(escapeRegex(candidate), "i")
+        : new RegExp(`\\b${escapeRegex(candidate)}\\b`, "i");
+      if (regex.test(combined)) {
+        leaked.push(rawCandidate);
+      }
+    }
+
+    return leaked.slice(0, 10);
+  }
+
+  private validatePublishSnapshot(input: {
+    title: string | null;
+    body: string | null;
+    calloutBoxes: Array<{ title?: string | null; body?: string | null }>;
+    fieldPrefix: "editable" | "scrubbed";
+  }): PublishValidationIssue[] {
+    const issues: PublishValidationIssue[] = [];
+    const title = (input.title ?? "").trim();
+    const body = (input.body ?? "").trim();
+
+    if (title.length < 3) {
+      issues.push({
+        field: input.fieldPrefix === "editable" ? "title" : "scrubbed_title",
+        code: "title_too_short",
+        message: "Title must be at least 3 characters before publish.",
+      });
+    }
+
+    if (!body) {
+      issues.push({
+        field:
+          input.fieldPrefix === "editable" ? "editable_body" : "scrubbed_body",
+        code: "body_required",
+        message: "Body content is required before publish.",
+      });
+    } else {
+      const plainText = body
+        .replace(/[`*_#>|[\]()!~-]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const words = plainText.length > 0 ? plainText.split(" ") : [];
+      if (plainText.length < 40 || words.length < 8) {
+        issues.push({
+          field:
+            input.fieldPrefix === "editable" ? "editable_body" : "scrubbed_body",
+          code: "body_too_short",
+          message:
+            "Body content is too short to publish. Add more narrative context.",
+        });
+      }
+    }
+
+    input.calloutBoxes.forEach((box, index) => {
+      const titleValue = (box.title ?? "").trim();
+      const bodyValue = (box.body ?? "").trim();
+      if (!titleValue) {
+        issues.push({
+          field: `callout_boxes.${index}.title`,
+          code: "callout_title_required",
+          message: `Callout ${index + 1} needs a title before publish.`,
+        });
+      }
+      if (!bodyValue) {
+        issues.push({
+          field: `callout_boxes.${index}.body`,
+          code: "callout_body_required",
+          message: `Callout ${index + 1} needs body text before publish.`,
+        });
+      }
+    });
+
+    return issues;
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -832,4 +1006,8 @@ function formatMetricTitle(metricType: string): string {
     roi: "Return on Investment",
   };
   return labels[metricType] ?? "Key Metric";
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

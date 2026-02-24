@@ -26,6 +26,10 @@ interface AuthenticatedRequest extends Request {
   sessionId?: string;
 }
 
+const policyCache = new Map<string, { policy: SecurityPolicy; expiresAt: number }>();
+const ipAllowlistCache = new Map<string, { entries: string[]; expiresAt: number }>();
+const CACHE_TTL_MS = resolvePositiveInt(process.env.SECURITY_POLICY_CACHE_TTL_SECONDS, 60) * 1000;
+
 function requestIp(req: Request): string {
   // Rely on Express req.ip (honors trust proxy when configured).
   return req.ip ?? req.socket.remoteAddress ?? "";
@@ -89,15 +93,7 @@ export function requireOrgSecurityPolicy(
       return;
     }
 
-    const settings = await prisma.orgSettings.findUnique({
-      where: { organizationId },
-      select: { securityPolicy: true },
-    });
-    const rawPolicy = settings?.securityPolicy;
-    const policy =
-      rawPolicy && typeof rawPolicy === "object" && !Array.isArray(rawPolicy)
-        ? (rawPolicy as SecurityPolicy)
-        : {};
+    const policy = await getOrgSecurityPolicy(prisma, organizationId);
 
     if (
       options.requireMfaIfConfigured &&
@@ -117,11 +113,7 @@ export function requireOrgSecurityPolicy(
       options.enforceIpAllowlistIfConfigured &&
       policy.ip_allowlist_enabled
     ) {
-      const entries = await prisma.orgIpAllowlistEntry.findMany({
-        where: { organizationId, enabled: true },
-        select: { cidr: true },
-      });
-      const dbAllowlist = entries.map((e) => e.cidr).filter(Boolean);
+      const dbAllowlist = await getOrgIpAllowlist(prisma, organizationId);
       const allowlist =
         dbAllowlist.length > 0
           ? dbAllowlist
@@ -218,4 +210,63 @@ export function requireOrgSecurityPolicy(
 
     next();
   };
+}
+
+async function getOrgSecurityPolicy(
+  prisma: PrismaClient,
+  organizationId: string
+): Promise<SecurityPolicy> {
+  const now = Date.now();
+  const cached = policyCache.get(organizationId);
+  if (cached && cached.expiresAt > now) {
+    return cached.policy;
+  }
+
+  const settings = await prisma.orgSettings.findUnique({
+    where: { organizationId },
+    select: { securityPolicy: true },
+  });
+  const rawPolicy = settings?.securityPolicy;
+  const policy =
+    rawPolicy && typeof rawPolicy === "object" && !Array.isArray(rawPolicy)
+      ? (rawPolicy as SecurityPolicy)
+      : {};
+  policyCache.set(organizationId, { policy, expiresAt: now + CACHE_TTL_MS });
+  return policy;
+}
+
+async function getOrgIpAllowlist(
+  prisma: PrismaClient,
+  organizationId: string
+): Promise<string[]> {
+  const now = Date.now();
+  const cached = ipAllowlistCache.get(organizationId);
+  if (cached && cached.expiresAt > now) {
+    return cached.entries;
+  }
+
+  const entries = await prisma.orgIpAllowlistEntry.findMany({
+    where: { organizationId, enabled: true },
+    select: { cidr: true },
+  });
+  const allowlist = entries.map((e) => e.cidr).filter(Boolean);
+  ipAllowlistCache.set(organizationId, {
+    entries: allowlist,
+    expiresAt: now + CACHE_TTL_MS,
+  });
+  return allowlist;
+}
+
+function resolvePositiveInt(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
+export function __resetSecurityPolicyCacheForTests(): void {
+  policyCache.clear();
+  ipAllowlistCache.clear();
 }

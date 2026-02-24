@@ -15,10 +15,18 @@ import {
   TextRun,
 } from "docx";
 import type { StoryBuilder, StoryBuilderOptions } from "../services/story-builder.js";
-import type { PrismaClient, TranscriptTruncationMode, HighValueQuote } from "@prisma/client";
+import type {
+  PrismaClient,
+  TranscriptTruncationMode,
+  HighValueQuote,
+  UserRole,
+} from "@prisma/client";
 import { TranscriptMerger } from "../services/transcript-merger.js";
 import { AccountAccessService } from "../services/account-access.js";
 import { RoleProfileService } from "../services/role-profiles.js";
+import { AIConfigService } from "../services/ai-config.js";
+import { AIUsageTracker, TrackedAIClient } from "../services/ai-usage-tracker.js";
+import { FailoverAIClient } from "../services/ai-resilience.js";
 import { STORY_FORMATS } from "../types/taxonomy.js";
 import {
   STORY_LENGTHS,
@@ -71,11 +79,70 @@ const ExportQuerySchema = z.object({
 
 export function createStoryRoutes(
   storyBuilder: StoryBuilder,
-  prisma: PrismaClient
+  prisma: PrismaClient,
+  aiConfigService: AIConfigService,
+  aiUsageTracker: AIUsageTracker
 ): Router {
   const router = Router();
   const accessService = new AccountAccessService(prisma);
   const roleProfiles = new RoleProfileService(prisma);
+
+  const normalizeRole = (role: unknown): UserRole => {
+    if (
+      role === "OWNER" ||
+      role === "ADMIN" ||
+      role === "MEMBER" ||
+      role === "VIEWER"
+    ) {
+      return role;
+    }
+    return "MEMBER";
+  };
+
+  const resolveStoryAIClient = async (input: {
+    organizationId: string;
+    userId: string;
+    userRole: UserRole;
+  }) => {
+    const resolved = await aiConfigService.resolveClientWithFailover(
+      input.organizationId,
+      input.userId,
+      input.userRole
+    );
+
+    const primaryTracked = new TrackedAIClient(
+      resolved.primary.client,
+      aiUsageTracker,
+      {
+        organizationId: input.organizationId,
+        userId: input.userId,
+        operation: "STORY_GENERATION",
+      },
+      resolved.primary.isPlatformBilled
+    );
+
+    const fallbackTracked = resolved.fallback
+      ? new TrackedAIClient(
+          resolved.fallback.client,
+          aiUsageTracker,
+          {
+            organizationId: input.organizationId,
+            userId: input.userId,
+            operation: "STORY_GENERATION",
+          },
+          resolved.fallback.isPlatformBilled
+        )
+      : null;
+
+    const client = new FailoverAIClient(primaryTracked, fallbackTracked, {
+      failureThreshold: 3,
+      cooldownMs: 60_000,
+      maxAttempts: resolved.retryBudget,
+      circuitKey: `story:${input.organizationId}:${resolved.primary.provider}`,
+    });
+
+    return { client, retryBudget: resolved.retryBudget };
+  };
 
   router.post("/build", async (req: Request, res: Response) => {
     const parseResult = BuildStorySchema.safeParse(req.body);
@@ -139,6 +206,14 @@ export function createStoryRoutes(
       }
 
       const result = await storyBuilder.buildStory({
+        aiClient: (
+          await resolveStoryAIClient({
+            organizationId,
+            userId,
+            userRole: normalizeRole(userRole),
+          })
+        ).client,
+        aiIdempotencyKey: `story-build:${organizationId}:${account_id}:${Date.now()}`,
         accountId: account_id,
         organizationId,
         funnelStages: funnel_stages as never[],
@@ -247,6 +322,14 @@ export function createStoryRoutes(
       sendEvent("progress", { step: "STARTED" });
 
       const result = await storyBuilder.buildStory({
+        aiClient: (
+          await resolveStoryAIClient({
+            organizationId,
+            userId,
+            userRole: normalizeRole(userRole),
+          })
+        ).client,
+        aiIdempotencyKey: `story-build-stream:${organizationId}:${account_id}:${Date.now()}`,
         accountId: account_id,
         organizationId,
         funnelStages: funnel_stages as never[],

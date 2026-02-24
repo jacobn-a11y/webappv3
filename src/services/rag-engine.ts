@@ -17,6 +17,7 @@
 import OpenAI from "openai";
 import { Pinecone } from "@pinecone-database/pinecone";
 import type { PrismaClient } from "@prisma/client";
+import crypto from "crypto";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,11 @@ export class RAGEngine {
   private prisma: PrismaClient;
   private indexName: string;
   private model: string;
+  private queryCache = new Map<string, { value: RAGResponse; expiresAt: number }>();
+  private chatCache = new Map<string, { value: RAGChatResponse; expiresAt: number }>();
+  private cacheTtlMs: number;
+  private maxCacheEntries: number;
+  private vectorRetentionDeleteLimit: number;
 
   constructor(
     prisma: PrismaClient,
@@ -90,6 +96,12 @@ export class RAGEngine {
     this.prisma = prisma;
     this.indexName = config.pineconeIndex;
     this.model = config.model ?? "gpt-4o";
+    this.cacheTtlMs = resolvePositiveInt(process.env.RAG_QUERY_CACHE_TTL_SECONDS, 90) * 1000;
+    this.maxCacheEntries = resolvePositiveInt(process.env.RAG_QUERY_CACHE_MAX_ENTRIES, 500);
+    this.vectorRetentionDeleteLimit = resolvePositiveInt(
+      process.env.RAG_VECTOR_RETENTION_DELETE_LIMIT,
+      1000
+    );
   }
 
   /**
@@ -98,6 +110,11 @@ export class RAGEngine {
    */
   async query(input: RAGQuery): Promise<RAGResponse> {
     const topK = input.topK ?? 8;
+    const cacheKey = this.buildQueryCacheKey(input, topK);
+    const cached = this.getCacheEntry(this.queryCache, cacheKey);
+    if (cached) {
+      return cached;
+    }
 
     // ── Step 1: Generate query embedding ─────────────────────────────
     const queryEmbedding = await this.embed(input.query);
@@ -124,12 +141,14 @@ export class RAGEngine {
     const sources = await this.hydrateSources(searchResults.matches ?? []);
 
     if (sources.length === 0) {
-      return {
+      const empty: RAGResponse = {
         answer:
           "I couldn't find any relevant transcript segments for this account matching your query.",
         sources: [],
         tokensUsed: 0,
       };
+      this.setCacheEntry(this.queryCache, cacheKey, empty);
+      return empty;
     }
 
     // ── Step 4: Build context and generate answer ────────────────────
@@ -170,7 +189,9 @@ ${contextBlock}`,
       response.choices[0]?.message?.content ?? "Unable to generate an answer.";
     const tokensUsed = response.usage?.total_tokens ?? 0;
 
-    return { answer, sources, tokensUsed };
+    const result: RAGResponse = { answer, sources, tokensUsed };
+    this.setCacheEntry(this.queryCache, cacheKey, result);
+    return result;
   }
 
   /**
@@ -180,6 +201,11 @@ ${contextBlock}`,
    */
   async chat(input: RAGChatQuery): Promise<RAGChatResponse> {
     const topK = input.topK ?? 8;
+    const cacheKey = this.buildChatCacheKey(input, topK);
+    const cached = this.getCacheEntry(this.chatCache, cacheKey);
+    if (cached) {
+      return cached;
+    }
 
     // ── Step 1: Generate query embedding ─────────────────────────────
     const queryEmbedding = await this.embed(input.query);
@@ -208,12 +234,14 @@ ${contextBlock}`,
     const sources = await this.hydrateSources(searchResults.matches ?? []);
 
     if (sources.length === 0) {
-      return {
+      const empty: RAGChatResponse = {
         answer:
           "I couldn't find any relevant transcript segments matching your query.",
         sources: [],
         tokensUsed: 0,
       };
+      this.setCacheEntry(this.chatCache, cacheKey, empty);
+      return empty;
     }
 
     // ── Step 4: Build context and generate answer with history ───────
@@ -264,7 +292,9 @@ ${contextBlock}`,
       response.choices[0]?.message?.content ?? "Unable to generate an answer.";
     const tokensUsed = response.usage?.total_tokens ?? 0;
 
-    return { answer, sources, tokensUsed };
+    const result: RAGChatResponse = { answer, sources, tokensUsed };
+    this.setCacheEntry(this.chatCache, cacheKey, result);
+    return result;
   }
 
   /**
@@ -310,6 +340,52 @@ ${contextBlock}`,
     return vectorId;
   }
 
+  async pruneVectors(input: {
+    organizationId: string;
+    olderThan: Date;
+    limit?: number;
+  }): Promise<number> {
+    const limit = Math.max(1, input.limit ?? this.vectorRetentionDeleteLimit);
+    const candidates = await this.prisma.transcriptChunk.findMany({
+      where: {
+        embeddingId: { not: null },
+        transcript: {
+          call: {
+            organizationId: input.organizationId,
+            occurredAt: { lt: input.olderThan },
+          },
+        },
+      },
+      select: {
+        id: true,
+        embeddingId: true,
+      },
+      take: limit,
+      orderBy: { createdAt: "asc" },
+    });
+
+    const vectorIds = candidates
+      .map((chunk) => chunk.embeddingId)
+      .filter((value): value is string => !!value);
+    if (vectorIds.length === 0) {
+      return 0;
+    }
+
+    const index = this.pinecone.Index(this.indexName);
+    for (let i = 0; i < vectorIds.length; i += 100) {
+      const batch = vectorIds.slice(i, i + 100);
+      if (batch.length === 0) continue;
+      await index.deleteMany(batch);
+    }
+
+    await this.prisma.transcriptChunk.updateMany({
+      where: { id: { in: candidates.map((c) => c.id) } },
+      data: { embeddingId: null },
+    });
+
+    return vectorIds.length;
+  }
+
   // ─── Private ──────────────────────────────────────────────────────
 
   private async embed(text: string): Promise<number[]> {
@@ -327,25 +403,35 @@ ${contextBlock}`,
       metadata?: Record<string, unknown>;
     }>
   ): Promise<RAGSource[]> {
-    const sources: RAGSource[] = [];
+    const chunkIds = Array.from(
+      new Set(
+        matches
+          .map((match) => match.metadata?.chunk_id as string | undefined)
+          .filter((value): value is string => !!value)
+      )
+    );
+    if (chunkIds.length === 0) {
+      return [];
+    }
 
+    const chunks = await this.prisma.transcriptChunk.findMany({
+      where: { id: { in: chunkIds } },
+      include: {
+        transcript: {
+          include: {
+            call: { select: { id: true, title: true, occurredAt: true } },
+          },
+        },
+      },
+    });
+    const chunkById = new Map(chunks.map((chunk) => [chunk.id, chunk]));
+
+    const sources: RAGSource[] = [];
     for (const match of matches) {
       const chunkId = match.metadata?.chunk_id as string | undefined;
       if (!chunkId) continue;
-
-      const chunk = await this.prisma.transcriptChunk.findUnique({
-        where: { id: chunkId },
-        include: {
-          transcript: {
-            include: {
-              call: { select: { id: true, title: true, occurredAt: true } },
-            },
-          },
-        },
-      });
-
+      const chunk = chunkById.get(chunkId);
       if (!chunk) continue;
-
       sources.push({
         chunkId: chunk.id,
         callId: chunk.transcript.call.id,
@@ -356,7 +442,83 @@ ${contextBlock}`,
         relevanceScore: match.score ?? 0,
       });
     }
-
     return sources;
   }
+
+  private buildQueryCacheKey(input: RAGQuery, topK: number): string {
+    return hashCacheKey(
+      "query",
+      input.organizationId,
+      input.accountId,
+      String(topK),
+      normalizeQueryKey(input.query),
+      normalizeArrayKey(input.funnelStages)
+    );
+  }
+
+  private buildChatCacheKey(input: RAGChatQuery, topK: number): string {
+    return hashCacheKey(
+      "chat",
+      input.organizationId,
+      input.accountId ?? "all",
+      String(topK),
+      normalizeQueryKey(input.query),
+      normalizeArrayKey(input.funnelStages),
+      normalizeHistoryKey(input.history)
+    );
+  }
+
+  private getCacheEntry<T>(
+    cache: Map<string, { value: T; expiresAt: number }>,
+    key: string
+  ): T | null {
+    const entry = cache.get(key);
+    if (!entry) return null;
+    if (entry.expiresAt <= Date.now()) {
+      cache.delete(key);
+      return null;
+    }
+    return entry.value;
+  }
+
+  private setCacheEntry<T>(
+    cache: Map<string, { value: T; expiresAt: number }>,
+    key: string,
+    value: T
+  ) {
+    if (cache.size >= this.maxCacheEntries) {
+      const oldestKey = cache.keys().next().value as string | undefined;
+      if (oldestKey) cache.delete(oldestKey);
+    }
+    cache.set(key, { value, expiresAt: Date.now() + this.cacheTtlMs });
+  }
+}
+
+function normalizeQueryKey(query: string): string {
+  return query.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function normalizeArrayKey(values?: string[]): string {
+  if (!values || values.length === 0) return "";
+  return [...values].map((v) => v.trim()).filter(Boolean).sort().join("|");
+}
+
+function normalizeHistoryKey(history: ChatMessage[]): string {
+  if (!history || history.length === 0) return "";
+  return history
+    .map((item) => `${item.role}:${normalizeQueryKey(item.content)}`)
+    .join("::");
+}
+
+function hashCacheKey(...parts: string[]): string {
+  return crypto.createHash("sha256").update(parts.join("||")).digest("hex");
+}
+
+function resolvePositiveInt(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
 }

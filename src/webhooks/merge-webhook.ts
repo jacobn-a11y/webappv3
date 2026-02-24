@@ -24,12 +24,19 @@ import {
 import logger from "../lib/logger.js";
 import { metrics } from "../lib/metrics.js";
 import { Sentry } from "../lib/sentry.js";
+import { enqueueProcessCallJob } from "../lib/queue-policy.js";
+import { markWebhookEventIfNew } from "../lib/webhook-idempotency.js";
+import {
+  pickFirstHeaderValue,
+  validateWebhookTimestamp,
+} from "../lib/webhook-security.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface MergeWebhookPayload {
   hook: {
     event: string;
+    timestamp?: string;
   };
   linked_account: {
     id: string;
@@ -163,6 +170,22 @@ export function createMergeWebhookHandler(deps: {
     }
 
     const eventType = payload.hook.event;
+    const timestampCandidate =
+      payload.hook.timestamp ??
+      pickFirstHeaderValue(req.headers, [
+        "x-merge-webhook-timestamp",
+        "x-webhook-timestamp",
+        "x-request-timestamp",
+      ]);
+    const timestampValidation = validateWebhookTimestamp({
+      provider: "merge",
+      timestamp: timestampCandidate,
+      required: false,
+    });
+    if (!timestampValidation.ok) {
+      res.status(401).json({ error: "stale_webhook" });
+      return;
+    }
 
     // ── Resolve org from linked-account ownership (tenant isolation) ──
     const linkedAccount = await prisma.linkedAccount.findUnique({
@@ -186,6 +209,23 @@ export function createMergeWebhookHandler(deps: {
         resolvedOrganizationId: orgId,
       });
       res.status(401).json({ error: "Invalid webhook payload" });
+      return;
+    }
+
+    const dataRecord = payload.data as Record<string, unknown>;
+    const dataId =
+      typeof dataRecord.id === "string"
+        ? dataRecord.id
+        : typeof dataRecord.remote_id === "string"
+          ? dataRecord.remote_id
+          : payload.linked_account.id;
+    const dedupeKey = `merge:${orgId}:${eventType}:${dataId}`;
+    if (!markWebhookEventIfNew(dedupeKey)) {
+      res.json({
+        received: true,
+        processed: true,
+        duplicate_ignored: true,
+      });
       return;
     }
 
@@ -331,20 +371,17 @@ async function handleRecordingEvent(
   }
 
   // ── Queue async processing (chunking → tagging → embedding) ────────
-  await processingQueue.add(
-    "process-call",
-    {
+  await enqueueProcessCallJob({
+    queue: processingQueue,
+    source: "merge-webhook",
+    payload: {
       callId: call.id,
       organizationId,
       accountId: resolution.accountId || null,
       hasTranscript: !!recording.transcript,
     },
-    {
-      jobId: `process-call:${call.id}`,
-      attempts: 3,
-      backoff: { type: "exponential", delay: 5000 },
-    }
-  );
+    options: { jobId: `process-call:${call.id}` },
+  });
 
   metrics.incrementCallsIngested();
   logger.info("Call ingested and queued for processing", {

@@ -113,7 +113,8 @@ export class GrainProvider implements CallRecordingProvider {
   async fetchCalls(
     credentials: ProviderCredentials,
     cursor: string | null,
-    since: Date | null
+    since: Date | null,
+    _options?: { settings?: Record<string, unknown> | null }
   ): Promise<SyncResult<NormalizedCall>> {
     const creds = asGrainCredentials(credentials);
     const base = this.baseUrl(creds);

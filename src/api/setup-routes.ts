@@ -19,10 +19,14 @@
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import type { PrismaClient, UserRole, CallProvider, CRMProvider, Plan } from "@prisma/client";
+import { Prisma, type PrismaClient, type UserRole, type CallProvider, type CRMProvider, type Plan } from "@prisma/client";
 import Stripe from "stripe";
 import { SetupWizardService } from "../services/setup-wizard.js";
 import { RoleProfileService } from "../services/role-profiles.js";
+import type { AIConfigService } from "../services/ai-config.js";
+import type { SyncEngine } from "../integrations/sync-engine.js";
+import { GongProvider } from "../integrations/gong-provider.js";
+import type { ProviderCredentials } from "../integrations/types.js";
 import { isBillingEnabled } from "../middleware/billing.js";
 import { getStripePriceId } from "../config/stripe-plans.js";
 import { buildPublicAppUrl } from "../lib/public-app-url.js";
@@ -88,6 +92,22 @@ const SkipStepSchema = z.object({
   ]),
 });
 
+const MvpQuickstartSaveSchema = z.object({
+  gong_api_key: z.string().min(1, "Gong API key is required"),
+  openai_api_key: z.string().min(1, "OpenAI API key is required"),
+  gong_base_url: z.string().url().optional(),
+});
+
+const MvpIndexAccountsSchema = z.object({
+  refresh: z.boolean().optional(),
+  max_scan_calls: z.number().int().min(0).max(200_000).optional(),
+});
+
+const MvpSelectAccountsSchema = z.object({
+  account_names: z.array(z.string().min(1)).max(500),
+  trigger_ingest: z.boolean().optional(),
+});
+
 // ─── Auth Request Type ───────────────────────────────────────────────────────
 
 interface AuthReq extends Request {
@@ -96,15 +116,99 @@ interface AuthReq extends Request {
   userRole?: UserRole;
 }
 
+interface SetupRouteDeps {
+  aiConfigService?: AIConfigService;
+  syncEngine?: SyncEngine;
+}
+
+interface ParsedGongKeyBundle {
+  accessKey: string;
+  accessKeySecret: string;
+}
+
+function parseGongKeyBundle(input: string): ParsedGongKeyBundle | null {
+  const value = String(input ?? "").trim();
+  if (!value) return null;
+
+  const parsePair = (raw: string): ParsedGongKeyBundle | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const separator = trimmed.includes(":") ? ":" : trimmed.includes("|") ? "|" : null;
+    if (!separator) return null;
+    const idx = trimmed.indexOf(separator);
+    const accessKey = trimmed.slice(0, idx).trim();
+    const accessKeySecret = trimmed.slice(idx + 1).trim();
+    if (!accessKey || !accessKeySecret) return null;
+    return { accessKey, accessKeySecret };
+  };
+
+  if (value.toLowerCase().startsWith("basic ")) {
+    const payload = value.slice(6).trim();
+    try {
+      const decoded = Buffer.from(payload, "base64").toString("utf8");
+      const parsed = parsePair(decoded);
+      if (parsed) return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  if (value.startsWith("{") && value.endsWith("}")) {
+    try {
+      const parsedJson = JSON.parse(value) as {
+        accessKey?: string;
+        access_key?: string;
+        key?: string;
+        accessKeySecret?: string;
+        access_key_secret?: string;
+        secret?: string;
+      };
+      const accessKey =
+        parsedJson.accessKey ?? parsedJson.access_key ?? parsedJson.key ?? "";
+      const accessKeySecret =
+        parsedJson.accessKeySecret ??
+        parsedJson.access_key_secret ??
+        parsedJson.secret ??
+        "";
+      if (String(accessKey).trim() && String(accessKeySecret).trim()) {
+        return {
+          accessKey: String(accessKey).trim(),
+          accessKeySecret: String(accessKeySecret).trim(),
+        };
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return parsePair(value);
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ...(value as Record<string, unknown>) };
+  }
+  return {};
+}
+
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
 export function createSetupRoutes(
   prisma: PrismaClient,
-  stripe: Stripe
+  stripe: Stripe,
+  deps: SetupRouteDeps = {}
 ): Router {
   const router = Router();
   const wizardService = new SetupWizardService(prisma);
   const roleProfiles = new RoleProfileService(prisma);
+  const gongProvider = new GongProvider();
+  const requireSetupAdmin = (req: AuthReq, res: Response): boolean => {
+    if (!req.userRole || (req.userRole !== "OWNER" && req.userRole !== "ADMIN")) {
+      res.status(403).json({ error: "Admin access required" });
+      return false;
+    }
+    return true;
+  };
 
   // ── GET /api/setup/status ─────────────────────────────────────────
 
@@ -126,6 +230,388 @@ export function createSetupRoutes(
       res.status(500).json({ error: "Failed to load setup status" });
     }
   });
+
+  const buildMvpQuickstartStatus = async (organizationId: string) => {
+    const [gongIntegration, openaiConfig] = await Promise.all([
+      prisma.integrationConfig.findUnique({
+        where: {
+          organizationId_provider: {
+            organizationId,
+            provider: "GONG",
+          },
+        },
+      }),
+      prisma.aIProviderConfig.findUnique({
+        where: {
+          organizationId_provider: {
+            organizationId,
+            provider: "OPENAI",
+          },
+        },
+      }),
+    ]);
+
+    const settings = asObject(gongIntegration?.settings);
+    const accountIndex = asObject(settings.gong_account_index);
+    const indexedAccounts = Array.isArray(accountIndex.accounts)
+      ? accountIndex.accounts
+          .map((row) => {
+            if (!row || typeof row !== "object") return null;
+            const r = row as Record<string, unknown>;
+            const name = String(r.name ?? "").trim();
+            const count = Number(r.count ?? 0);
+            if (!name) return null;
+            return {
+              name,
+              count: Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0,
+            };
+          })
+          .filter((row): row is { name: string; count: number } => Boolean(row))
+      : [];
+
+    const selectedAccounts = Array.isArray(settings.gong_selected_accounts)
+      ? settings.gong_selected_accounts
+          .map((value) => String(value ?? "").trim())
+          .filter(Boolean)
+      : [];
+
+    const credentials = asObject(gongIntegration?.credentials);
+    const hasGongCreds = Boolean(
+      String(credentials.accessKey ?? "").trim() &&
+        String(credentials.accessKeySecret ?? "").trim()
+    );
+
+    return {
+      gong_configured: hasGongCreds && Boolean(gongIntegration?.enabled),
+      gong_base_url:
+        String(credentials.baseUrl ?? "").trim() || "https://api.gong.io",
+      gong_status: gongIntegration?.status ?? "PENDING_SETUP",
+      gong_last_sync_at: gongIntegration?.lastSyncAt?.toISOString() ?? null,
+      gong_last_error: gongIntegration?.lastError ?? null,
+      openai_configured: Boolean(openaiConfig?.isActive),
+      selected_account_names: selectedAccounts,
+      account_index: {
+        generated_at:
+          typeof accountIndex.generatedAt === "string"
+            ? accountIndex.generatedAt
+            : null,
+        total_calls_indexed:
+          Number(accountIndex.totalCallsIndexed ?? 0) || 0,
+        total_accounts: indexedAccounts.length,
+        accounts: indexedAccounts,
+      },
+    };
+  };
+
+  // ── MVP Quickstart: Gong + OpenAI ─────────────────────────────────────
+
+  router.get("/mvp/quickstart", async (req: AuthReq, res: Response) => {
+    if (!req.organizationId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    if (!requireSetupAdmin(req, res)) return;
+
+    try {
+      const status = await buildMvpQuickstartStatus(req.organizationId);
+      res.json(status);
+    } catch (err) {
+      console.error("MVP quickstart status error:", err);
+      res.status(500).json({ error: "Failed to load MVP quickstart status" });
+    }
+  });
+
+  router.post("/mvp/quickstart", async (req: AuthReq, res: Response) => {
+    if (!req.organizationId) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    if (!requireSetupAdmin(req, res)) return;
+    if (!deps.aiConfigService) {
+      res.status(500).json({ error: "AI config service unavailable" });
+      return;
+    }
+
+    const parse = MvpQuickstartSaveSchema.safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({ error: "validation_error", details: parse.error.issues });
+      return;
+    }
+
+    const gongBundle = parseGongKeyBundle(parse.data.gong_api_key);
+    if (!gongBundle) {
+      res.status(400).json({
+        error:
+          "Invalid Gong API key format. Use `accessKey:accessKeySecret` or `Basic <base64(accessKey:accessKeySecret)>`.",
+      });
+      return;
+    }
+
+    try {
+      const valid = await gongProvider.validateCredentials({
+        accessKey: gongBundle.accessKey,
+        accessKeySecret: gongBundle.accessKeySecret,
+        baseUrl: parse.data.gong_base_url?.trim() || "https://api.gong.io",
+      });
+
+      if (!valid) {
+        res.status(400).json({
+          error: "Gong credentials validation failed. Check your Gong API key.",
+        });
+        return;
+      }
+
+      const existing = await prisma.integrationConfig.findUnique({
+        where: {
+          organizationId_provider: {
+            organizationId: req.organizationId,
+            provider: "GONG",
+          },
+        },
+      });
+
+      const preservedSettings = asObject(existing?.settings);
+
+      await prisma.integrationConfig.upsert({
+        where: {
+          organizationId_provider: {
+            organizationId: req.organizationId,
+            provider: "GONG",
+          },
+        },
+        create: {
+          organizationId: req.organizationId,
+          provider: "GONG",
+          enabled: true,
+          status: "ACTIVE",
+          credentials: {
+            accessKey: gongBundle.accessKey,
+            accessKeySecret: gongBundle.accessKeySecret,
+            baseUrl: parse.data.gong_base_url?.trim() || "https://api.gong.io",
+          },
+          settings: preservedSettings as Prisma.InputJsonValue,
+          lastError: null,
+        },
+        update: {
+          enabled: true,
+          status: "ACTIVE",
+          credentials: {
+            accessKey: gongBundle.accessKey,
+            accessKeySecret: gongBundle.accessKeySecret,
+            baseUrl: parse.data.gong_base_url?.trim() || "https://api.gong.io",
+          },
+          settings: preservedSettings as Prisma.InputJsonValue,
+          lastError: null,
+        },
+      });
+
+      await deps.aiConfigService.upsertOrgConfig(req.organizationId, {
+        provider: "openai",
+        apiKey: parse.data.openai_api_key,
+        displayName: "OpenAI",
+        defaultModel: "gpt-4o",
+        isDefault: true,
+      });
+
+      await prisma.orgAISettings.upsert({
+        where: { organizationId: req.organizationId },
+        create: {
+          organizationId: req.organizationId,
+          defaultProvider: "openai",
+          defaultModel: "gpt-4o",
+        },
+        update: {
+          defaultProvider: "openai",
+          defaultModel: "gpt-4o",
+        },
+      });
+
+      const status = await buildMvpQuickstartStatus(req.organizationId);
+      res.json({ saved: true, status });
+    } catch (err) {
+      console.error("MVP quickstart save error:", err);
+      res.status(500).json({ error: "Failed to save MVP quickstart keys" });
+    }
+  });
+
+  router.post(
+    "/mvp/quickstart/gong/accounts/index",
+    async (req: AuthReq, res: Response) => {
+      if (!req.organizationId) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+      if (!requireSetupAdmin(req, res)) return;
+
+      const parse = MvpIndexAccountsSchema.safeParse(req.body ?? {});
+      if (!parse.success) {
+        res.status(400).json({
+          error: "validation_error",
+          details: parse.error.issues,
+        });
+        return;
+      }
+
+      try {
+        const config = await prisma.integrationConfig.findUnique({
+          where: {
+            organizationId_provider: {
+              organizationId: req.organizationId,
+              provider: "GONG",
+            },
+          },
+        });
+        if (!config) {
+          res.status(404).json({
+            error: "Gong is not configured yet. Save your Gong key first.",
+          });
+          return;
+        }
+
+        const settings = asObject(config.settings);
+        const existingIndex = asObject(settings.gong_account_index);
+        const cachedAccounts = Array.isArray(existingIndex.accounts)
+          ? existingIndex.accounts
+          : [];
+        const hasCachedIndex =
+          cachedAccounts.length > 0 &&
+          typeof existingIndex.generatedAt === "string";
+
+        if (!parse.data.refresh && hasCachedIndex) {
+          res.json({
+            generated_at: existingIndex.generatedAt,
+            total_calls_indexed: Number(existingIndex.totalCallsIndexed ?? 0) || 0,
+            accounts: cachedAccounts,
+            total_accounts: cachedAccounts.length,
+            cached: true,
+          });
+          return;
+        }
+
+        const credentials = asObject(config.credentials);
+        const indexResult = await gongProvider.fetchAccountIndex(
+          credentials as unknown as ProviderCredentials,
+          {
+            maxScanCalls: parse.data.max_scan_calls ?? 0,
+            since: null,
+          }
+        );
+
+        const nextSettings = {
+          ...settings,
+          gong_account_index: {
+            generatedAt: indexResult.generatedAt,
+            totalCallsIndexed: indexResult.totalCallsIndexed,
+            accounts: indexResult.accounts,
+          },
+        };
+
+        await prisma.integrationConfig.update({
+          where: { id: config.id },
+          data: { settings: nextSettings as Prisma.InputJsonValue },
+        });
+
+        res.json({
+          generated_at: indexResult.generatedAt,
+          total_calls_indexed: indexResult.totalCallsIndexed,
+          accounts: indexResult.accounts,
+          total_accounts: indexResult.totalAccounts,
+          cached: false,
+        });
+      } catch (err) {
+        console.error("MVP Gong account index error:", err);
+        res.status(500).json({ error: "Failed to index Gong accounts" });
+      }
+    }
+  );
+
+  router.post(
+    "/mvp/quickstart/gong/accounts/selection",
+    async (req: AuthReq, res: Response) => {
+      if (!req.organizationId) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+      if (!requireSetupAdmin(req, res)) return;
+
+      const parse = MvpSelectAccountsSchema.safeParse(req.body);
+      if (!parse.success) {
+        res.status(400).json({
+          error: "validation_error",
+          details: parse.error.issues,
+        });
+        return;
+      }
+
+      try {
+        const config = await prisma.integrationConfig.findUnique({
+          where: {
+            organizationId_provider: {
+              organizationId: req.organizationId,
+              provider: "GONG",
+            },
+          },
+        });
+        if (!config) {
+          res.status(404).json({
+            error: "Gong is not configured yet. Save your Gong key first.",
+          });
+          return;
+        }
+
+        const selected = Array.from(
+          new Set(
+            parse.data.account_names
+              .map((name) => String(name ?? "").trim())
+              .filter(Boolean)
+          )
+        ).sort((a, b) => a.localeCompare(b));
+
+        const settings = asObject(config.settings);
+        const nextSettings = {
+          ...settings,
+          gong_selected_accounts: selected,
+        };
+
+        const updatedConfig = await prisma.integrationConfig.update({
+          where: { id: config.id },
+          data: {
+            settings: nextSettings as Prisma.InputJsonValue,
+            status: "ACTIVE",
+            enabled: true,
+            lastError: null,
+          },
+        });
+
+        const shouldTriggerIngest = parse.data.trigger_ingest ?? true;
+        let idempotencyKey: string | null = null;
+
+        if (shouldTriggerIngest && deps.syncEngine) {
+          idempotencyKey = `mvp-quickstart:${updatedConfig.id}:${Date.now()}`;
+          deps.syncEngine
+            .syncIntegration(updatedConfig, {
+              runType: "BACKFILL",
+              idempotencyKey,
+              sinceOverride: new Date("2000-01-01T00:00:00.000Z"),
+              cursorOverride: null,
+            })
+            .catch((err) => {
+              console.error("MVP quickstart ingest failed:", err);
+            });
+        }
+
+        res.json({
+          saved: true,
+          selected_account_names: selected,
+          ingest_started: Boolean(shouldTriggerIngest && deps.syncEngine),
+          idempotency_key: idempotencyKey,
+        });
+      } catch (err) {
+        console.error("MVP Gong account selection error:", err);
+        res.status(500).json({ error: "Failed to save Gong account selection" });
+      }
+    }
+  );
 
   // ── Step 1: Recording Provider ────────────────────────────────────
 

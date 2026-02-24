@@ -19,6 +19,7 @@
 import { Prisma, type PrismaClient, type IntegrationConfig } from "@prisma/client";
 import type { Queue } from "bullmq";
 import type { ProcessCallJob } from "../services/transcript-processor.js";
+import { enqueueProcessCallJob } from "../lib/queue-policy.js";
 import {
   EntityResolver,
   normalizeCompanyName,
@@ -331,7 +332,15 @@ export class SyncEngine {
           provider.fetchCalls(
             credentials,
             cursor,
-            options?.sinceOverride ?? config.lastSyncAt
+            options?.sinceOverride ?? config.lastSyncAt,
+            {
+              settings:
+                config.settings &&
+                typeof config.settings === "object" &&
+                !Array.isArray(config.settings)
+                  ? (config.settings as Record<string, unknown>)
+                  : null,
+            }
           ),
         { attempts: 4, baseDelayMs: 1000 }
       );
@@ -437,8 +446,22 @@ export class SyncEngine {
     const resolution = await resolver.resolveAndLinkContacts(
       organizationId,
       call.id,
-      participantInputs
+      participantInputs,
+      normalizedCall.title ?? undefined
     );
+
+    if (
+      !resolution.accountId &&
+      normalizedCall.accountHints &&
+      normalizedCall.accountHints.length > 0
+    ) {
+      await this.linkCallByProviderAccountHints({
+        organizationId,
+        callId: call.id,
+        participants: normalizedCall.participants,
+        accountHints: normalizedCall.accountHints,
+      });
+    }
 
     // Store transcript
     let hasTranscript = false;
@@ -458,13 +481,116 @@ export class SyncEngine {
       const job: ProcessCallJob = {
         callId: call.id,
         organizationId,
-        accountId: resolution.accountId || null,
+        accountId:
+          (await this.prisma.call.findUnique({
+            where: { id: call.id },
+            select: { accountId: true },
+          }))?.accountId ?? null,
         hasTranscript: true,
       };
 
-      await this.processingQueue.add("process-call", job, {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 5000 },
+      await enqueueProcessCallJob({
+        queue: this.processingQueue,
+        payload: job,
+        source: "integration-sync",
+      });
+    }
+  }
+
+  private async linkCallByProviderAccountHints(input: {
+    organizationId: string;
+    callId: string;
+    participants: NormalizedCall["participants"];
+    accountHints: string[];
+  }): Promise<void> {
+    const normalizedHints = input.accountHints
+      .map((hint) => {
+        const name = String(hint ?? "").trim();
+        return {
+          name,
+          normalized: normalizeCompanyName(name),
+        };
+      })
+      .filter((hint) => hint.name.length > 1 && hint.normalized.length > 1);
+
+    if (normalizedHints.length === 0) return;
+
+    const participantDomains = input.participants
+      .map((p) => (p.email ? extractEmailDomain(p.email) : null))
+      .filter((domain): domain is string => Boolean(domain));
+
+    let account = null as { id: string; name: string } | null;
+
+    for (const hint of normalizedHints) {
+      account = await this.prisma.account.findFirst({
+        where: {
+          organizationId: input.organizationId,
+          OR: [
+            { normalizedName: hint.normalized },
+            { name: { equals: hint.name, mode: "insensitive" } },
+          ],
+        },
+        select: { id: true, name: true },
+      });
+      if (account) break;
+    }
+
+    if (!account && participantDomains.length > 0) {
+      account = await this.prisma.account.findFirst({
+        where: {
+          organizationId: input.organizationId,
+          domain: { in: participantDomains },
+        },
+        select: { id: true, name: true },
+      });
+    }
+
+    if (!account) {
+      const best = normalizedHints[0];
+      if (!best) return;
+      const domain = participantDomains[0] ?? null;
+      account = await this.prisma.account.create({
+        data: {
+          organizationId: input.organizationId,
+          name: best.name,
+          normalizedName: best.normalized,
+          domain,
+        },
+        select: { id: true, name: true },
+      });
+    }
+
+    await this.prisma.call.update({
+      where: { id: input.callId },
+      data: {
+        accountId: account.id,
+        matchMethod: "FUZZY_NAME",
+        matchConfidence: 0.7,
+      },
+    });
+
+    for (const participant of input.participants) {
+      if (!participant.email) continue;
+      const domain = extractEmailDomain(participant.email);
+      if (!domain) continue;
+      await this.prisma.contact.upsert({
+        where: {
+          accountId_email: {
+            accountId: account.id,
+            email: participant.email.toLowerCase(),
+          },
+        },
+        create: {
+          accountId: account.id,
+          email: participant.email.toLowerCase(),
+          emailDomain: domain,
+          name: participant.name ?? null,
+          title: participant.title ?? null,
+        },
+        update: {
+          name: participant.name ?? undefined,
+          title: participant.title ?? undefined,
+        },
       });
     }
   }

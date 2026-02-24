@@ -27,6 +27,14 @@ interface TaggingRecord {
   confidence: number;
 }
 
+interface ProcessCallEnqueueFailureRecord {
+  timestamp: string;
+  source: string;
+  callId: string;
+  attempts: number;
+  error: string;
+}
+
 // ─── Metrics Store ──────────────────────────────────────────────────────────
 
 class MetricsCollector {
@@ -42,6 +50,14 @@ class MetricsCollector {
 
   // Tagging confidence tracking
   private _taggingRecords: TaggingRecord[] = [];
+
+  // Process-call enqueue reliability
+  private _processCallEnqueueRetryCount = 0;
+  private _processCallEnqueueRecoveredCount = 0;
+  private _processCallEnqueueFailureCount = 0;
+  private _processCallEnqueueFailuresBySource = new Map<string, number>();
+  private _processCallEnqueueRecentFailures: ProcessCallEnqueueFailureRecord[] =
+    [];
 
   // Startup time for uptime calculation
   private _startedAt = Date.now();
@@ -86,6 +102,53 @@ class MetricsCollector {
     }
   }
 
+  recordProcessCallEnqueueRetry(): void {
+    this._processCallEnqueueRetryCount += 1;
+  }
+
+  recordProcessCallEnqueueRecovered(): void {
+    this._processCallEnqueueRecoveredCount += 1;
+  }
+
+  recordProcessCallEnqueueFailure(input: {
+    source: string;
+    callId: string;
+    attempts: number;
+    error: string;
+  }): void {
+    this._processCallEnqueueFailureCount += 1;
+    const source = input.source.trim() || "unknown";
+    const current = this._processCallEnqueueFailuresBySource.get(source) ?? 0;
+    this._processCallEnqueueFailuresBySource.set(source, current + 1);
+    this._processCallEnqueueRecentFailures.push({
+      timestamp: new Date().toISOString(),
+      source,
+      callId: input.callId,
+      attempts: input.attempts,
+      error: input.error,
+    });
+    if (this._processCallEnqueueRecentFailures.length > 100) {
+      this._processCallEnqueueRecentFailures =
+        this._processCallEnqueueRecentFailures.slice(-50);
+    }
+  }
+
+  resetForTesting(): void {
+    this._callsIngested = 0;
+    this._transcriptsProcessed = 0;
+    this._storiesGenerated = 0;
+    this._landingPagesPublished = 0;
+    this._ragQueriesServed = 0;
+    this._entityResolutions = [];
+    this._taggingRecords = [];
+    this._processCallEnqueueRetryCount = 0;
+    this._processCallEnqueueRecoveredCount = 0;
+    this._processCallEnqueueFailureCount = 0;
+    this._processCallEnqueueFailuresBySource = new Map<string, number>();
+    this._processCallEnqueueRecentFailures = [];
+    this._startedAt = Date.now();
+  }
+
   // ── Snapshot ────────────────────────────────────────────────────────────
 
   getSnapshot(): MetricsSnapshot {
@@ -100,6 +163,7 @@ class MetricsCollector {
       },
       entity_resolution: this.computeEntityResolutionRates(),
       tagging_confidence: this.computeTaggingConfidence(),
+      queue_observability: this.computeQueueObservability(),
     };
   }
 
@@ -182,6 +246,24 @@ class MetricsCollector {
 
     return result;
   }
+
+  private computeQueueObservability(): QueueObservability {
+    const failuresBySource = Object.fromEntries(
+      Array.from(this._processCallEnqueueFailuresBySource.entries()).sort(
+        ([a], [b]) => a.localeCompare(b)
+      )
+    );
+
+    return {
+      process_call_enqueue: {
+        retries: this._processCallEnqueueRetryCount,
+        recovered_after_retry: this._processCallEnqueueRecoveredCount,
+        failures: this._processCallEnqueueFailureCount,
+        failures_by_source: failuresBySource,
+        recent_failures: this._processCallEnqueueRecentFailures,
+      },
+    };
+  }
 }
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -197,6 +279,7 @@ export interface MetricsSnapshot {
   };
   entity_resolution: EntityResolutionRates;
   tagging_confidence: TaggingConfidenceByStage;
+  queue_observability: QueueObservability;
 }
 
 interface EntityResolutionRates {
@@ -218,6 +301,16 @@ interface TaggingConfidenceByStage {
     string,
     { count: number; average_confidence: number }
   >;
+}
+
+interface QueueObservability {
+  process_call_enqueue: {
+    retries: number;
+    recovered_after_retry: number;
+    failures: number;
+    failures_by_source: Record<string, number>;
+    recent_failures: ProcessCallEnqueueFailureRecord[];
+  };
 }
 
 // ─── Singleton ──────────────────────────────────────────────────────────────

@@ -305,6 +305,74 @@ describe.runIf(dbAvailable)("POST /api/pages/:pageId/publish — scrubbing", () 
   });
 });
 
+describe.runIf(dbAvailable)(
+  "POST /api/pages/:pageId/publish — validation guardrails",
+  () => {
+    it("blocks publish when editable body is empty/too short", async () => {
+      const app = buildApp(adminAuth());
+
+      await withRequestServer(app, async (req) => {
+        const createRes = await req
+          .post("/api/pages")
+          .send({ story_id: seed.story.id, title: "Validation Test Page" })
+          .expect(201);
+
+        await req
+          .patch(`/api/pages/${createRes.body.id}`)
+          .send({ editable_body: "  " })
+          .expect(200);
+
+        const publishRes = await req
+          .post(`/api/pages/${createRes.body.id}/publish`)
+          .send({ visibility: "SHARED_WITH_LINK" })
+          .expect(400);
+
+        expect(publishRes.body.error).toBe("publish_validation_failed");
+        expect(publishRes.body.issues).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ field: "editable_body" }),
+          ])
+        );
+      });
+    });
+
+    it("blocks publish when a callout is missing required content", async () => {
+      const app = buildApp(adminAuth());
+
+      await withRequestServer(app, async (req) => {
+        const createRes = await req
+          .post("/api/pages")
+          .send({ story_id: seed.story.id, title: "Callout Validation Test" })
+          .expect(201);
+
+        await req
+          .patch(`/api/pages/${createRes.body.id}`)
+          .send({
+            callout_boxes: [
+              {
+                title: "",
+                body: "Some body text",
+              },
+            ],
+          })
+          .expect(200);
+
+        const publishRes = await req
+          .post(`/api/pages/${createRes.body.id}/publish`)
+          .send({ visibility: "SHARED_WITH_LINK" })
+          .expect(400);
+
+        expect(publishRes.body.error).toBe("publish_validation_failed");
+        expect(publishRes.body.issues).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ field: "callout_boxes.0.title" }),
+          ])
+        );
+      });
+    });
+  }
+);
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // 4. PUBLIC ROUTE — HTML, NOINDEX, AI BADGE
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -16,6 +16,7 @@
 import type { PrismaClient } from "@prisma/client";
 import type { Queue } from "bullmq";
 import type { ProcessCallJob } from "./transcript-processor.js";
+import { enqueueProcessCallJob } from "../lib/queue-policy.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -238,9 +239,10 @@ export class TranscriptFetcher {
       hasTranscript: true,
     };
 
-    await this.processingQueue.add("process-call", processingJob, {
-      attempts: 3,
-      backoff: { type: "exponential", delay: 5000 },
+    await enqueueProcessCallJob({
+      queue: this.processingQueue,
+      payload: processingJob,
+      source: "transcript-fetcher",
     });
 
     console.log(

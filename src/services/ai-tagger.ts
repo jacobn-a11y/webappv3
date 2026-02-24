@@ -14,6 +14,7 @@
 
 import OpenAI from "openai";
 import type { PrismaClient } from "@prisma/client";
+import type { AIClient } from "./ai-client.js";
 import {
   FunnelStage,
   ALL_TOPICS,
@@ -37,6 +38,11 @@ export interface ChunkTaggingResult {
   chunkId: string;
   tags: TagResult[];
   cached: boolean;
+}
+
+interface TagCallOptions {
+  aiClient?: AIClient;
+  idempotencyKeyPrefix?: string;
 }
 
 export interface AITaggerOptions {
@@ -165,7 +171,10 @@ export class AITagger {
    * Checks the local cache first; on miss, calls the LLM with rate limiting.
    * Applies confidence calibration if a calibrator is present.
    */
-  async tagChunk(chunkText: string): Promise<{ tags: TagResult[]; cached: boolean }> {
+  async tagChunk(
+    chunkText: string,
+    options?: { aiClient?: AIClient; idempotencyKey?: string }
+  ): Promise<{ tags: TagResult[]; cached: boolean }> {
     // ── Cache lookup ───────────────────────────────────────────────
     const cached = this.cache.get(chunkText);
     if (cached) {
@@ -179,31 +188,45 @@ export class AITagger {
 
     await this.rateLimiter.acquire(estimatedTokens);
 
-    const response = await this.openai.chat.completions.create({
-      model: this.model,
-      temperature: 0.1,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: TAGGER_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: `Classify this transcript segment. Return JSON with a "tags" array where each element has "funnel_stage", "topic", and "confidence".
+    const messages = [
+      { role: "system" as const, content: TAGGER_SYSTEM_PROMPT },
+      {
+        role: "user" as const,
+        content: `Classify this transcript segment. Return JSON with a "tags" array where each element has "funnel_stage", "topic", and "confidence".
 
 TRANSCRIPT SEGMENT:
 """
 ${chunkText}
 """`,
-        },
-      ],
-    });
+      },
+    ];
 
-    // Report actual token usage back to the rate limiter
-    const usage = response.usage;
-    if (usage) {
-      this.rateLimiter.reportUsage(usage.total_tokens, estimatedTokens);
+    let content: string | null | undefined = null;
+    if (options?.aiClient) {
+      const completion = await options.aiClient.chatCompletion({
+        messages,
+        temperature: 0.1,
+        jsonMode: true,
+        idempotencyKey: options.idempotencyKey,
+      });
+      this.rateLimiter.reportUsage(completion.totalTokens, estimatedTokens);
+      content = completion.content;
+    } else {
+      const response = await this.openai.chat.completions.create({
+        model: this.model,
+        temperature: 0.1,
+        response_format: { type: "json_object" },
+        messages,
+      });
+
+      // Report actual token usage back to the rate limiter
+      const usage = response.usage;
+      if (usage) {
+        this.rateLimiter.reportUsage(usage.total_tokens, estimatedTokens);
+      }
+      content = response.choices[0]?.message?.content;
     }
 
-    const content = response.choices[0]?.message?.content;
     if (!content) {
       return { tags: [], cached: false };
     }
@@ -228,7 +251,10 @@ ${chunkText}
    * Tags all chunks for an entire call transcript with concurrency-limited
    * batch processing. Persists tags to the database.
    */
-  async tagCallTranscript(callId: string): Promise<ChunkTaggingResult[]> {
+  async tagCallTranscript(
+    callId: string,
+    options?: TagCallOptions
+  ): Promise<ChunkTaggingResult[]> {
     const transcript = await this.prisma.transcript.findUnique({
       where: { callId },
       include: { chunks: { orderBy: { chunkIndex: "asc" } } },
@@ -240,7 +266,11 @@ ${chunkText}
 
     // Process chunks in concurrency-limited batches
     const results = await this.processChunksWithConcurrency(
-      transcript.chunks.map((c: { id: string; text: string }) => ({ id: c.id, text: c.text }))
+      transcript.chunks.map((c: { id: string; text: string }) => ({
+        id: c.id,
+        text: c.text,
+      })),
+      options
     );
 
     // Persist chunk-level tags (concurrent DB writes are fine)
@@ -374,7 +404,8 @@ ${chunkText}
    * Each chunk goes through cache check → rate limiter → LLM call.
    */
   private async processChunksWithConcurrency(
-    chunks: Array<{ id: string; text: string }>
+    chunks: Array<{ id: string; text: string }>,
+    options?: TagCallOptions
   ): Promise<ChunkTaggingResult[]> {
     const results: ChunkTaggingResult[] = new Array(chunks.length);
 
@@ -385,7 +416,13 @@ ${chunkText}
       while (nextIndex < chunks.length) {
         const idx = nextIndex++;
         const chunk = chunks[idx];
-        const { tags, cached } = await this.tagChunk(chunk.text);
+        const idempotencyKey = options?.idempotencyKeyPrefix
+          ? `${options.idempotencyKeyPrefix}:${chunk.id}`
+          : undefined;
+        const { tags, cached } = await this.tagChunk(chunk.text, {
+          aiClient: options?.aiClient,
+          idempotencyKey,
+        });
         results[idx] = { chunkId: chunk.id, tags, cached };
       }
     };

@@ -8,7 +8,11 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient, UserRole } from "@prisma/client";
-import { LandingPageEditor } from "../services/landing-page-editor.js";
+import {
+  LandingPageEditor,
+  PublishValidationError,
+  ScrubValidationError,
+} from "../services/landing-page-editor.js";
 import { AccountAccessService } from "../services/account-access.js";
 import { RoleProfileService } from "../services/role-profiles.js";
 import { AuditLogService } from "../services/audit-log.js";
@@ -730,6 +734,24 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           url: result.url,
         });
       } catch (err) {
+        if (err instanceof PublishValidationError) {
+          res.status(400).json({
+            error: "publish_validation_failed",
+            message:
+              "Publishing blocked because required content is incomplete. Fix the highlighted fields and retry.",
+            issues: err.issues,
+          });
+          return;
+        }
+        if (err instanceof ScrubValidationError) {
+          res.status(400).json({
+            error: "scrub_validation_failed",
+            message:
+              "Publishing blocked because anonymization is incomplete. Remove or redact leaked identifiers and retry.",
+            leaked_terms: err.leakedTerms,
+          });
+          return;
+        }
         console.error("Publish landing page error:", err);
         res.status(500).json({ error: "Failed to publish landing page" });
       }
@@ -1058,6 +1080,15 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           slug: result.slug,
         });
       } catch (err) {
+        if (err instanceof ScrubValidationError) {
+          res.status(400).json({
+            error: "scrub_validation_failed",
+            message:
+              "Publishing blocked because anonymization is incomplete. Remove or redact leaked identifiers and retry.",
+            leaked_terms: err.leakedTerms,
+          });
+          return;
+        }
         console.error("Review publish approval error:", err);
         res.status(500).json({ error: "Failed to review publish approval" });
       }

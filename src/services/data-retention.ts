@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import logger from "../lib/logger.js";
 import { AuditLogService } from "./audit-log.js";
 import { getDataGovernancePolicy } from "./data-governance.js";
+import type { RAGEngine } from "./rag-engine.js";
 
 const DEFAULT_RETENTION_DAYS = 365;
 const MIN_RETENTION_DAYS = 30;
@@ -24,10 +25,12 @@ export interface DataRetentionSweepResult {
   deletedLandingPages: number;
   deletedIntegrationRuns: number;
   deletedAuditLogs: number;
+  prunedVectors: number;
 }
 
 export async function runDataRetentionSweep(
-  prisma: PrismaClient
+  prisma: PrismaClient,
+  ragEngine?: RAGEngine
 ): Promise<DataRetentionSweepResult> {
   const settings = await prisma.orgSettings.findMany({
     select: { organizationId: true },
@@ -42,6 +45,7 @@ export async function runDataRetentionSweep(
     deletedLandingPages: 0,
     deletedIntegrationRuns: 0,
     deletedAuditLogs: 0,
+    prunedVectors: 0,
   };
 
   for (const setting of settings) {
@@ -55,6 +59,13 @@ export async function runDataRetentionSweep(
     const retentionDays = normalizeRetentionDays(policy.retention_days);
     const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
     const organizationId = setting.organizationId;
+    if (ragEngine) {
+      const pruned = await ragEngine.pruneVectors({
+        organizationId,
+        olderThan: cutoff,
+      });
+      result.prunedVectors += pruned;
+    }
 
     const [landingPagesDeleted, storiesDeleted, callsDeleted, runsDeleted] =
       await prisma.$transaction([
@@ -98,12 +109,15 @@ export async function runDataRetentionSweep(
   return result;
 }
 
-export function startDataRetentionCron(prisma: PrismaClient): cron.ScheduledTask {
+export function startDataRetentionCron(
+  prisma: PrismaClient,
+  ragEngine?: RAGEngine
+): cron.ScheduledTask {
   const task = cron.schedule(
     "15 3 * * *",
     async () => {
       try {
-        await runDataRetentionSweep(prisma);
+        await runDataRetentionSweep(prisma, ragEngine);
       } catch (error) {
         logger.error("Data retention cron failed", { error });
       }

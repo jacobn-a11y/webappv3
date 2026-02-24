@@ -23,8 +23,10 @@ import {
 import { startUsageReportingCron } from "./services/usage-reporter.js";
 import { startAuditRetentionCron } from "./services/audit-retention.js";
 import { startDataRetentionCron } from "./services/data-retention.js";
+import { startCallProcessingDeadLetterReplayCron } from "./services/call-processing-dead-letter-replay.js";
 import logger, { jobStore } from "./lib/logger.js";
 import { Sentry } from "./lib/sentry.js";
+import { PROCESS_CALL_JOB_DEFAULT_OPTIONS } from "./lib/queue-policy.js";
 import type { Services } from "./services.js";
 
 export interface Queues {
@@ -42,6 +44,9 @@ export interface Workers {
   usageCron: ReturnType<typeof startUsageReportingCron>;
   auditRetentionCron: ReturnType<typeof startAuditRetentionCron>;
   dataRetentionCron: ReturnType<typeof startDataRetentionCron>;
+  callProcessingDeadLetterReplayCron: ReturnType<
+    typeof startCallProcessingDeadLetterReplayCron
+  >;
 }
 
 /**
@@ -51,10 +56,7 @@ export interface Workers {
 export function createQueues(redisUrl: string): Queues {
   const processingQueue = new Queue("call-processing", {
     connection: { url: redisUrl },
-    defaultJobOptions: {
-      attempts: 3,
-      backoff: { type: "exponential", delay: 5000 },
-    },
+    defaultJobOptions: PROCESS_CALL_JOB_DEFAULT_OPTIONS,
   });
 
   const transcriptFetchQueue = new Queue("transcript-fetching", {
@@ -100,6 +102,7 @@ export function createQueues(redisUrl: string): Queues {
  */
 export function createWorkers(
   redisUrl: string,
+  queues: Queues,
   services: Services,
   prisma: PrismaClient,
   stripe: Stripe
@@ -110,6 +113,7 @@ export function createWorkers(
     syncEngine,
     weeklyStoryRegen,
     notificationService,
+    ragEngine,
   } = services;
 
   // Call processing worker
@@ -230,7 +234,9 @@ export function createWorkers(
   // Usage reporting cron
   const usageCron = startUsageReportingCron(prisma, stripe);
   const auditRetentionCron = startAuditRetentionCron(prisma);
-  const dataRetentionCron = startDataRetentionCron(prisma);
+  const dataRetentionCron = startDataRetentionCron(prisma, ragEngine);
+  const callProcessingDeadLetterReplayCron =
+    startCallProcessingDeadLetterReplayCron(prisma, queues.processingQueue);
 
   return {
     callWorker,
@@ -240,5 +246,6 @@ export function createWorkers(
     usageCron,
     auditRetentionCron,
     dataRetentionCron,
+    callProcessingDeadLetterReplayCron,
   };
 }

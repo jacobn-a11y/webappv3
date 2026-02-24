@@ -66,6 +66,7 @@ import { requestLoggingMiddleware } from "./middleware/request-logging.js";
 import { createApiKeyAuth, requireScope } from "./middleware/api-key-auth.js";
 import { createDevAuthBypass } from "./middleware/dev-auth.js";
 import { createSessionAuth } from "./middleware/session-auth.js";
+import { createCsrfProtection } from "./middleware/csrf-protection.js";
 import {
   createRateLimiter,
   apiRateLimiter,
@@ -130,6 +131,7 @@ export function createApp(deps: AppDeps): express.Application {
         "Content-Type",
         "Authorization",
         "x-session-token",
+        "x-csrf-token",
         "x-mfa-verified",
         "x-support-impersonation-token",
       ],
@@ -213,6 +215,8 @@ export function createApp(deps: AppDeps): express.Application {
 
   // Resolve application session tokens into request auth context.
   app.use(createSessionAuth(prisma));
+  // CSRF defenses for session-authenticated browser writes.
+  app.use(createCsrfProtection());
 
   // Platform owner operations (session context from createSessionAuth).
   app.use("/api/platform", createPlatformRoutes(prisma));
@@ -221,7 +225,13 @@ export function createApp(deps: AppDeps): express.Application {
   app.use("/api/platform", createPlatformAdminRoutes(aiConfigService));
 
   // ─── Setup Wizard (before auth — needed for first-run onboarding) ──────
-  app.use("/api/setup", createSetupRoutes(prisma, stripe));
+  app.use(
+    "/api/setup",
+    createSetupRoutes(prisma, stripe, {
+      aiConfigService,
+      syncEngine,
+    })
+  );
 
   // ─── Authenticated Routes ──────────────────────────────────────────────
   app.use(requireAuth);
@@ -248,7 +258,7 @@ export function createApp(deps: AppDeps): express.Application {
     "/api/stories",
     trialGate,
     apiRateLimiter,
-    createStoryRoutes(storyBuilder, prisma)
+    createStoryRoutes(storyBuilder, prisma, aiConfigService, aiUsageTracker)
   );
 
   // Landing Pages — CRUD, edit, publish, share (behind trial gate)
@@ -347,7 +357,7 @@ export function createApp(deps: AppDeps): express.Application {
       requireRecentAuthIfConfigured: true,
     }),
     requirePermission(prisma, "manage_permissions"),
-    createQueueHealthRoutes(queues)
+    createQueueHealthRoutes({ queues, prisma })
   );
 
   // Admin Settings Pages

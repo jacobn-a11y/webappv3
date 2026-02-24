@@ -18,6 +18,7 @@
 import type { PrismaClient, AIOperation } from "@prisma/client";
 import type { AIClient, ChatCompletionOptions, ChatCompletionResult, AIProviderName } from "./ai-client.js";
 import type { AIConfigService } from "./ai-config.js";
+import logger from "../lib/logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -100,6 +101,17 @@ export class TrackedAIClient implements AIClient {
     // Make the actual AI call
     const result = await this.inner.chatCompletion(options);
 
+    const chargeIdempotencyKey = options.idempotencyKey?.trim()
+      ? `${this.context.organizationId}:${this.context.userId}:${this.context.operation}:${options.idempotencyKey.trim()}`
+      : null;
+    const alreadyCharged = chargeIdempotencyKey
+      ? this.tracker.hasRecordedUsageCharge(chargeIdempotencyKey)
+      : false;
+
+    if (alreadyCharged) {
+      return result;
+    }
+
     // Compute cost (only for platform-billed calls)
     let costCents = 0;
     if (this.isPlatformBilled) {
@@ -134,11 +146,20 @@ export class TrackedAIClient implements AIClient {
       );
     }
 
+    if (chargeIdempotencyKey) {
+      this.tracker.markUsageChargeRecorded(chargeIdempotencyKey);
+    }
+
     // Check notification thresholds (non-blocking)
     this.tracker
       .checkAndNotify(this.context.organizationId, this.context.userId)
       .catch((err) =>
         console.error("Usage notification check failed:", err)
+      );
+    this.tracker
+      .checkSpendAnomalies(this.context.organizationId, this.context.userId)
+      .catch((err) =>
+        console.error("Spend anomaly check failed:", err)
       );
 
     return result;
@@ -150,10 +171,25 @@ export class TrackedAIClient implements AIClient {
 export class AIUsageTracker {
   private prisma: PrismaClient;
   private configService: AIConfigService;
+  private usageChargeDedup = new Map<string, number>();
+  private usageChargeDedupTtlMs = 24 * 60 * 60 * 1000;
 
   constructor(prisma: PrismaClient, configService: AIConfigService) {
     this.prisma = prisma;
     this.configService = configService;
+  }
+
+  hasRecordedUsageCharge(idempotencyKey: string): boolean {
+    this.pruneUsageChargeKeys();
+    return this.usageChargeDedup.has(idempotencyKey);
+  }
+
+  markUsageChargeRecorded(idempotencyKey: string): void {
+    this.pruneUsageChargeKeys();
+    this.usageChargeDedup.set(
+      idempotencyKey,
+      Date.now() + this.usageChargeDedupTtlMs
+    );
   }
 
   /**
@@ -510,6 +546,109 @@ export class AIUsageTracker {
     }
   }
 
+  async checkSpendAnomalies(
+    organizationId: string,
+    userId: string
+  ): Promise<void> {
+    const now = new Date();
+    const startOfToday = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    );
+    const startOfTomorrow = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
+
+    const [todayOrgCostAgg, previousSevenDays, orgSettings, todayPlatformCostAgg] =
+      await Promise.all([
+        this.prisma.aIUsageRecord.aggregate({
+          where: {
+            organizationId,
+            createdAt: { gte: startOfToday, lt: startOfTomorrow },
+          },
+          _sum: { costCents: true },
+        }),
+        this.prisma.aIUsageRecord.findMany({
+          where: {
+            organizationId,
+            createdAt: {
+              gte: new Date(startOfToday.getTime() - 7 * 24 * 60 * 60 * 1000),
+              lt: startOfToday,
+            },
+          },
+          select: { costCents: true, createdAt: true },
+        }),
+        this.prisma.orgSettings.findUnique({
+          where: { organizationId },
+          select: { dataGovernancePolicy: true },
+        }),
+        this.prisma.aIUsageRecord.aggregate({
+          where: {
+            createdAt: { gte: startOfToday, lt: startOfTomorrow },
+          },
+          _sum: { costCents: true },
+        }),
+      ]);
+
+    const todayOrgCost = todayOrgCostAgg._sum.costCents ?? 0;
+    const platformDailyThreshold = Number(
+      process.env.AI_SPEND_ALERT_PLATFORM_DAILY_CENTS ?? "50000"
+    );
+    const normalizedPlatformThreshold = Number.isFinite(platformDailyThreshold)
+      ? Math.max(1_000, Math.floor(platformDailyThreshold))
+      : 50_000;
+
+    const rawPolicy = orgSettings?.dataGovernancePolicy;
+    const policy =
+      rawPolicy && typeof rawPolicy === "object" && !Array.isArray(rawPolicy)
+        ? (rawPolicy as Record<string, unknown>)
+        : {};
+    const orgThresholdRaw = policy.ai_spend_alert_daily_cents;
+    const orgThreshold =
+      typeof orgThresholdRaw === "number" && Number.isFinite(orgThresholdRaw)
+        ? Math.max(500, Math.floor(orgThresholdRaw))
+        : 10_000;
+
+    if (todayOrgCost >= orgThreshold) {
+      await this.createNotificationIfNew(
+        organizationId,
+        userId,
+        "daily_spend_org",
+        100,
+        Math.round(todayOrgCost),
+        orgThreshold
+      );
+    }
+
+    if (previousSevenDays.length > 0) {
+      const costsByDay = new Map<string, number>();
+      for (const row of previousSevenDays) {
+        const dayKey = row.createdAt.toISOString().slice(0, 10);
+        costsByDay.set(dayKey, (costsByDay.get(dayKey) ?? 0) + row.costCents);
+      }
+      const totals = Array.from(costsByDay.values());
+      const avgDaily =
+        totals.length > 0
+          ? totals.reduce((sum, value) => sum + value, 0) / totals.length
+          : 0;
+      if (avgDaily > 0 && todayOrgCost >= avgDaily * 3 && todayOrgCost >= 2_000) {
+        await this.createNotificationIfNew(
+          organizationId,
+          userId,
+          "daily_spend_anomaly",
+          100,
+          Math.round(todayOrgCost),
+          Math.round(avgDaily)
+        );
+      }
+    }
+
+    const todayPlatformCost = todayPlatformCostAgg._sum.costCents ?? 0;
+    if (todayPlatformCost >= normalizedPlatformThreshold) {
+      logger.warn("Platform AI spend threshold exceeded", {
+        todayPlatformCostCents: Math.round(todayPlatformCost),
+        thresholdCents: normalizedPlatformThreshold,
+      });
+    }
+  }
+
   // ─── Notifications ──────────────────────────────────────────────────
 
   async getPendingNotifications(organizationId: string, userId: string) {
@@ -629,7 +768,13 @@ export class AIUsageTracker {
     startOfDay.setHours(0, 0, 0, 0);
 
     const existing = await this.prisma.aIUsageNotification.findFirst({
-      where: { userId, limitType, thresholdPct, createdAt: { gte: startOfDay } },
+      where: {
+        organizationId,
+        userId,
+        limitType,
+        thresholdPct,
+        createdAt: { gte: startOfDay },
+      },
     });
     if (existing) return;
 
@@ -639,6 +784,8 @@ export class AIUsageTracker {
       daily_requests: "daily request",
       monthly_requests: "monthly request",
       monthly_stories: "monthly case study",
+      daily_spend_org: "daily AI spend",
+      daily_spend_anomaly: "daily AI spend anomaly baseline",
     };
 
     const label = labels[limitType] ?? limitType;
@@ -658,6 +805,15 @@ export class AIUsageTracker {
         message,
       },
     });
+  }
+
+  private pruneUsageChargeKeys(): void {
+    const now = Date.now();
+    for (const [key, expiresAt] of this.usageChargeDedup.entries()) {
+      if (expiresAt <= now) {
+        this.usageChargeDedup.delete(key);
+      }
+    }
   }
 }
 

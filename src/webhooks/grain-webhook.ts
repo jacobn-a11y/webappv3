@@ -21,6 +21,12 @@ import type { Queue } from "bullmq";
 import { GrainProvider } from "../integrations/grain-provider.js";
 import type { GrainCredentials } from "../integrations/types.js";
 import logger from "../lib/logger.js";
+import { enqueueProcessCallJob } from "../lib/queue-policy.js";
+import { markWebhookEventIfNew } from "../lib/webhook-idempotency.js";
+import {
+  pickFirstHeaderValue,
+  validateWebhookTimestamp,
+} from "../lib/webhook-security.js";
 
 // ─── Grain Webhook Payload Types ────────────────────────────────────────────
 
@@ -115,6 +121,27 @@ export function createGrainWebhookHandler(deps: {
 
     const credentials = matchedConfig.credentials as unknown as GrainCredentials;
     const organizationId = matchedConfig.organizationId;
+    const timestampCandidate =
+      payload.timestamp ??
+      pickFirstHeaderValue(req.headers, [
+        "x-grain-timestamp",
+        "x-webhook-timestamp",
+        "x-request-timestamp",
+      ]);
+    const timestampValidation = validateWebhookTimestamp({
+      provider: "grain",
+      timestamp: timestampCandidate,
+      required: true,
+    });
+    if (!timestampValidation.ok) {
+      res.status(401).json({
+        error:
+          timestampValidation.reason === "timestamp_missing"
+            ? "missing_webhook_timestamp"
+            : "stale_webhook",
+      });
+      return;
+    }
 
     try {
       if (
@@ -126,6 +153,16 @@ export function createGrainWebhookHandler(deps: {
             received: true,
             processed: false,
             reason: "No recording_id",
+          });
+          return;
+        }
+
+        const eventKey = `grain:${organizationId}:${payload.event}:${payload.recording_id}`;
+        if (!markWebhookEventIfNew(eventKey)) {
+          res.json({
+            received: true,
+            processed: true,
+            duplicate_ignored: true,
           });
           return;
         }
@@ -205,18 +242,15 @@ async function handleRecordingReady(
   }
 
   // Queue for async processing
-  await processingQueue.add(
-    "process-call",
-    {
+  await enqueueProcessCallJob({
+    queue: processingQueue,
+    source: "grain-webhook",
+    payload: {
       callId: call.id,
       organizationId,
       accountId: call.accountId ?? null,
       hasTranscript: !!transcript,
     },
-    {
-      jobId: `process-call:${call.id}`,
-      attempts: 3,
-      backoff: { type: "exponential", delay: 5000 },
-    }
-  );
+    options: { jobId: `process-call:${call.id}` },
+  });
 }

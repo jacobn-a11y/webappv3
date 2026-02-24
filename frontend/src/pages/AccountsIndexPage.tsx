@@ -11,6 +11,7 @@ export function AccountsIndexPage() {
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const resolveAccounts = useCallback(async () => {
     setLoading(true);
@@ -19,7 +20,7 @@ export function AccountsIndexPage() {
       const res = await getAccountsList({
         search: search || undefined,
         page,
-        limit: 25,
+        limit: pageSize,
         sort_by: "lastCallDate",
         sort_order: "desc",
       });
@@ -29,7 +30,7 @@ export function AccountsIndexPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, page]);
+  }, [search, page, pageSize]);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -44,6 +45,9 @@ export function AccountsIndexPage() {
   }, [resolveAccounts]);
 
   const totalCount = accountsData?.pagination.totalCount ?? 0;
+  const pageLimit = accountsData?.pagination.limit ?? pageSize;
+  const rangeStart = totalCount === 0 ? 0 : ((accountsData?.pagination.page ?? page) - 1) * pageLimit + 1;
+  const rangeEnd = totalCount === 0 ? 0 : Math.min(rangeStart + pageLimit - 1, totalCount);
 
   return (
     <div className="page">
@@ -65,8 +69,23 @@ export function AccountsIndexPage() {
           onChange={(e) => setSearchDraft(e.target.value)}
           aria-label="Search accounts"
         />
+        <select
+          className="form-field__input account-list-controls__page-size"
+          value={pageSize}
+          onChange={(event) => {
+            setPageSize(Number(event.target.value));
+            setPage(1);
+          }}
+          aria-label="Accounts per page"
+        >
+          <option value={25}>25 / page</option>
+          <option value={50}>50 / page</option>
+          <option value={100}>100 / page</option>
+        </select>
         <span className="account-list-controls__count" aria-live="polite">
-          {loading ? "Loading..." : `${totalCount} account${totalCount === 1 ? "" : "s"}`}
+          {loading
+            ? "Loading..."
+            : `${rangeStart}-${rangeEnd} of ${totalCount} account${totalCount === 1 ? "" : "s"}`}
         </span>
       </div>
 

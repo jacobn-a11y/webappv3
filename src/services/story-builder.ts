@@ -12,6 +12,7 @@ import OpenAI from "openai";
 import type { PrismaClient, FunnelStage } from "@prisma/client";
 import { TOPIC_LABELS, type TaxonomyTopic } from "../types/taxonomy.js";
 import { TranscriptMerger } from "./transcript-merger.js";
+import type { AIClient } from "./ai-client.js";
 import {
   storyLengthWordTarget,
   storyOutlineGuide,
@@ -59,6 +60,10 @@ export interface StoryBuilderOptions {
     | "DONE") => void;
   /** Optional callback fired as narrative tokens stream from the LLM. */
   onNarrativeToken?: (token: string) => void;
+  /** Optional resilient AI client (provider failover + tracking). */
+  aiClient?: AIClient;
+  /** Optional idempotency base key for usage/cost dedupe. */
+  aiIdempotencyKey?: string;
 }
 
 interface TranscriptSegment {
@@ -195,12 +200,18 @@ export class StoryBuilder {
       segments,
       savedContext,
       effectiveSettings,
-      options.onNarrativeToken
+      options.onNarrativeToken,
+      options.aiClient,
+      options.aiIdempotencyKey
     );
 
     // ── Step 4: Extract high-value quotes ────────────────────────────
     options.onProgress?.("EXTRACTING_QUOTES");
-    const quotes = await this.extractQuotes(segments);
+    const quotes = await this.extractQuotes(
+      segments,
+      options.aiClient,
+      options.aiIdempotencyKey
+    );
 
     // ── Persist the story ────────────────────────────────────────────
     options.onProgress?.("SAVING_STORY");
@@ -364,7 +375,9 @@ export class StoryBuilder {
     segments: TranscriptSegment[],
     context: StoryContextSettings,
     settings: EffectiveStoryGenerationSettings,
-    onNarrativeToken?: (token: string) => void
+    onNarrativeToken?: (token: string) => void,
+    aiClient?: AIClient,
+    aiIdempotencyKey?: string
   ): Promise<string> {
     // Build topic summary from tagged segments for additional context
     const topicSummary = this.buildTopicSummary(segments);
@@ -390,6 +403,24 @@ export class StoryBuilder {
         }),
       },
     ];
+
+    if (aiClient) {
+      const completion = await aiClient.chatCompletion({
+        messages,
+        temperature: 0.3,
+        maxTokens: 4000,
+        idempotencyKey: aiIdempotencyKey
+          ? `${aiIdempotencyKey}:narrative`
+          : undefined,
+      });
+      const content = completion.content || "# Story generation failed";
+      if (onNarrativeToken) {
+        for (let i = 0; i < content.length; i += 80) {
+          onNarrativeToken(content.slice(i, i + 80));
+        }
+      }
+      return content;
+    }
 
     if (onNarrativeToken) {
       const stream = await this.openai.chat.completions.create({
@@ -554,7 +585,9 @@ ${input.mergedMarkdown}`;
   // ─── Step 3: Extract Quotes ───────────────────────────────────────
 
   private async extractQuotes(
-    segments: TranscriptSegment[]
+    segments: TranscriptSegment[],
+    aiClient?: AIClient,
+    aiIdempotencyKey?: string
   ): Promise<ExtractedQuote[]> {
     // Only send segments likely to contain quantified value (BoFu + Post-Sale)
     const valuableSegments = segments.filter((s) =>
@@ -578,20 +611,33 @@ ${input.mergedMarkdown}`;
       })
       .join("\n\n");
 
-    const response = await this.openai.chat.completions.create({
-      model: this.model,
-      temperature: 0.1,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: QUOTE_EXTRACTION_PROMPT },
-        {
-          role: "user",
-          content: `Extract high-value quotes with quantified metrics from these transcript segments:\n\n${transcriptText}`,
-        },
-      ],
-    });
+    const messages = [
+      { role: "system" as const, content: QUOTE_EXTRACTION_PROMPT },
+      {
+        role: "user" as const,
+        content: `Extract high-value quotes with quantified metrics from these transcript segments:\n\n${transcriptText}`,
+      },
+    ];
 
-    const content = response.choices[0]?.message?.content;
+    const content = aiClient
+      ? (
+          await aiClient.chatCompletion({
+            messages,
+            temperature: 0.1,
+            jsonMode: true,
+            idempotencyKey: aiIdempotencyKey
+              ? `${aiIdempotencyKey}:quotes`
+              : undefined,
+          })
+        ).content
+      : (
+          await this.openai.chat.completions.create({
+            model: this.model,
+            temperature: 0.1,
+            response_format: { type: "json_object" },
+            messages,
+          })
+        ).choices[0]?.message?.content;
     if (!content) return [];
 
     try {

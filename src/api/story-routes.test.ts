@@ -32,11 +32,23 @@ function createMockPrisma() {
   };
 }
 
+function createMockAIConfigService() {
+  return {
+    resolveClientWithFailover: vi.fn(),
+  };
+}
+
+function createMockAIUsageTracker() {
+  return {};
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function createApp(
   storyBuilder: ReturnType<typeof createMockStoryBuilder>,
-  prisma: ReturnType<typeof createMockPrisma>
+  prisma: ReturnType<typeof createMockPrisma>,
+  aiConfigService: ReturnType<typeof createMockAIConfigService>,
+  aiUsageTracker: ReturnType<typeof createMockAIUsageTracker>
 ) {
   const app = express();
   app.use(express.json());
@@ -45,7 +57,15 @@ function createApp(
     (req as any).userId = "user-test";
     next();
   });
-  app.use("/api/stories", createStoryRoutes(storyBuilder as any, prisma as any));
+  app.use(
+    "/api/stories",
+    createStoryRoutes(
+      storyBuilder as any,
+      prisma as any,
+      aiConfigService as any,
+      aiUsageTracker as any
+    )
+  );
   return app;
 }
 
@@ -92,13 +112,17 @@ async function request(
 describe("Story Routes - Merge Transcripts Endpoint", () => {
   let storyBuilder: ReturnType<typeof createMockStoryBuilder>;
   let prisma: ReturnType<typeof createMockPrisma>;
+  let aiConfigService: ReturnType<typeof createMockAIConfigService>;
+  let aiUsageTracker: ReturnType<typeof createMockAIUsageTracker>;
   let app: express.Express;
 
   beforeEach(async () => {
     vi.clearAllMocks();
     storyBuilder = createMockStoryBuilder();
     prisma = createMockPrisma();
-    app = createApp(storyBuilder, prisma);
+    aiConfigService = createMockAIConfigService();
+    aiUsageTracker = createMockAIUsageTracker();
+    app = createApp(storyBuilder, prisma, aiConfigService, aiUsageTracker);
   });
 
   describe("POST /api/stories/merge-transcripts", () => {

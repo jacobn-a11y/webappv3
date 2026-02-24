@@ -141,18 +141,33 @@ describe("maskPII – IP address", () => {
 });
 
 // ─── Street Address ─────────────────────────────────────────────────────────
-// Note: The current implementation does NOT include a street address regex in
-// PII_PATTERNS (only 6 patterns are defined). These tests document the current
-// behavior — street addresses are NOT masked.
 
 describe("maskPII – street address", () => {
-  it("does not mask a street address (not currently implemented)", () => {
+  it("masks a street address with city/state/zip", () => {
     const text = "I live at 123 Main Street, Springfield, IL 62704";
     const result = maskPII(text);
-    // No street_address pattern in PII_PATTERNS, so no detection expected
+    expect(result.maskedText).toContain("[ADDRESS_REDACTED]");
+    expect(result.detections.filter((d) => d.type === "street_address")).toHaveLength(
+      1
+    );
+  });
+});
+
+describe("maskPII – contextual heuristics", () => {
+  it("masks person names when introduced by context keywords", () => {
+    const result = maskPII("My name is Jane Doe and I run RevOps.");
+    expect(result.maskedText).toContain("[NAME_REDACTED]");
+    expect(result.maskedText).not.toContain("Jane Doe");
+    expect(result.detections.some((d) => d.type === "person_name")).toBe(true);
+  });
+
+  it("masks account/customer identifiers when prefixed with ID labels", () => {
+    const result = maskPII("Customer ID: ACCT-9F2X7L is the canonical key.");
+    expect(result.maskedText).toContain("[ID_REDACTED]");
+    expect(result.maskedText).not.toContain("ACCT-9F2X7L");
     expect(
-      result.detections.filter((d) => d.type === "street_address"),
-    ).toHaveLength(0);
+      result.detections.some((d) => d.type === "account_identifier")
+    ).toBe(true);
   });
 });
 
@@ -365,6 +380,14 @@ describe("containsPII", () => {
 
   it("returns true when DOB pattern is present", () => {
     expect(containsPII("date of birth: 01/01/2000")).toBe(true);
+  });
+
+  it("returns true when contextual name pattern is present", () => {
+    expect(containsPII("This is Jane Doe from procurement.")).toBe(true);
+  });
+
+  it("returns true when contextual account identifier is present", () => {
+    expect(containsPII("Employee ID EID-7788ZX was provisioned.")).toBe(true);
   });
 
   it("returns false for clean text", () => {

@@ -2,12 +2,18 @@ import { useEffect, useState } from "react";
 import {
   applySetupRolePresets,
   getFirstValueRecommendations,
+  getSetupMvpQuickstartStatus,
   getSetupPlans,
   getSetupStatus,
+  indexSetupMvpGongAccounts,
   saveSetupGovernanceDefaults,
+  saveSetupMvpGongAccountSelection,
+  saveSetupMvpQuickstartKeys,
   saveSetupOrgProfile,
   selectSetupPlan,
   type FirstValueRecommendations,
+  type SetupMvpAccountRow,
+  type SetupMvpQuickstartStatus,
   type SetupPlanCatalog,
   type SetupStatus,
 } from "../lib/api";
@@ -23,6 +29,16 @@ export function AdminSetupWizardPage() {
   >("STARTER");
   const [companyOverview, setCompanyOverview] = useState("");
   const [products, setProducts] = useState("");
+  const [mvpStatus, setMvpStatus] = useState<SetupMvpQuickstartStatus | null>(null);
+  const [gongApiKey, setGongApiKey] = useState("");
+  const [openaiApiKey, setOpenaiApiKey] = useState("");
+  const [gongBaseUrl, setGongBaseUrl] = useState("https://api.gong.io");
+  const [accountFilter, setAccountFilter] = useState("");
+  const [accountRows, setAccountRows] = useState<SetupMvpAccountRow[]>([]);
+  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  const [savingMvpKeys, setSavingMvpKeys] = useState(false);
+  const [indexingAccounts, setIndexingAccounts] = useState(false);
+  const [savingSelection, setSavingSelection] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { showToast } = useToast();
@@ -30,14 +46,19 @@ export function AdminSetupWizardPage() {
   const load = async () => {
     setError(null);
     try {
-      const [statusRes, firstValueRes, plansRes] = await Promise.all([
+      const [statusRes, firstValueRes, plansRes, mvpRes] = await Promise.all([
         getSetupStatus(),
         getFirstValueRecommendations(),
         getSetupPlans(),
+        getSetupMvpQuickstartStatus(),
       ]);
       setStatus(statusRes);
       setFirstValue(firstValueRes);
       setPlans(plansRes);
+      setMvpStatus(mvpRes);
+      setGongBaseUrl(mvpRes.gong_base_url || "https://api.gong.io");
+      setAccountRows(mvpRes.account_index.accounts ?? []);
+      setSelectedAccounts(mvpRes.selected_account_names ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load setup data");
     }
@@ -119,7 +140,88 @@ export function AdminSetupWizardPage() {
     }
   };
 
+  const saveMvpKeys = async () => {
+    setSavingMvpKeys(true);
+    setError(null);
+    try {
+      const result = await saveSetupMvpQuickstartKeys({
+        gong_api_key: gongApiKey.trim(),
+        openai_api_key: openaiApiKey.trim(),
+        gong_base_url: gongBaseUrl.trim() || undefined,
+      });
+      setMvpStatus(result.status);
+      setAccountRows(result.status.account_index.accounts ?? []);
+      setSelectedAccounts(result.status.selected_account_names ?? []);
+      setGongApiKey("");
+      setOpenaiApiKey("");
+      showToast("Gong and OpenAI keys saved", "success");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save MVP setup keys");
+    } finally {
+      setSavingMvpKeys(false);
+    }
+  };
+
+  const refreshMvpAccountIndex = async () => {
+    setIndexingAccounts(true);
+    setError(null);
+    try {
+      const result = await indexSetupMvpGongAccounts({ refresh: true });
+      setAccountRows(result.accounts ?? []);
+      showToast(
+        `Indexed ${result.total_accounts} accounts from ${result.total_calls_indexed} calls`,
+        "success"
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to index Gong accounts");
+    } finally {
+      setIndexingAccounts(false);
+    }
+  };
+
+  const toggleSelectedAccount = (name: string) => {
+    setSelectedAccounts((prev) =>
+      prev.includes(name) ? prev.filter((row) => row !== name) : [...prev, name]
+    );
+  };
+
+  const saveAccountSelection = async () => {
+    setSavingSelection(true);
+    setError(null);
+    try {
+      const result = await saveSetupMvpGongAccountSelection({
+        account_names: selectedAccounts,
+        trigger_ingest: true,
+      });
+      setSelectedAccounts(result.selected_account_names);
+      showToast(
+        result.ingest_started
+          ? "Selection saved and Gong ingest started"
+          : "Selection saved",
+        "success"
+      );
+      await load();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to save Gong account selection"
+      );
+    } finally {
+      setSavingSelection(false);
+    }
+  };
+
   const completionScore = status?.completionScore ?? 0;
+  const normalizedFilter = accountFilter.trim().toLowerCase();
+  const visibleAccounts = accountRows.filter((row) =>
+    normalizedFilter
+      ? `${row.name} ${row.count}`.toLowerCase().includes(normalizedFilter)
+      : true
+  );
+  const selectedSet = new Set(selectedAccounts);
+  const selectedCallCount = accountRows
+    .filter((row) => selectedSet.has(row.name))
+    .reduce((sum, row) => sum + row.count, 0);
 
   return (
     <div className="page">
@@ -131,6 +233,224 @@ export function AdminSetupWizardPage() {
       </div>
 
       {error && <div className="alert alert--error">{error}</div>}
+
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div>
+            <div className="card__title">MVP Quick Setup (Gong + OpenAI)</div>
+            <div className="card__subtitle">
+              Save two keys, index Gong accounts, select scope, then ingest.
+            </div>
+          </div>
+          {mvpStatus && (
+            <span
+              className={`badge ${
+                mvpStatus.gong_configured && mvpStatus.openai_configured
+                  ? "badge--success"
+                  : "badge--draft"
+              }`}
+            >
+              {mvpStatus.gong_configured && mvpStatus.openai_configured
+                ? "Configured"
+                : "Needs Keys"}
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: "grid", gap: 12 }}>
+          <div className="form-group">
+            <label className="form-group__label" htmlFor="setup-gong-api-key">Gong API Key Bundle</label>
+            <input
+              id="setup-gong-api-key"
+              className="form-input"
+              type="password"
+              value={gongApiKey}
+              onChange={(e) => setGongApiKey(e.target.value)}
+              placeholder="accessKey:accessKeySecret"
+              autoComplete="off"
+              aria-label="Gong API key bundle"
+            />
+            <span className="form-group__hint">
+              Format: `accessKey:accessKeySecret` or `Basic &lt;base64&gt;`.
+            </span>
+          </div>
+
+          <div className="form-group">
+            <label className="form-group__label" htmlFor="setup-openai-api-key">OpenAI API Key</label>
+            <input
+              id="setup-openai-api-key"
+              className="form-input"
+              type="password"
+              value={openaiApiKey}
+              onChange={(e) => setOpenaiApiKey(e.target.value)}
+              placeholder="sk-..."
+              autoComplete="off"
+              aria-label="OpenAI API key"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-group__label" htmlFor="setup-gong-base-url">Gong Base URL (optional)</label>
+            <input
+              id="setup-gong-base-url"
+              className="form-input"
+              value={gongBaseUrl}
+              onChange={(e) => setGongBaseUrl(e.target.value)}
+              placeholder="https://api.gong.io"
+              aria-label="Gong base URL"
+            />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button
+              className="btn btn--primary"
+              onClick={saveMvpKeys}
+              disabled={savingMvpKeys}
+            >
+              {savingMvpKeys ? "Saving..." : "Save Gong + OpenAI Keys"}
+            </button>
+          </div>
+        </div>
+
+        {mvpStatus && (
+          <div style={{ marginTop: 14, display: "grid", gap: 8, fontSize: 13 }}>
+            <div>
+              Gong status: <strong>{formatEnumLabel(mvpStatus.gong_status)}</strong>
+              {mvpStatus.gong_last_sync_at
+                ? ` · Last sync ${new Date(mvpStatus.gong_last_sync_at).toLocaleString()}`
+                : ""}
+            </div>
+            <div>
+              OpenAI configured:{" "}
+              <strong>{mvpStatus.openai_configured ? "Yes" : "No"}</strong>
+            </div>
+            {mvpStatus.gong_last_error && (
+              <div style={{ color: "var(--color-danger)" }}>
+                Last Gong error: {mvpStatus.gong_last_error}
+              </div>
+            )}
+          </div>
+        )}
+
+        {(mvpStatus?.gong_configured ?? false) && (
+          <div style={{ marginTop: 20 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 10,
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>Account Search & Selection</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="btn btn--secondary btn--sm"
+                  onClick={refreshMvpAccountIndex}
+                  disabled={indexingAccounts}
+                >
+                  {indexingAccounts ? "Indexing..." : "Refresh Account Index"}
+                </button>
+                <button
+                  className="btn btn--ghost btn--sm"
+                  onClick={() =>
+                    setSelectedAccounts(visibleAccounts.map((row) => row.name))
+                  }
+                  type="button"
+                >
+                  Select Visible
+                </button>
+                <button
+                  className="btn btn--ghost btn--sm"
+                  onClick={() => setSelectedAccounts([])}
+                  type="button"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <input
+              id="setup-account-filter"
+              type="search"
+              className="form-input"
+              placeholder="Type to filter accounts..."
+              value={accountFilter}
+              onChange={(e) => setAccountFilter(e.target.value)}
+              aria-label="Filter indexed accounts"
+            />
+
+            <div
+              style={{
+                marginTop: 8,
+                marginBottom: 8,
+                fontSize: 13,
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              {selectedAccounts.length} account
+              {selectedAccounts.length === 1 ? "" : "s"} selected · {selectedCallCount} tagged
+              call{selectedCallCount === 1 ? "" : "s"}
+            </div>
+
+            <div
+              style={{
+                border: "1px solid var(--color-border)",
+                borderRadius: 10,
+                maxHeight: 280,
+                overflowY: "auto",
+                padding: 8,
+              }}
+            >
+              {visibleAccounts.length === 0 ? (
+                <div style={{ padding: "0.5rem", color: "var(--color-text-secondary)" }}>
+                  {accountRows.length === 0
+                    ? "No accounts indexed yet."
+                    : "No accounts match your filter."}
+                </div>
+              ) : (
+                visibleAccounts.map((row) => (
+                  <label
+                    key={row.name}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      borderRadius: 8,
+                      padding: "0.45rem 0.55rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedSet.has(row.name)}
+                        onChange={() => toggleSelectedAccount(row.name)}
+                        aria-label={`Select account ${row.name}`}
+                      />
+                      <span>{row.name}</span>
+                    </span>
+                    <span style={{ color: "var(--color-text-secondary)", fontSize: 12 }}>
+                      {row.count} call{row.count === 1 ? "" : "s"}
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+              <button
+                className="btn btn--primary"
+                onClick={saveAccountSelection}
+                disabled={savingSelection || selectedAccounts.length === 0}
+              >
+                {savingSelection ? "Saving..." : "Save Selection & Ingest Calls"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Progress */}
       {status && (
@@ -175,12 +495,12 @@ export function AdminSetupWizardPage() {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div className="form-group">
-            <label className="form-group__label">Company Overview</label>
-            <textarea className="form-textarea" value={companyOverview} onChange={(e) => setCompanyOverview(e.target.value)} rows={4} placeholder="Describe what your company does..." />
+            <label className="form-group__label" htmlFor="setup-company-overview">Company Overview</label>
+            <textarea id="setup-company-overview" className="form-textarea" value={companyOverview} onChange={(e) => setCompanyOverview(e.target.value)} rows={4} placeholder="Describe what your company does..." aria-label="Company overview" />
           </div>
           <div className="form-group">
-            <label className="form-group__label">Products</label>
-            <input className="form-input" value={products} onChange={(e) => setProducts(e.target.value)} placeholder="Product A, Product B, Product C" />
+            <label className="form-group__label" htmlFor="setup-products">Products</label>
+            <input id="setup-products" className="form-input" value={products} onChange={(e) => setProducts(e.target.value)} placeholder="Product A, Product B, Product C" aria-label="Products list" />
             <span className="form-group__hint">Comma-separated list of product names</span>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>

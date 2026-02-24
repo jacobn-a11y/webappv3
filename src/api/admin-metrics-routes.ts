@@ -100,6 +100,7 @@ export function createAdminMetricsRoutes(prisma: PrismaClient): Router {
           all_time: dbTaggingConfidence,
           since_restart: runtimeMetrics.tagging_confidence,
         },
+        queue_observability: runtimeMetrics.queue_observability,
       });
     } catch (err) {
       if (err instanceof TenantGuardError) {

@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextFunction, Request, Response } from "express";
-import { requireOrgSecurityPolicy } from "../../src/middleware/security-policy.js";
+import {
+  __resetSecurityPolicyCacheForTests,
+  requireOrgSecurityPolicy,
+} from "../../src/middleware/security-policy.js";
 
 function mockReq(overrides: Record<string, unknown> = {}): Request {
   return {
@@ -25,6 +28,10 @@ function mockNext(): NextFunction {
 }
 
 describe("requireOrgSecurityPolicy IP allowlist handling", () => {
+  beforeEach(() => {
+    __resetSecurityPolicyCacheForTests();
+  });
+
   it("uses req.ip as source of truth instead of x-forwarded-for header", async () => {
     const prisma = {
       orgSettings: {
@@ -82,5 +89,35 @@ describe("requireOrgSecurityPolicy IP allowlist handling", () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ error: "ip_restricted" })
     );
+  });
+
+  it("caches org security policy and allowlist lookups to reduce repeated overhead", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      securityPolicy: { ip_allowlist_enabled: true },
+    });
+    const findMany = vi.fn().mockResolvedValue([{ cidr: "10.0.0.0/24" }]);
+    const prisma = {
+      orgSettings: { findUnique },
+      orgIpAllowlistEntry: { findMany },
+    } as any;
+
+    const middleware = requireOrgSecurityPolicy(prisma, {
+      enforceIpAllowlistIfConfigured: true,
+    });
+
+    const req1 = mockReq({ ip: "10.0.0.12" });
+    const req2 = mockReq({ ip: "10.0.0.13" });
+    const res1 = mockRes();
+    const res2 = mockRes();
+    const next1 = mockNext();
+    const next2 = mockNext();
+
+    await middleware(req1, res1, next1);
+    await middleware(req2, res2, next2);
+
+    expect(next1).toHaveBeenCalledTimes(1);
+    expect(next2).toHaveBeenCalledTimes(1);
+    expect(findUnique).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledTimes(1);
   });
 });

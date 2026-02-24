@@ -20,6 +20,12 @@ import type { Queue } from "bullmq";
 import { GongProvider } from "../integrations/gong-provider.js";
 import type { GongCredentials } from "../integrations/types.js";
 import logger from "../lib/logger.js";
+import { enqueueProcessCallJob } from "../lib/queue-policy.js";
+import { markWebhookEventIfNew } from "../lib/webhook-idempotency.js";
+import {
+  pickFirstHeaderValue,
+  validateWebhookTimestamp,
+} from "../lib/webhook-security.js";
 
 // ─── Gong Webhook Payload Types ─────────────────────────────────────────────
 
@@ -115,6 +121,27 @@ export function createGongWebhookHandler(deps: {
     const credentials = matchedConfig.credentials as unknown as GongCredentials;
     const organizationId = matchedConfig.organizationId;
 
+    const payloadData =
+      payload.data && typeof payload.data === "object" ? payload.data : {};
+    const timestampCandidate =
+      pickFirstHeaderValue(req.headers, [
+        "x-gong-timestamp",
+        "x-webhook-timestamp",
+        "x-request-timestamp",
+      ]) ??
+      (payloadData["timestamp"] as unknown) ??
+      (payloadData["eventTimestamp"] as unknown) ??
+      null;
+    const timestampValidation = validateWebhookTimestamp({
+      provider: "gong",
+      timestamp: timestampCandidate,
+      required: false,
+    });
+    if (!timestampValidation.ok) {
+      res.status(401).json({ error: "stale_webhook" });
+      return;
+    }
+
     try {
       if (
         payload.event === "CALL_RECORDING_READY" ||
@@ -122,6 +149,16 @@ export function createGongWebhookHandler(deps: {
       ) {
         if (!payload.callId) {
           res.json({ received: true, processed: false, reason: "No callId" });
+          return;
+        }
+
+        const eventKey = `gong:${organizationId}:${payload.event}:${payload.callId}`;
+        if (!markWebhookEventIfNew(eventKey)) {
+          res.json({
+            received: true,
+            processed: true,
+            duplicate_ignored: true,
+          });
           return;
         }
 
@@ -197,18 +234,15 @@ async function handleCallReady(
   }
 
   // Queue for async processing
-  await processingQueue.add(
-    "process-call",
-    {
+  await enqueueProcessCallJob({
+    queue: processingQueue,
+    source: "gong-webhook",
+    payload: {
       callId: call.id,
       organizationId,
       accountId: call.accountId ?? null,
       hasTranscript: !!transcript,
     },
-    {
-      jobId: `process-call:${call.id}`,
-      attempts: 3,
-      backoff: { type: "exponential", delay: 5000 },
-    }
-  );
+    options: { jobId: `process-call:${call.id}` },
+  });
 }

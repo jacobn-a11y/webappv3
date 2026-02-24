@@ -23,6 +23,7 @@ import {
   normalizeCompanyName,
   extractEmailDomain,
 } from "./entity-resolution.js";
+import { enqueueProcessCallJob } from "../lib/queue-policy.js";
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -373,19 +374,16 @@ export class MergeApiClient {
     }
 
     // Queue for async processing
-    await this.processingQueue.add(
-      "process-call",
-      {
+    await enqueueProcessCallJob({
+      queue: this.processingQueue,
+      source: "merge-api-client",
+      payload: {
         callId: call.id,
         organizationId,
         accountId: resolution.accountId || null,
         hasTranscript: !!recording.transcript,
       },
-      {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 5000 },
-      }
-    );
+    });
   }
 
   // ─── CRM Polling Sync (15-minute fallback) ─────────────────────────

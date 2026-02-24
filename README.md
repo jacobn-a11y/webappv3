@@ -288,6 +288,36 @@ npm run dev
 
 **Required env vars:** `DATABASE_URL` (PostgreSQL), `REDIS_URL` (BullMQ). The app will exit with a clear error if these are missing.
 
+## Frontend Setup (Vite SPA)
+
+Run backend and frontend in separate terminals:
+
+```bash
+# terminal 1: API/backend
+npm run dev
+
+# terminal 2: frontend SPA
+npm --prefix frontend ci
+npm --prefix frontend run dev
+```
+
+- Frontend dev server: `http://localhost:5173`
+- API proxy in dev: requests to `/api/*` are proxied to `http://localhost:3000` (`frontend/vite.config.ts`)
+- Production frontend build:
+  - `npm --prefix frontend run build`
+  - output: `frontend/dist/`
+
+## Deployment Paths
+
+- CI build/deploy flow:
+  - `.github/workflows/ci-cd.yml`
+  - backend build: `npm run build`
+  - frontend build: `npm --prefix frontend run build`
+  - deploy target: Fly.io (main branch push)
+- Staging/demo rollout and smoke checklist:
+  - `docs/demo-staging-playbook.md`
+  - `docs/operator-runbook.md`
+
 ## Running Tests
 
 - **Unit tests:** `npm test` (excludes DB-dependent tests when `TEST_DATABASE_URL` is unset)
