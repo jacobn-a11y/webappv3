@@ -340,7 +340,7 @@ function StoryCard({
   const handleDelete = async () => {
     if (!canEdit) return;
     const confirmed = window.confirm(
-      `Delete story "${story.title}"? This cannot be undone.`
+      `Are you sure you want to delete the story "${story.title}"? This action cannot be undone.`
     );
     if (!confirmed) return;
     setDeleting(true);

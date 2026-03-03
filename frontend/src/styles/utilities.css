@@ -16,11 +16,11 @@
 }
 
 .u-stack-sm > * + * {
-  margin-top: var(--space-2);
+  margin-top: var(--space-sm);
 }
 
 .u-stack-md > * + * {
-  margin-top: var(--space-4);
+  margin-top: var(--space-md);
 }
 
 .u-text-muted {

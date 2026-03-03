@@ -144,12 +144,12 @@ export class RAGEngine {
       filter.funnel_stages = { $in: input.funnelStages };
     }
 
-    const searchResults = await index.query({
+    const searchResults = await this.withRetry(() => index.query({
       vector: queryEmbedding,
       topK,
       filter,
       includeMetadata: true,
-    });
+    }));
 
     // ── Step 3: Hydrate sources from PostgreSQL ──────────────────────
     const hydratedSources = await this.hydrateSources(searchResults.matches ?? []);
@@ -244,12 +244,12 @@ ${contextBlock}`,
       filter.funnel_stages = { $in: input.funnelStages };
     }
 
-    const searchResults = await index.query({
+    const searchResults = await this.withRetry(() => index.query({
       vector: queryEmbedding,
       topK,
       filter,
       includeMetadata: true,
-    });
+    }));
 
     // ── Step 3: Hydrate sources from PostgreSQL ──────────────────────
     const hydratedSources = await this.hydrateSources(searchResults.matches ?? []);
@@ -343,7 +343,7 @@ ${contextBlock}`,
 
     const vectorId = `chunk_${chunk.chunkId}`;
 
-    await index.upsert([
+    await this.withRetry(() => index.upsert([
       {
         id: vectorId,
         values: embedding,
@@ -357,7 +357,7 @@ ${contextBlock}`,
           text_preview: chunk.text.slice(0, 200),
         },
       },
-    ]);
+    ]));
 
     // Update the chunk record with the Pinecone vector ID
     await this.prisma.transcriptChunk.update({
@@ -403,7 +403,7 @@ ${contextBlock}`,
     for (let i = 0; i < vectorIds.length; i += 100) {
       const batch = vectorIds.slice(i, i + 100);
       if (batch.length === 0) continue;
-      await index.deleteMany(batch);
+      await this.withRetry(() => index.deleteMany(batch));
     }
 
     await this.prisma.transcriptChunk.updateMany({
@@ -415,6 +415,21 @@ ${contextBlock}`,
   }
 
   // ─── Private ──────────────────────────────────────────────────────
+
+  private async withRetry<T>(fn: () => Promise<T>, attempts = 3, baseDelayMs = 500): Promise<T> {
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await fn();
+      } catch (err: unknown) {
+        const isRetryable = err instanceof Error &&
+          (err.message.includes("429") || err.message.includes("503") || err.message.includes("ECONNRESET"));
+        if (!isRetryable || i === attempts - 1) throw err;
+        const delay = baseDelayMs * Math.pow(2, i) + Math.random() * baseDelayMs;
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+    throw new Error("Retry exhausted");
+  }
 
   private async embed(text: string): Promise<number[]> {
     const response = await this.openai.embeddings.create({

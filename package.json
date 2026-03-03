@@ -1,6 +1,9 @@
 {
   "name": "storyengine",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "description": "B2B SaaS - Consolidate call recordings into Account Journey views with AI-powered story extraction",
   "main": "dist/index.js",
   "scripts": {
@@ -48,7 +51,9 @@
     "contracts:file-size:check": "node scripts/contracts/file-size-guard.mjs --strict",
     "migrate:safety": "node scripts/migration-safety-check.mjs",
     "smoke:test": "node scripts/smoke/smoke-test.mjs",
-    "migrate:safety:baseline": "node scripts/migration-safety-check.mjs --update-baseline"
+    "migrate:safety:baseline": "node scripts/migration-safety-check.mjs --update-baseline",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\""
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",

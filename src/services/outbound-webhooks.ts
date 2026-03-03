@@ -127,6 +127,8 @@ export async function deliverWebhookToSubscription(
     .update(payload)
     .digest("hex");
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
     const response = await fetch(subscription.url, {
       method: "POST",
@@ -136,11 +138,14 @@ export async function deliverWebhookToSubscription(
         "X-StoryEngine-Signature": `sha256=${signature}`,
       },
       body: payload,
+      signal: controller.signal,
     });
     return { status: response.status, ok: response.ok };
   } catch (err) {
     const error = err instanceof Error ? err.message : "request_failed";
     return { status: 0, ok: false, error };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

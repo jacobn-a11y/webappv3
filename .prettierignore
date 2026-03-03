@@ -1,0 +1,6 @@
+dist/
+node_modules/
+coverage/
+frontend/dist/
+*.prisma
+package-lock.json

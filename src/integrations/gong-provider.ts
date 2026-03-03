@@ -19,6 +19,7 @@ import {
   gongCallMatchesSelectedAccounts,
 } from "./gong-account-utils.js";
 import { OutboundRateLimiter } from "./outbound-rate-limiter.js";
+import logger from "../lib/logger.js";
 
 const GONG_GLOBAL_HISTORY_START_ISO = "2000-01-01T00:00:00.000Z";
 
@@ -363,7 +364,11 @@ export class GongProvider implements CallRecordingProvider {
           transcriptMap.set(id, text);
         }
       } catch (err) {
-        console.warn("Gong: failed to fetch transcript batch", err);
+        logger.warn("Gong: failed to fetch transcript batch, calls will be stored without transcripts", {
+          error: err,
+          callIds: callIds.slice(0, 5),
+          totalCalls: callIds.length,
+        });
       }
     }
 

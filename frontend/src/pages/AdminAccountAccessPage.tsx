@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useToast } from "../components/Toast";
 import {
   getAccessUsers,
   searchAccounts,
@@ -42,12 +43,6 @@ function formatRelativeTime(dateStr: string): string {
 type GrantTab = "all" | "single" | "list" | "crm";
 type CrmProvider = "SALESFORCE" | "HUBSPOT";
 
-interface Toast {
-  id: number;
-  message: string;
-  type: "success" | "error";
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function AdminAccountAccessPage() {
@@ -81,25 +76,13 @@ export function AdminAccountAccessPage() {
   const [crmReportsLoading, setCrmReportsLoading] = useState(false);
   const [selectedReportId, setSelectedReportId] = useState("");
 
-  // Toast state
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const toastIdRef = useRef(0);
-
   // Refs for debounce and outside-click
   const singleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const singleSearchRef = useRef<HTMLDivElement>(null);
   const listSearchRef = useRef<HTMLDivElement>(null);
 
-  // ─── Toast Helper ─────────────────────────────────────────────────────────
-
-  const showToast = useCallback((message: string, type: "success" | "error") => {
-    const id = ++toastIdRef.current;
-    setToasts((prev: Toast[]) => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts((prev: Toast[]) => prev.filter((t: Toast) => t.id !== id));
-    }, 3800);
-  }, []);
+  const { showToast } = useToast();
 
   // ─── Load Users ───────────────────────────────────────────────────────────
 
@@ -355,7 +338,7 @@ export function AdminAccountAccessPage() {
 
   const handleRevoke = useCallback(
     async (grantId: string) => {
-      if (!window.confirm("Revoke this access grant?")) return;
+      if (!window.confirm("Are you sure you want to revoke this access grant? The user will lose access to the associated accounts immediately.")) return;
 
       try {
         await revokeAccess(grantId);
@@ -862,33 +845,6 @@ export function AdminAccountAccessPage() {
     );
   }
 
-  // ─── Render: Toasts ───────────────────────────────────────────────────────
-
-  function renderToasts() {
-    if (toasts.length === 0) return null;
-
-    return (
-      <div
-        className="admin-access__toast-container"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {toasts.map((toast: Toast) => (
-          <div
-            key={toast.id}
-            className={
-              "admin-access__toast admin-access__toast--" + toast.type
-            }
-            role="status"
-          >
-            {toast.message}
-          </div>
-        ))}
-      </div>
-    );
-  }
-
   // ─── Main Render ──────────────────────────────────────────────────────────
 
   return (
@@ -929,7 +885,6 @@ export function AdminAccountAccessPage() {
       )}
 
       {renderModal()}
-      {renderToasts()}
     </div>
   );
 }

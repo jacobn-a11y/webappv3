@@ -25,6 +25,7 @@ import {
 } from "../config/stripe-plans.js";
 import { buildPublicAppUrl } from "../lib/public-app-url.js";
 import logger from "../lib/logger.js";
+import { markWebhookEventIfNew } from "../lib/webhook-idempotency.js";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 
 const BILLING_ADMIN_ROLES: UserRole[] = ["OWNER", "ADMIN"];
@@ -69,71 +70,79 @@ export function createTrialGate(prisma: PrismaClient, _stripe: Stripe) {
       return;
     }
 
-    const org = await prisma.organization.findUnique({
-      where: { id: orgId },
-    });
+    try {
+      const org = await prisma.organization.findUnique({
+        where: { id: orgId },
+      });
 
-    if (!org) {
-      res.status(404).json({ error: "Organization not found" });
-      return;
-    }
-
-    // Active paid plan — allow through only when subscription is healthy.
-    if (org.plan !== "FREE_TRIAL") {
-      if (org.billingChannel === "SALES_LED") {
-        next();
+      if (!org) {
+        res.status(404).json({ error: "Organization not found" });
         return;
       }
 
-      const latestSubscription = await prisma.subscription.findFirst({
-        where: { organizationId: orgId },
-        orderBy: [{ currentPeriodEnd: "desc" }, { createdAt: "desc" }],
-        select: { status: true },
-      });
+      // Active paid plan — allow through only when subscription is healthy.
+      if (org.plan !== "FREE_TRIAL") {
+        if (org.billingChannel === "SALES_LED") {
+          next();
+          return;
+        }
 
-      if (!latestSubscription) {
+        const latestSubscription = await prisma.subscription.findFirst({
+          where: { organizationId: orgId },
+          orderBy: [{ currentPeriodEnd: "desc" }, { createdAt: "desc" }],
+          select: { status: true },
+        });
+
+        if (!latestSubscription) {
+          res.status(402).json({
+            error: "subscription_required",
+            message: "No active subscription found. Please subscribe to continue.",
+            upgradeUrl: "/api/billing/checkout",
+          });
+          return;
+        }
+
+        if (latestSubscription.status === "ACTIVE" || latestSubscription.status === "TRIALING") {
+          next();
+          return;
+        }
+
+        if (latestSubscription.status === "PAST_DUE") {
+          res.status(402).json({
+            error: "payment_past_due",
+            message: "Your subscription payment is past due. Update billing to continue.",
+            portalUrl: "/api/billing/portal",
+          });
+          return;
+        }
+
         res.status(402).json({
-          error: "subscription_required",
-          message: "No active subscription found. Please subscribe to continue.",
+          error: "subscription_inactive",
+          message: "Your subscription is inactive. Please re-subscribe to continue.",
           upgradeUrl: "/api/billing/checkout",
         });
         return;
       }
 
-      if (latestSubscription.status === "ACTIVE" || latestSubscription.status === "TRIALING") {
-        next();
-        return;
-      }
-
-      if (latestSubscription.status === "PAST_DUE") {
+      // Check trial expiration. Null expiry is treated as expired when billing is enabled.
+      if (!org.trialEndsAt || new Date() > org.trialEndsAt) {
         res.status(402).json({
-          error: "payment_past_due",
-          message: "Your subscription payment is past due. Update billing to continue.",
-          portalUrl: "/api/billing/portal",
+          error: "trial_expired",
+          message: "Your free trial has expired. Please upgrade to continue.",
+          upgradeUrl: `/api/billing/checkout`,
         });
         return;
       }
 
-      res.status(402).json({
-        error: "subscription_inactive",
-        message: "Your subscription is inactive. Please re-subscribe to continue.",
-        upgradeUrl: "/api/billing/checkout",
+      // Trial still active
+      next();
+    } catch (error) {
+      logger.error("Trial gate middleware error", { error });
+      res.status(503).json({
+        error: "service_unavailable",
+        message: "Billing service temporarily unavailable.",
       });
-      return;
     }
-
-    // Check trial expiration. Null expiry is treated as expired when billing is enabled.
-    if (!org.trialEndsAt || new Date() > org.trialEndsAt) {
-      res.status(402).json({
-        error: "trial_expired",
-        message: "Your free trial has expired. Please upgrade to continue.",
-        upgradeUrl: `/api/billing/checkout`,
-      });
-      return;
-    }
-
-    // Trial still active
-    next();
   };
 }
 
@@ -386,6 +395,12 @@ export function createStripeWebhookHandler(
       event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
     } catch {
       res.status(400).json({ error: "Invalid webhook signature" });
+      return;
+    }
+
+    const isNew = await markWebhookEventIfNew(`stripe:${event.id}`);
+    if (!isNew) {
+      res.json({ received: true, deduplicated: true });
       return;
     }
 

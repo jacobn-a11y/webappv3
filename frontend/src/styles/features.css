@@ -54,7 +54,7 @@
   --color-surface-raised: var(--neutral-200);
   --color-text: var(--white);
   --color-text-secondary: var(--neutral-600);
-  --color-text-muted: var(--neutral-500);
+  --color-text-muted: var(--neutral-600);
   --color-text-body: var(--neutral-700);
   --color-accent: var(--blue-400);
   --color-accent-hover: var(--blue-300);
@@ -69,6 +69,8 @@
   --color-warning-light: rgba(255, 238, 112, 0.1);
   --color-info: var(--blue-400);
   --color-info-light: rgba(51, 111, 230, 0.12);
+  --color-surface-muted: var(--color-bg);
+  --color-danger: var(--color-error);
 
   /* ── Font ── */
   --font-sans: 'Inter', 'General Sans', 'Satoshi', system-ui, sans-serif;

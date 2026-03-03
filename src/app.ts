@@ -108,11 +108,27 @@ export function createApp(deps: AppDeps): express.Application {
 
   const app = express();
 
-  // Sentry request handler (must be first middleware)
-  Sentry.setupExpressErrorHandler(app);
-
   // Global middleware
-  app.use(helmet());
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true,
+    },
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+  }));
 
   const allowedOrigins = Array.from(
     new Set(
@@ -421,6 +437,9 @@ export function createApp(deps: AppDeps): express.Application {
 
   // Chatbot Connector UI
   app.use("/chat", trialGate, createChatbotConnectorRoutes());
+
+  // Sentry error handler must be registered after all routes but before other error handlers
+  Sentry.setupExpressErrorHandler(app);
 
   app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     logger.error("Unhandled route error", { error: err.message, stack: err.stack });

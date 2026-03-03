@@ -479,6 +479,7 @@ model Call {
   @@index([organizationId, accountId])
   @@index([organizationId, occurredAt])
   @@index([organizationId, matchMethod, matchConfidence])
+  @@unique([organizationId, provider, externalId], name: "call_org_provider_external")
   @@map("calls")
 }
 

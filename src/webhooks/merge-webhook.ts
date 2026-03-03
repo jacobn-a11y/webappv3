@@ -180,7 +180,7 @@ export function createMergeWebhookHandler(deps: {
     const timestampValidation = validateWebhookTimestamp({
       provider: "merge",
       timestamp: timestampCandidate,
-      required: false,
+      required: true,
     });
     if (!timestampValidation.ok) {
       res.status(401).json({ error: "stale_webhook" });

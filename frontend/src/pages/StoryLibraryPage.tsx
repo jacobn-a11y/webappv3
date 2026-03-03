@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useToast } from "../components/Toast";
 import {
   createStoryComment,
   createLandingPage,
@@ -40,6 +41,7 @@ const STORY_STATUS_BADGES: Record<StoryLibraryItem["story_status"], string> = {
 
 export function StoryLibraryPage({ userRole }: { userRole: string }) {
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stories, setStories] = useState<StoryLibraryItem[]>([]);
@@ -56,7 +58,6 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
   const [busyStoryId, setBusyStoryId] = useState<string | null>(null);
   const [selectedStoryIds, setSelectedStoryIds] = useState<string[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkMessage, setBulkMessage] = useState<string | null>(null);
   const [commentStory, setCommentStory] = useState<StoryLibraryItem | null>(null);
   const [commentTarget, setCommentTarget] = useState<"story" | "page">("story");
   const [comments, setComments] = useState<StoryComment[]>([]);
@@ -122,7 +123,6 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
 
   useEffect(() => {
     setSelectedStoryIds([]);
-    setBulkMessage(null);
   }, [page, search, storyType, status]);
 
   useEffect(() => {
@@ -262,13 +262,13 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
         document.execCommand("copy");
         document.body.removeChild(textarea);
       }
-      setBulkMessage(`Share link copied for "${story.title}".`);
+      showToast(`Share link copied for "${story.title}".`, "success");
       trackStoryLibraryAction(story, "share_action", "copy_share_link", {
         url: shareUrl,
       });
       return;
     }
-    setBulkMessage(
+    showToast(
       story.landing_page
         ? "Page exists but is not published yet. Open the editor to publish first."
         : "Create a landing page first, then publish to get a share link."
@@ -281,7 +281,7 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
 
   const handleDelete = async (story: StoryLibraryItem) => {
     const confirmed = window.confirm(
-      `Delete story \"${story.title}\"? This cannot be undone.`
+      `Are you sure you want to delete the story "${story.title}"? This action cannot be undone.`
     );
     if (!confirmed) return;
 
@@ -314,20 +314,20 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
 
   const handleCopyStoryMarkdown = async (story: StoryLibraryItem) => {
     await navigator.clipboard.writeText(story.markdown);
-    setBulkMessage(`Copied story markdown for "${story.title}".`);
+    showToast(`Copied story markdown for "${story.title}".`, "success");
     trackStoryLibraryAction(story, "share_action", "copy_story_markdown");
   };
 
   const handleCopyCrmNote = async (story: StoryLibraryItem) => {
     const note = buildCrmNote(story);
     await navigator.clipboard.writeText(note);
-    setBulkMessage(`Copied CRM note for "${story.title}".`);
+    showToast(`Copied CRM note for "${story.title}".`, "success");
     trackStoryLibraryAction(story, "share_action", "copy_crm_note");
   };
 
   const handlePushCrmNote = async (story: StoryLibraryItem) => {
     const confirmed = window.confirm(
-      `Push a CRM note for "${story.title}" to account "${story.account.name}"?`
+      `Are you sure you want to push a CRM note for "${story.title}" to account "${story.account.name}"? This will create a new note in your CRM.`
     );
     if (!confirmed) {
       return;
@@ -344,13 +344,14 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
           story_id: story.id,
         },
       });
-      setBulkMessage(`Queued CRM note writeback for "${story.title}".`);
+      showToast(`Queued CRM note writeback for "${story.title}".`, "success");
       trackStoryLibraryAction(story, "share_action", "push_crm_note");
     } catch (err) {
-      setBulkMessage(
+      showToast(
         err instanceof Error
           ? `CRM writeback failed: ${err.message}`
-          : "CRM writeback failed."
+          : "CRM writeback failed.",
+        "error"
       );
     } finally {
       setBusyStoryId(null);
@@ -384,8 +385,9 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
       )
       .join("\n\n---\n\n");
     await navigator.clipboard.writeText(payload);
-    setBulkMessage(
-      `Copied ${selectedStories.length} stor${selectedStories.length === 1 ? "y" : "ies"} to clipboard.`
+    showToast(
+      `Copied ${selectedStories.length} stor${selectedStories.length === 1 ? "y" : "ies"} to clipboard.`,
+      "success"
     );
   };
 
@@ -396,7 +398,7 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     if (
       selectedStories.length > 5 &&
       !window.confirm(
-        `Export ${selectedStories.length} files as ${format.toUpperCase()}? Your browser will download them one by one.`
+        `Are you sure you want to export ${selectedStories.length} files as ${format.toUpperCase()}? Your browser will download them one by one.`
       )
     ) {
       return;
@@ -420,7 +422,7 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
       }
     }
     setBulkBusy(false);
-    setBulkMessage(
+    showToast(
       `Bulk export complete: ${successCount} succeeded${failedCount > 0 ? `, ${failedCount} failed` : ""}.`
     );
   };
@@ -432,17 +434,17 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     const blocked = selectedStories.filter((story) => !!story.landing_page);
     const deletable = selectedStories.filter((story) => !story.landing_page);
     if (deletable.length === 0) {
-      setBulkMessage(
+      showToast(
         "No selected stories can be deleted because they already have linked pages."
       );
       return;
     }
     const confirmText = [
-      `Delete ${deletable.length} selected stor${deletable.length === 1 ? "y" : "ies"}?`,
+      `Are you sure you want to delete ${deletable.length} selected stor${deletable.length === 1 ? "y" : "ies"}? This action cannot be undone.`,
       blocked.length > 0
-        ? `${blocked.length} stor${blocked.length === 1 ? "y has" : "ies have"} linked pages and will be skipped.`
-        : "This cannot be undone.",
-    ].join("\n");
+        ? `\n${blocked.length} stor${blocked.length === 1 ? "y has" : "ies have"} linked pages and will be skipped.`
+        : "",
+    ].join("");
     if (!window.confirm(confirmText)) {
       return;
     }
@@ -462,8 +464,9 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     setSelectedStoryIds((prev) => prev.filter((id) => !deletedSet.has(id)));
     setTotalCount((prev) => Math.max(0, prev - deletedIds.length));
     setBulkBusy(false);
-    setBulkMessage(
-      `Deleted ${deletedIds.length} stor${deletedIds.length === 1 ? "y" : "ies"}${blocked.length > 0 ? `, skipped ${blocked.length}` : ""}.`
+    showToast(
+      `Deleted ${deletedIds.length} stor${deletedIds.length === 1 ? "y" : "ies"}${blocked.length > 0 ? `, skipped ${blocked.length}` : ""}.`,
+      "success"
     );
   };
 
@@ -645,12 +648,6 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
               </button>
             )}
           </div>
-        </div>
-      )}
-
-      {bulkMessage && (
-        <div className="story-library__bulk-message" role="status" aria-live="polite">
-          {bulkMessage}
         </div>
       )}
 

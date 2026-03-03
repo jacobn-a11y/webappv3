@@ -514,50 +514,63 @@ export class SyncEngine {
   ): Promise<void> {
     const organizationId = config.organizationId;
 
-    // Check if this call already exists (by provider + externalId)
-    const existing = await this.prisma.call.findFirst({
-      where: {
-        organizationId,
-        provider: provider.callProvider,
-        externalId: normalizedCall.externalId,
-      },
-    });
+    const { call, hasTranscript } = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.call.findFirst({
+        where: {
+          organizationId,
+          provider: provider.callProvider,
+          externalId: normalizedCall.externalId,
+        },
+      });
 
-    // Upsert the call
-    const call = existing
-      ? await this.prisma.call.update({
-          where: { id: existing.id },
+      const call = existing
+        ? await tx.call.update({
+            where: { id: existing.id },
+            data: {
+              title: normalizedCall.title ?? undefined,
+              recordingUrl: normalizedCall.recordingUrl ?? undefined,
+              duration: normalizedCall.duration ?? undefined,
+            },
+          })
+        : await tx.call.create({
+            data: {
+              organizationId,
+              title: normalizedCall.title,
+              provider: provider.callProvider,
+              externalId: normalizedCall.externalId,
+              recordingUrl: normalizedCall.recordingUrl,
+              duration: normalizedCall.duration,
+              occurredAt: normalizedCall.occurredAt,
+            },
+          });
+
+      if (!existing && normalizedCall.participants.length > 0) {
+        await tx.callParticipant.createMany({
+          data: normalizedCall.participants.map((p) => ({
+            callId: call.id,
+            email: p.email,
+            name: p.name,
+            isHost: p.isHost,
+          })),
+        });
+      }
+
+      let hasTranscript = false;
+      if (normalizedCall.transcript && !existing) {
+        await tx.transcript.create({
           data: {
-            title: normalizedCall.title ?? undefined,
-            recordingUrl: normalizedCall.recordingUrl ?? undefined,
-            duration: normalizedCall.duration ?? undefined,
-          },
-        })
-      : await this.prisma.call.create({
-          data: {
-            organizationId,
-            title: normalizedCall.title,
-            provider: provider.callProvider,
-            externalId: normalizedCall.externalId,
-            recordingUrl: normalizedCall.recordingUrl,
-            duration: normalizedCall.duration,
-            occurredAt: normalizedCall.occurredAt,
+            callId: call.id,
+            fullText: normalizedCall.transcript,
+            wordCount: normalizedCall.transcript.split(/\s+/).length,
           },
         });
+        hasTranscript = true;
+      }
 
-    // Store participants (only for new calls to avoid duplicates)
-    if (!existing && normalizedCall.participants.length > 0) {
-      await this.prisma.callParticipant.createMany({
-        data: normalizedCall.participants.map((p) => ({
-          callId: call.id,
-          email: p.email,
-          name: p.name,
-          isHost: p.isHost,
-        })),
-      });
-    }
+      return { call, hasTranscript };
+    });
 
-    // Entity resolution
+    // Entity resolution (outside transaction)
     const participantInputs = normalizedCall.participants.map((p) => ({
       email: p.email ?? undefined,
       name: p.name ?? undefined,
@@ -581,19 +594,6 @@ export class SyncEngine {
         participants: normalizedCall.participants,
         accountHints: normalizedCall.accountHints,
       });
-    }
-
-    // Store transcript
-    let hasTranscript = false;
-    if (normalizedCall.transcript && !existing) {
-      await this.prisma.transcript.create({
-        data: {
-          callId: call.id,
-          fullText: normalizedCall.transcript,
-          wordCount: normalizedCall.transcript.split(/\s+/).length,
-        },
-      });
-      hasTranscript = true;
     }
 
     // Queue for processing pipeline (chunking → tagging → embedding)

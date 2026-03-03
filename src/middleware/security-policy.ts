@@ -21,6 +21,13 @@ const policyCache = new Map<
 const ipAllowlistCache = new Map<string, { entries: string[]; expiresAt: number }>();
 const CACHE_TTL_MS = resolvePositiveInt(process.env.SECURITY_POLICY_CACHE_TTL_SECONDS, 60) * 1000;
 
+function evictIfNeeded<K, V>(map: Map<K, V>, maxSize: number): void {
+  if (map.size > maxSize) {
+    const firstKey = map.keys().next().value;
+    if (firstKey !== undefined) map.delete(firstKey);
+  }
+}
+
 function requestIp(req: Request): string {
   // Rely on Express req.ip (honors trust proxy when configured).
   return req.ip ?? req.socket.remoteAddress ?? "";
@@ -210,6 +217,7 @@ async function getOrgSecurityPolicy(
   });
   const policy = decodeSecurityPolicy(settings?.securityPolicy);
   policyCache.set(organizationId, { policy, expiresAt: now + CACHE_TTL_MS });
+  evictIfNeeded(policyCache, 500);
   return policy;
 }
 
@@ -232,6 +240,7 @@ async function getOrgIpAllowlist(
     entries: allowlist,
     expiresAt: now + CACHE_TTL_MS,
   });
+  evictIfNeeded(ipAllowlistCache, 500);
   return allowlist;
 }
 
