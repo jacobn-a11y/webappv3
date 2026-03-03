@@ -12,6 +12,8 @@ import puppeteer from "puppeteer-core";
 import { google } from "googleapis";
 import { renderLandingPageHtml } from "../api/public-page-renderer.js";
 import type { CalloutBox } from "./landing-page-editor.js";
+import { decodeCalloutBoxes } from "../types/json-boundaries.js";
+import type { StoryContextSettings } from "../types/story-generation.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -23,6 +25,13 @@ interface ExportablePage {
   totalCallHours: number;
   heroImageUrl: string | null;
   customCss: string | null;
+  branding?: {
+    brandName?: string | null;
+    logoUrl?: string | null;
+    primaryColor?: string | null;
+    accentColor?: string | null;
+    surfaceColor?: string | null;
+  } | null;
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -398,15 +407,30 @@ export class LandingPageExporter {
     const page = await this.prisma.landingPage.findUniqueOrThrow({
       where: { id: pageId },
     });
+    const settings = await this.prisma.orgSettings.findUnique({
+      where: { organizationId: page.organizationId },
+      select: { storyContext: true },
+    });
+    const storyContext = (settings?.storyContext ?? {}) as StoryContextSettings;
+    const branding = storyContext.publishedBranding ?? null;
 
     return {
       title: page.title,
       subtitle: page.subtitle,
       body: page.scrubbedBody || page.editableBody,
-      calloutBoxes: (page.calloutBoxes as unknown as CalloutBox[]) ?? [],
+      calloutBoxes: decodeCalloutBoxes(page.calloutBoxes),
       totalCallHours: page.totalCallHours,
       heroImageUrl: page.heroImageUrl,
       customCss: page.customCss,
+      branding: branding
+        ? {
+            brandName: branding.brandName ?? null,
+            logoUrl: branding.logoUrl ?? null,
+            primaryColor: branding.primaryColor ?? null,
+            accentColor: branding.accentColor ?? null,
+            surfaceColor: branding.surfaceColor ?? null,
+          }
+        : null,
     };
   }
 

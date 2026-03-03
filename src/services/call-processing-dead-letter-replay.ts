@@ -20,6 +20,9 @@ interface FailedProcessCallJob {
   id?: string;
   data: ProcessCallJob;
   failedReason?: string;
+  attemptsMade?: number;
+  failedOn?: number;
+  timestamp?: number;
   retry(): Promise<void>;
 }
 
@@ -32,6 +35,8 @@ export interface DeadLetterReplaySummary {
     different_organization: number;
     duplicate_call: number;
     non_retryable: number;
+    outside_replay_window: number;
+    replay_attempt_cap: number;
     replay_error: number;
   };
   replayed_calls: string[];
@@ -39,6 +44,10 @@ export interface DeadLetterReplaySummary {
 
 const DEFAULT_REPLAY_BATCH_SIZE = 50;
 const MAX_REPLAY_BATCH_SIZE = 200;
+const DEFAULT_MAX_FAILURE_AGE_MINUTES = 24 * 60;
+const MAX_FAILURE_AGE_MINUTES_LIMIT = 14 * 24 * 60;
+const DEFAULT_REPLAY_ATTEMPT_CAP = 8;
+const MAX_REPLAY_ATTEMPT_CAP_LIMIT = 25;
 
 const RETRYABLE_PATTERNS: Array<{ className: CallProcessingFailureClass; pattern: RegExp }> = [
   {
@@ -63,6 +72,25 @@ function parseReplayBatchSize(raw: string | undefined): number {
   return Math.max(1, Math.min(MAX_REPLAY_BATCH_SIZE, Math.floor(parsed)));
 }
 
+function parseMaxFailureAgeMinutes(raw: string | undefined): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_MAX_FAILURE_AGE_MINUTES;
+  }
+  return Math.max(
+    5,
+    Math.min(MAX_FAILURE_AGE_MINUTES_LIMIT, Math.floor(parsed))
+  );
+}
+
+function parseReplayAttemptCap(raw: string | undefined): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_REPLAY_ATTEMPT_CAP;
+  }
+  return Math.max(1, Math.min(MAX_REPLAY_ATTEMPT_CAP_LIMIT, Math.floor(parsed)));
+}
+
 export function classifyCallProcessingFailure(
   failedReason: string | null | undefined
 ): CallProcessingFailureClassification {
@@ -85,9 +113,13 @@ async function recordReplayAuditLog(
   input: {
     organizationId: string;
     actorUserId?: string | null;
+    scanned: number;
     replayed: number;
     trigger: "manual" | "scheduled";
     replayedCalls: string[];
+    skipped: DeadLetterReplaySummary["skipped"];
+    replayWindowMinutes: number;
+    replayAttemptCap: number;
   }
 ): Promise<void> {
   const auditLogs = new AuditLogService(prisma);
@@ -103,9 +135,13 @@ async function recordReplayAuditLog(
     targetId: "call-processing",
     severity: "WARN",
     metadata: {
+      scanned: input.scanned,
       replayed: input.replayed,
       replayed_calls: input.replayedCalls,
       trigger: input.trigger,
+      skipped: input.skipped,
+      replay_window_minutes: input.replayWindowMinutes,
+      replay_attempt_cap: input.replayAttemptCap,
     },
   });
 }
@@ -117,6 +153,8 @@ export async function replayRetryableDeadLetterJobs(input: {
   trigger: "manual" | "scheduled";
   prisma?: PrismaClient;
   actorUserId?: string | null;
+  maxFailureAgeMinutes?: number;
+  replayAttemptCap?: number;
 }): Promise<DeadLetterReplaySummary> {
   const limit = Math.max(
     1,
@@ -131,6 +169,26 @@ export async function replayRetryableDeadLetterJobs(input: {
     0,
     limit - 1
   )) as FailedProcessCallJob[];
+  const replayWindowMinutes = Math.max(
+    5,
+    Math.floor(
+      input.maxFailureAgeMinutes ??
+        parseMaxFailureAgeMinutes(
+          process.env.CALL_PROCESSING_DEAD_LETTER_REPLAY_MAX_AGE_MINUTES
+        )
+    )
+  );
+  const replayAttemptCap = Math.max(
+    1,
+    Math.floor(
+      input.replayAttemptCap ??
+        parseReplayAttemptCap(
+          process.env.CALL_PROCESSING_DEAD_LETTER_REPLAY_ATTEMPT_CAP
+        )
+    )
+  );
+  const replayWindowMs = replayWindowMinutes * 60 * 1000;
+  const nowMs = Date.now();
 
   const summary: DeadLetterReplaySummary = {
     trigger: input.trigger,
@@ -141,13 +199,38 @@ export async function replayRetryableDeadLetterJobs(input: {
       different_organization: 0,
       duplicate_call: 0,
       non_retryable: 0,
+      outside_replay_window: 0,
+      replay_attempt_cap: 0,
       replay_error: 0,
     },
     replayed_calls: [],
   };
 
   const seenCallIds = new Set<string>();
-  const replayedByOrganization = new Map<string, string[]>();
+  const orgSummaries = new Map<
+    string,
+    { scanned: number; replayedCalls: string[]; skipped: DeadLetterReplaySummary["skipped"] }
+  >();
+
+  const getOrgSummary = (organizationId: string) => {
+    let existing = orgSummaries.get(organizationId);
+    if (existing) return existing;
+    existing = {
+      scanned: 0,
+      replayedCalls: [],
+      skipped: {
+        missing_payload: 0,
+        different_organization: 0,
+        duplicate_call: 0,
+        non_retryable: 0,
+        outside_replay_window: 0,
+        replay_attempt_cap: 0,
+        replay_error: 0,
+      },
+    };
+    orgSummaries.set(organizationId, existing);
+    return existing;
+  };
 
   for (const job of failedJobs) {
     const payload = job.data;
@@ -166,16 +249,42 @@ export async function replayRetryableDeadLetterJobs(input: {
       summary.skipped.different_organization += 1;
       continue;
     }
+    const orgSummary = getOrgSummary(organizationId);
+    orgSummary.scanned += 1;
 
     if (seenCallIds.has(callId)) {
       summary.skipped.duplicate_call += 1;
+      orgSummary.skipped.duplicate_call += 1;
       continue;
     }
     seenCallIds.add(callId);
 
+    const failureTimestampMs =
+      typeof job.failedOn === "number"
+        ? job.failedOn
+        : typeof job.timestamp === "number"
+          ? job.timestamp
+          : null;
+    if (
+      failureTimestampMs !== null &&
+      nowMs - failureTimestampMs > replayWindowMs
+    ) {
+      summary.skipped.outside_replay_window += 1;
+      orgSummary.skipped.outside_replay_window += 1;
+      continue;
+    }
+
+    const attemptsMade = Math.max(0, Math.floor(job.attemptsMade ?? 0));
+    if (attemptsMade >= replayAttemptCap) {
+      summary.skipped.replay_attempt_cap += 1;
+      orgSummary.skipped.replay_attempt_cap += 1;
+      continue;
+    }
+
     const failureClass = classifyCallProcessingFailure(job.failedReason);
     if (!failureClass.retryable) {
       summary.skipped.non_retryable += 1;
+      orgSummary.skipped.non_retryable += 1;
       continue;
     }
 
@@ -183,12 +292,10 @@ export async function replayRetryableDeadLetterJobs(input: {
       await job.retry();
       summary.replayed += 1;
       summary.replayed_calls.push(callId);
-
-      const orgCalls = replayedByOrganization.get(organizationId) ?? [];
-      orgCalls.push(callId);
-      replayedByOrganization.set(organizationId, orgCalls);
+      orgSummary.replayedCalls.push(callId);
     } catch (error) {
       summary.skipped.replay_error += 1;
+      orgSummary.skipped.replay_error += 1;
       logger.warn("Dead-letter replay failed for call-processing job", {
         callId,
         organizationId,
@@ -201,17 +308,20 @@ export async function replayRetryableDeadLetterJobs(input: {
 
   if (input.prisma) {
     await Promise.all(
-      Array.from(replayedByOrganization.entries()).map(
-        async ([organizationId, replayedCalls]) => {
-          await recordReplayAuditLog(input.prisma as PrismaClient, {
-            organizationId,
-            actorUserId: input.actorUserId ?? null,
-            replayed: replayedCalls.length,
-            trigger: input.trigger,
-            replayedCalls,
-          });
-        }
-      )
+      Array.from(orgSummaries.entries()).map(async ([organizationId, orgSummary]) => {
+        if (orgSummary.scanned <= 0) return;
+        await recordReplayAuditLog(input.prisma as PrismaClient, {
+          organizationId,
+          actorUserId: input.actorUserId ?? null,
+          scanned: orgSummary.scanned,
+          replayed: orgSummary.replayedCalls.length,
+          trigger: input.trigger,
+          replayedCalls: orgSummary.replayedCalls,
+          skipped: orgSummary.skipped,
+          replayWindowMinutes,
+          replayAttemptCap,
+        });
+      })
     );
   }
 
@@ -236,6 +346,12 @@ export function startCallProcessingDeadLetterReplayCron(
   const batchSize = parseReplayBatchSize(
     process.env.CALL_PROCESSING_DEAD_LETTER_REPLAY_BATCH_SIZE
   );
+  const replayWindowMinutes = parseMaxFailureAgeMinutes(
+    process.env.CALL_PROCESSING_DEAD_LETTER_REPLAY_MAX_AGE_MINUTES
+  );
+  const replayAttemptCap = parseReplayAttemptCap(
+    process.env.CALL_PROCESSING_DEAD_LETTER_REPLAY_ATTEMPT_CAP
+  );
 
   const task = cron.schedule(
     schedule,
@@ -246,6 +362,8 @@ export function startCallProcessingDeadLetterReplayCron(
           limit: batchSize,
           trigger: "scheduled",
           prisma,
+          maxFailureAgeMinutes: replayWindowMinutes,
+          replayAttemptCap,
         });
         if (result.replayed > 0 || result.skipped.replay_error > 0) {
           logger.warn("Call-processing dead-letter auto replay run", result);
@@ -264,6 +382,8 @@ export function startCallProcessingDeadLetterReplayCron(
   logger.info("Call-processing dead-letter auto replay cron scheduled", {
     schedule,
     batchSize,
+    replayWindowMinutes,
+    replayAttemptCap,
   });
   return task;
 }

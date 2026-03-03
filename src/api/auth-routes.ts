@@ -20,6 +20,10 @@ import type { WorkOS, User as WorkOSUser } from "@workos-inc/node";
 import { z } from "zod";
 import type { PrismaClient, User, UserRole } from "@prisma/client";
 import { generateSessionToken, hashSessionToken } from "../lib/session-token.js";
+import {
+  decodeSecurityPolicy,
+  type SecurityPolicyBoundary,
+} from "../types/json-boundaries.js";
 
 // ─── Validation Schemas ─────────────────────────────────────────────────────
 
@@ -38,6 +42,10 @@ const passwordLoginSchema = z.object({
 const inviteAcceptSchema = z.object({
   password: z.string().min(8),
   name: z.string().min(1).optional(),
+});
+
+const updateMeSchema = z.object({
+  name: z.string().trim().min(1).max(120),
 });
 
 // ─── First-Login Provisioning ───────────────────────────────────────────────
@@ -151,13 +159,6 @@ function formatUserResponse(user: User) {
   };
 }
 
-interface OrgSecurityPolicy {
-  sso_enforced?: boolean;
-  allowed_sso_domains?: string[];
-  session_controls_enabled?: boolean;
-  max_session_age_hours?: number;
-}
-
 function emailDomain(email: string): string {
   return email.split("@")[1]?.toLowerCase() ?? "";
 }
@@ -165,14 +166,12 @@ function emailDomain(email: string): string {
 async function readOrgSecurityPolicy(
   prisma: PrismaClient,
   organizationId: string
-): Promise<OrgSecurityPolicy> {
+): Promise<SecurityPolicyBoundary> {
   const settings = await prisma.orgSettings.findUnique({
     where: { organizationId },
     select: { securityPolicy: true },
   });
-  const raw = settings?.securityPolicy;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-  return raw as OrgSecurityPolicy;
+  return decodeSecurityPolicy(settings?.securityPolicy);
 }
 
 async function enforcePasswordAuthAllowed(
@@ -448,6 +447,33 @@ export function createAuthRoutes(
       user: formatUserResponse(session.user),
       sessionExpiresAt: session.expiresAt.toISOString(),
     });
+  });
+
+  // PATCH /me — update current user profile fields.
+  router.patch("/me", async (req, res) => {
+    const rawToken = readSessionTokenHeader(req.headers["x-session-token"]);
+    if (!rawToken) {
+      res.status(401).json({ error: "authentication_required" });
+      return;
+    }
+    const session = await findActiveSession(prisma, rawToken);
+    if (!session) {
+      res.status(401).json({ error: "invalid_session" });
+      return;
+    }
+    const parsed = updateMeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "validation_error",
+        details: parsed.error.flatten().fieldErrors,
+      });
+      return;
+    }
+    const user = await prisma.user.update({
+      where: { id: session.user.id },
+      data: { name: parsed.data.name },
+    });
+    res.json({ user: formatUserResponse(user) });
   });
 
   // GET /invites/:token — fetch invite details for acceptance UI.

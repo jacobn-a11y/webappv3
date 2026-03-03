@@ -8,6 +8,7 @@
 
 import type { JobsOptions } from "bullmq";
 import type { ProcessCallJob } from "../services/transcript-processor.js";
+import { parseProcessCallIngestPayload } from "../contracts/process-call-ingest-payload.js";
 import logger from "./logger.js";
 import { Sentry } from "./sentry.js";
 import { metrics } from "./metrics.js";
@@ -57,6 +58,7 @@ export async function enqueueProcessCallJob(
 ): Promise<void> {
   const attempts = Math.max(1, input.enqueueAttempts ?? 3);
   const baseDelayMs = Math.max(50, input.enqueueBaseDelayMs ?? 250);
+  const payload = parseProcessCallIngestPayload(input.payload);
   const jobOptions = buildProcessCallJobOptions({
     jobId: input.options?.jobId,
   });
@@ -64,12 +66,12 @@ export async function enqueueProcessCallJob(
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      await input.queue.add("process-call", input.payload, jobOptions);
+      await input.queue.add("process-call", payload, jobOptions);
       if (attempt > 1) {
         metrics.recordProcessCallEnqueueRecovered();
         logger.warn("Recovered enqueue after retry", {
           source: input.source,
-          callId: input.payload.callId,
+          callId: payload.callId,
           attempt,
         });
       }
@@ -81,7 +83,7 @@ export async function enqueueProcessCallJob(
       const delay = baseDelayMs * attempt + jitter;
       logger.warn("Enqueue retry scheduled", {
         source: input.source,
-        callId: input.payload.callId,
+        callId: payload.callId,
         attempt,
         delayMs: delay,
         error: error instanceof Error ? error.message : String(error),
@@ -95,14 +97,14 @@ export async function enqueueProcessCallJob(
     lastError instanceof Error ? lastError.message : String(lastError);
   metrics.recordProcessCallEnqueueFailure({
     source: input.source,
-    callId: input.payload.callId,
+    callId: payload.callId,
     attempts,
     error: errorMessage,
   });
 
   logger.error("Failed to enqueue process-call job", {
     source: input.source,
-    callId: input.payload.callId,
+    callId: payload.callId,
     attempts,
     error: errorMessage,
   });
@@ -114,7 +116,7 @@ export async function enqueueProcessCallJob(
       tags: {
         source: input.source,
         queue: "call-processing",
-        callId: input.payload.callId,
+        callId: payload.callId,
       },
     }
   );

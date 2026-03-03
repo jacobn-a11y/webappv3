@@ -36,12 +36,18 @@ describe("API Key Routes", () => {
         findMany: vi.fn(),
         findFirst: vi.fn(),
         update: vi.fn(),
-        $transaction: vi.fn(),
+        updateMany: vi.fn(),
       },
       apiUsageLog: {
         count: vi.fn(),
         aggregate: vi.fn(),
         findMany: vi.fn(),
+      },
+      orgSettings: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      auditLog: {
+        create: vi.fn().mockResolvedValue({}),
       },
       $transaction: vi.fn(),
     };
@@ -162,8 +168,11 @@ describe("API Key Routes", () => {
         createdAt: new Date(),
       };
 
-      prisma.$transaction.mockResolvedValue([newKeyRecord, {}]);
-      prisma.apiKey.update.mockResolvedValue({});
+      prisma.apiKey.create.mockResolvedValue(newKeyRecord);
+      prisma.apiKey.updateMany.mockResolvedValue({ count: 1 });
+      prisma.$transaction.mockImplementation(async (ops: Promise<any>[]) =>
+        Promise.all(ops)
+      );
 
       const app = buildApp(prisma);
       const res = await request(app)
@@ -213,15 +222,15 @@ describe("API Key Routes", () => {
         organizationId: "org_test",
         revokedAt: null,
       });
-      prisma.apiKey.update.mockResolvedValue({});
+      prisma.apiKey.updateMany.mockResolvedValue({ count: 1 });
 
       const app = buildApp(prisma);
       const res = await request(app).delete("/api/keys/key_to_revoke");
 
       expect(res.status).toBe(200);
       expect(res.body.revoked).toBe(true);
-      expect(prisma.apiKey.update).toHaveBeenCalledWith({
-        where: { id: "key_to_revoke" },
+      expect(prisma.apiKey.updateMany).toHaveBeenCalledWith({
+        where: { id: "key_to_revoke", organizationId: "org_test" },
         data: { revokedAt: expect.any(Date), gracePeriodEndsAt: null },
       });
     });

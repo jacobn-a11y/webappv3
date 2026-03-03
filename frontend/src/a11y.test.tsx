@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { axe } from "jest-axe";
-import { render } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { Sidebar, type NavEntry } from "./App";
+import { PublicApp, Sidebar } from "./App";
+import type { NavEntry } from "./app/nav-config";
 import { AuthPage } from "./pages/AuthPage";
+import { I18nProvider } from "./i18n";
 
 function TestIcon() {
   return (
@@ -25,25 +27,27 @@ const nav: NavEntry[] = [
 describe("accessibility", () => {
   it("sidebar has no critical axe violations", async () => {
     const { container } = render(
-      <MemoryRouter initialEntries={["/admin/setup"]}>
-        <Sidebar
-          nav={nav}
-          user={{
-            id: "usr_1",
-            email: "admin@example.com",
-            name: "Admin User",
-            organizationId: "org_1",
-            role: "ADMIN",
-          }}
-          collapsed={false}
-          theme="dark"
-          highContrast={false}
-          onToggleCollapse={() => {}}
-          onToggleTheme={() => {}}
-          onToggleHighContrast={() => {}}
-          onLogout={() => {}}
-        />
-      </MemoryRouter>
+      <I18nProvider>
+        <MemoryRouter initialEntries={["/admin/setup"]}>
+          <Sidebar
+            nav={nav}
+            user={{
+              id: "usr_1",
+              email: "admin@example.com",
+              name: "Admin User",
+              organizationId: "org_1",
+              role: "ADMIN",
+            }}
+            collapsed={false}
+            theme="dark"
+            highContrast={false}
+            onToggleCollapse={() => {}}
+            onToggleTheme={() => {}}
+            onToggleHighContrast={() => {}}
+            onLogout={() => {}}
+          />
+        </MemoryRouter>
+      </I18nProvider>
     );
 
     const results = await axe(container);
@@ -58,6 +62,26 @@ describe("accessibility", () => {
         </Routes>
       </MemoryRouter>
     );
+
+    const results = await axe(container);
+    expect(results.violations).toHaveLength(0);
+  });
+
+  it("public app wrapper has landmarks and route-focus behavior", async () => {
+    const { container } = render(
+      <I18nProvider>
+        <MemoryRouter initialEntries={["/auth?mode=login"]}>
+          <PublicApp />
+        </MemoryRouter>
+      </I18nProvider>
+    );
+
+    const heading = await screen.findByRole("heading", { name: "Sign in" });
+    await waitFor(() => {
+      expect(heading).toHaveAttribute("tabindex", "-1");
+    });
+    expect(document.activeElement).toBe(heading);
+    expect(container.querySelector("main#public-main-content")).toBeTruthy();
 
     const results = await axe(container);
     expect(results.violations).toHaveLength(0);

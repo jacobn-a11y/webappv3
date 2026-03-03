@@ -79,6 +79,33 @@ Scope: All findings in Grok architecture, functionality, UI, accessibility, secu
 - [x] `E5 (P2)` Optional theming pass (light/dark/high-contrast support).
   - Acceptance: theme switch with accessible defaults.
 
+## Workstream I: Sales Adoption UX Fast Path
+
+- [ ] `I1 (P1)` Add a global `New Story` entry point with one-click account/opportunity picker.
+  - Acceptance: story creation can start from any page in one click; no dependency on navigating to Account Detail first.
+- [ ] `I2 (P1)` Add deal-stage presets mapped to seller workflow (`Discovery`, `Evaluation`, `Business Case`, `Negotiation`, `Expansion`).
+  - Acceptance: selecting a stage auto-applies recommended story type, format, length, and outline defaults.
+- [ ] `I3 (P1)` Replace the current advanced-first modal with a guided quick flow (`Goal`, `Audience`, `Anonymization`) and an optional `Advanced` panel.
+  - Acceptance: first-time sellers can generate a valid story with <=3 inputs; advanced controls stay available but hidden by default.
+- [ ] `I4 (P1)` Add explicit `Anonymous` vs `Named` generation mode with clear guardrails and copy.
+  - Acceptance: sellers can intentionally switch modes; named mode is blocked when governance requires anonymization review.
+- [ ] `I5 (P1)` Add a `Generate + Package` action that outputs: polished story view, email-ready summary, one-page PDF, and share link.
+  - Acceptance: seller can produce a deal-ready package in one flow without manual copy/paste steps.
+- [ ] `I6 (P1)` Redesign story list cards for readability and speed: rendered markdown preview, status badge, and one-click actions (`Share`, `Copy`, `Create Page`, `Export`).
+  - Acceptance: no raw markdown blocks on cards; top actions are visible without opening editor flows.
+- [ ] `I7 (P1)` Add CRM-first sharing actions (`Copy for CRM note`, `Push to account/opportunity note` where integrations are available).
+  - Acceptance: seller can move a generated story into CRM in <=2 clicks.
+- [ ] `I8 (P1)` Add rapid iteration controls (`Regenerate same`, `Regenerate with tweak`, `Shorter`, `More executive`, `More proof`).
+  - Acceptance: seller can iterate without re-entering the full form.
+- [ ] `I9 (P1)` Add stage-matched packaging templates for both anonymous and named output (e.g., `Executive Recap`, `Champion Forward`, `ROI Proof`).
+  - Acceptance: generated package clearly matches selected stage and audience framing.
+- [ ] `I10 (P1)` Add quote/source confidence chips and a `Safe to Share` indicator.
+  - Acceptance: sellers can quickly trust output quality and identify any content that still needs review.
+- [ ] `I11 (P1)` Add first-run seller onboarding focused on the 60-second first story and first share.
+  - Acceptance: new sellers have a guided path from login to generated+shared story without documentation.
+- [ ] `I12 (P1)` Add adoption telemetry for seller UX: time-to-first-story, time-to-share, stage-preset usage, anonymous-vs-named usage, and drop-off points.
+  - Acceptance: weekly funnel metrics identify where story creation/sharing friction remains.
+
 ## Workstream F: Security Hardening
 
 - [x] `F1 (P0)` Strengthen PII masking beyond regex-only patterns.
@@ -116,6 +143,18 @@ Scope: All findings in Grok architecture, functionality, UI, accessibility, secu
 - Sprint 2: `A4-A5`, `C1-C3`, `D4-D6`, `E1-E3`
 - Sprint 3: `A6`, `B4-B5`, `F3-F4`, `G1-G3`
 - Sprint 4: `C4`, `E4-E5`, `G4`, `H1-H3`
+- Sprint 5: `I1-I4` (fast story start + stage-guided defaults)
+- Sprint 6: `I5-I9` (packaging, sharing, and fast iteration)
+- Sprint 7: `I10-I12` + `D1-D7` (trust signals, onboarding, telemetry, accessibility completion)
+
+## Sales UX Success Metrics
+
+- `Median time to first story`: <= 60 seconds for first-time seller flow
+- `Median time to package + share`: <= 2 minutes from generation start
+- `Stage preset usage`: >= 70% of new story starts use a stage preset
+- `Story-to-share conversion`: >= 65% of generated stories are shared/exported within 24h
+- `Anonymous/Named clarity`: < 5% mode-switch reversals due to confusion
+- `Weekly active sellers using story flow`: +30% vs pre-I-series baseline
 
 ## Current Status
 
@@ -132,3 +171,4 @@ Scope: All findings in Grok architecture, functionality, UI, accessibility, secu
 - `G1-G4` Completed in this branch
 - `H1-H3` Completed in this branch
 - `D1-D7` Deferred to end of queue per active instruction
+- `I1-I12` Pending (new high-impact sales adoption track)

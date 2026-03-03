@@ -38,14 +38,20 @@ Added indexes for heavy read paths:
 
 ## Perf Budgets
 Budgets in `scripts/perf/perf-budget.config.json`:
-- Main frontend JS max: `850KB`
-- Main frontend CSS max: `120KB`
-- API latency budget for load profiles:
+- Main frontend JS max: `920KB`
+- Main frontend CSS max: `126KB`
+- Endpoint latency budgets (CI-enforced via `tests/perf-endpoint-load-budget.test.ts`):
+  - `POST /api/rag/query`: p95 `250ms`, p99 `450ms`
+  - `POST /api/rag/chat`: p95 `250ms`, p99 `450ms`
+  - `POST /api/stories/build`: p95 `300ms`, p99 `550ms`
+- Sustained load threshold budgets:
   - p95: `750ms`
   - p99: `1500ms`
+  - max failure rate: `5%`
 
 ## Tooling
 - `npm run perf:budget`
-  - Validates built frontend bundle sizes against configured budgets.
+  - Validates built frontend bundle sizes and endpoint p95/p99 budgets.
 - `npm run perf:load`
-  - Runs load profiles for tenant sizes (`100`, `500`, `2000`) and checks p95/p99 budgets.
+  - Runs sustained load profiles (`dashboard-sustained`, `story-sustained`) and checks p95/p99 and failure-rate thresholds.
+  - Profile config source: `scripts/perf/load-profile.config.json`.

@@ -1,0 +1,10 @@
+{
+  "files": [
+    { "path": "src/api/dashboard-routes.ts", "maxLines": 1200 },
+    { "path": "src/api/setup-routes.ts", "maxLines": 800 },
+    { "path": "src/api/ai-settings-routes.ts", "maxLines": 800 },
+    { "path": "frontend/src/lib/api.ts", "maxLines": 1200 },
+    { "path": "frontend/src/components/StoryGeneratorModal.tsx", "maxLines": 700 },
+    { "path": "frontend/src/styles/features.css", "maxLines": 3000 }
+  ]
+}

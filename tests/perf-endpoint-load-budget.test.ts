@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import { createTestAppWithServer } from "./helpers/create-test-app.js";
+import { buildMockStoryResponse } from "./helpers/seed.js";
 
 function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0;
@@ -45,7 +48,30 @@ async function runLoad(
 }
 
 describe("endpoint load budgets", () => {
-  it("keeps RAG query/chat p95 latency under budget", async () => {
+  it("keeps key endpoint p95/p99 latency under configured budgets", async () => {
+    const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
+    const budgetPath = path.join(
+      repoRoot,
+      "scripts",
+      "perf",
+      "perf-budget.config.json"
+    );
+    const budget = JSON.parse(fs.readFileSync(budgetPath, "utf8")) as {
+      apiLatency: {
+        endpointBudgets: Record<
+          string,
+          {
+            path: string;
+            method: "GET" | "POST";
+            p95Ms: number;
+            p99Ms: number;
+            requests: number;
+            concurrency: number;
+          }
+        >;
+      };
+    };
+
     const ragEngine = {
       query: async () => ({
         answer: "ok",
@@ -60,19 +86,36 @@ describe("endpoint load budgets", () => {
     };
     const storyBuilder = {
       buildStory: async () => ({
-        title: "Test",
-        markdown: "Test",
-        quotes: [],
+        storyId: "story-perf-1",
+        ...buildMockStoryResponse(),
       }),
     };
     const prisma = {
-      organization: { findUnique: async () => ({ id: "org-test-active", plan: "PROFESSIONAL", trialEndsAt: new Date(Date.now() + 86_400_000) }) },
-      subscription: { findFirst: async () => ({ id: "sub-1", status: "ACTIVE", currentPeriodEnd: new Date(Date.now() + 86_400_000) }) },
+      organization: {
+        findUnique: async () => ({
+          id: "org-test-active",
+          plan: "PROFESSIONAL",
+          trialEndsAt: new Date(Date.now() + 86_400_000),
+        }),
+      },
+      subscription: {
+        findFirst: async () => ({
+          id: "sub-1",
+          status: "ACTIVE",
+          currentPeriodEnd: new Date(Date.now() + 86_400_000),
+        }),
+      },
       userAccountAccess: { findMany: async () => [] },
       orgSettings: { findUnique: async () => ({ timezone: "UTC" }) },
       story: { create: async () => ({ id: "story-1" }) },
       storyQuote: { createMany: async () => ({ count: 0 }) },
-      account: { findFirst: async () => ({ id: "acct-test-001", organizationId: "org-test-active", name: "Acme" }) },
+      account: {
+        findFirst: async () => ({
+          id: "acct-test-001",
+          organizationId: "org-test-active",
+          name: "Acme",
+        }),
+      },
     };
 
     const { request, close } = await createTestAppWithServer({
@@ -82,25 +125,46 @@ describe("endpoint load budgets", () => {
     });
 
     try {
-      const queryLatencies = await runLoad(80, 10, async () => {
-        await request.post("/api/rag/query").send({
+      const endpointPayload: Record<string, Record<string, unknown>> = {
+        rag_query: {
           query: "What changed in the renewal motion?",
           account_id: "acct-test-001",
           organization_id: "org-test-active",
-        });
-      });
-      const chatLatencies = await runLoad(80, 10, async () => {
-        await request.post("/api/rag/chat").send({
+        },
+        rag_chat: {
           query: "Any churn risks this month?",
           account_id: "acct-test-001",
           history: [],
-        });
-      });
+        },
+        story_build: {
+          account_id: "acct-test-001",
+          funnel_stages: ["BOFU"],
+          filter_topics: ["roi_financial_outcomes"],
+          title: "Performance budget story",
+        },
+      };
 
-      const queryP95 = percentile(queryLatencies, 95);
-      const chatP95 = percentile(chatLatencies, 95);
-      expect(queryP95).toBeLessThan(250);
-      expect(chatP95).toBeLessThan(250);
+      for (const [key, endpoint] of Object.entries(
+        budget.apiLatency.endpointBudgets
+      )) {
+        const latencies = await runLoad(
+          endpoint.requests,
+          endpoint.concurrency,
+          async () => {
+            if (endpoint.method === "GET") {
+              await request.get(endpoint.path);
+              return;
+            }
+            await request
+              .post(endpoint.path)
+              .send(endpointPayload[key] ?? {});
+          }
+        );
+        const p95 = percentile(latencies, 95);
+        const p99 = percentile(latencies, 99);
+        expect(p95).toBeLessThan(endpoint.p95Ms);
+        expect(p99).toBeLessThan(endpoint.p99Ms);
+      }
     } finally {
       close();
     }

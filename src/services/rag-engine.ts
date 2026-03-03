@@ -18,6 +18,12 @@ import OpenAI from "openai";
 import { Pinecone } from "@pinecone-database/pinecone";
 import type { PrismaClient } from "@prisma/client";
 import crypto from "crypto";
+import { resolveOperationRuntimePolicy } from "./ai-operation-policy.js";
+import {
+  ensureGroundedCitations,
+  filterGroundedSources,
+} from "./rag-quality-guardrails.js";
+import logger from "../lib/logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -67,6 +73,14 @@ export interface RAGSource {
   speaker: string | null;
   relevanceScore: number;
 }
+
+const RAG_RUNTIME_POLICY = resolveOperationRuntimePolicy({
+  operation: "RAG_QUERY",
+});
+const RAG_MIN_RELEVANCE_SCORE = resolvePositiveFloat(
+  process.env.RAG_MIN_RELEVANCE_SCORE,
+  0.55
+);
 
 // ─── RAG Engine ──────────────────────────────────────────────────────────────
 
@@ -138,12 +152,16 @@ export class RAGEngine {
     });
 
     // ── Step 3: Hydrate sources from PostgreSQL ──────────────────────
-    const sources = await this.hydrateSources(searchResults.matches ?? []);
+    const hydratedSources = await this.hydrateSources(searchResults.matches ?? []);
+    const sources = filterGroundedSources(
+      hydratedSources,
+      RAG_MIN_RELEVANCE_SCORE
+    );
 
     if (sources.length === 0) {
       const empty: RAGResponse = {
         answer:
-          "I couldn't find any relevant transcript segments for this account matching your query.",
+          "I couldn't find sufficiently relevant transcript evidence for this account matching your query.",
         sources: [],
         tokensUsed: 0,
       };
@@ -159,10 +177,12 @@ export class RAGEngine {
       )
       .join("\n\n---\n\n");
 
+    this.logRuntimePolicy();
+
     const response = await this.openai.chat.completions.create({
       model: this.model,
-      temperature: 0.2,
-      max_tokens: 1500,
+      temperature: RAG_RUNTIME_POLICY.temperature,
+      max_tokens: RAG_RUNTIME_POLICY.maxTokens,
       messages: [
         {
           role: "system",
@@ -185,8 +205,9 @@ ${contextBlock}`,
       ],
     });
 
-    const answer =
+    const rawAnswer =
       response.choices[0]?.message?.content ?? "Unable to generate an answer.";
+    const answer = ensureGroundedCitations(rawAnswer, sources.length);
     const tokensUsed = response.usage?.total_tokens ?? 0;
 
     const result: RAGResponse = { answer, sources, tokensUsed };
@@ -231,12 +252,16 @@ ${contextBlock}`,
     });
 
     // ── Step 3: Hydrate sources from PostgreSQL ──────────────────────
-    const sources = await this.hydrateSources(searchResults.matches ?? []);
+    const hydratedSources = await this.hydrateSources(searchResults.matches ?? []);
+    const sources = filterGroundedSources(
+      hydratedSources,
+      RAG_MIN_RELEVANCE_SCORE
+    );
 
     if (sources.length === 0) {
       const empty: RAGChatResponse = {
         answer:
-          "I couldn't find any relevant transcript segments matching your query.",
+          "I couldn't find sufficiently relevant transcript evidence matching your query.",
         sources: [],
         tokensUsed: 0,
       };
@@ -281,15 +306,18 @@ TRANSCRIPT SOURCES:
 ${contextBlock}`,
     });
 
+    this.logRuntimePolicy();
+
     const response = await this.openai.chat.completions.create({
       model: this.model,
-      temperature: 0.2,
-      max_tokens: 1500,
+      temperature: RAG_RUNTIME_POLICY.temperature,
+      max_tokens: RAG_RUNTIME_POLICY.maxTokens,
       messages,
     });
 
-    const answer =
+    const rawAnswer =
       response.choices[0]?.message?.content ?? "Unable to generate an answer.";
+    const answer = ensureGroundedCitations(rawAnswer, sources.length);
     const tokensUsed = response.usage?.total_tokens ?? 0;
 
     const result: RAGChatResponse = { answer, sources, tokensUsed };
@@ -456,6 +484,18 @@ ${contextBlock}`,
     );
   }
 
+  private logRuntimePolicy(): void {
+    logger.info("Resolved AI operation runtime policy", {
+      operation: "RAG_QUERY",
+      temperature: RAG_RUNTIME_POLICY.temperature,
+      maxTokens: RAG_RUNTIME_POLICY.maxTokens,
+      jsonMode: RAG_RUNTIME_POLICY.jsonMode,
+      temperatureSource: RAG_RUNTIME_POLICY.temperatureSource,
+      maxTokensSource: RAG_RUNTIME_POLICY.maxTokensSource,
+      jsonModeSource: RAG_RUNTIME_POLICY.jsonModeSource,
+    });
+  }
+
   private buildChatCacheKey(input: RAGChatQuery, topK: number): string {
     return hashCacheKey(
       "chat",
@@ -517,6 +557,15 @@ function hashCacheKey(...parts: string[]): string {
 function resolvePositiveInt(raw: string | undefined, fallback: number): number {
   if (!raw) return fallback;
   const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function resolvePositiveFloat(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
+  const parsed = Number.parseFloat(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return fallback;
   }

@@ -1,13 +1,10 @@
 import type { PrismaClient } from "@prisma/client";
+import {
+  decodeDataGovernancePolicy,
+  type DataGovernancePolicyBoundary,
+} from "../types/json-boundaries.js";
 
-export interface DataGovernancePolicy {
-  retention_days?: number;
-  audit_log_retention_days?: number;
-  legal_hold_enabled?: boolean;
-  pii_export_enabled?: boolean;
-  deletion_requires_approval?: boolean;
-  allow_named_story_exports?: boolean;
-}
+export type DataGovernancePolicy = DataGovernancePolicyBoundary;
 
 export async function getDataGovernancePolicy(
   prisma: PrismaClient,
@@ -17,11 +14,7 @@ export async function getDataGovernancePolicy(
     where: { organizationId },
     select: { dataGovernancePolicy: true },
   });
-  const raw = settings?.dataGovernancePolicy;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return {};
-  }
-  return raw as DataGovernancePolicy;
+  return decodeDataGovernancePolicy(settings?.dataGovernancePolicy);
 }
 
 export async function isLegalHoldEnabled(

@@ -25,6 +25,7 @@ import {
 import { RateLimiter } from "./rate-limiter.js";
 import { TagCache, type CachedTag } from "./tag-cache.js";
 import { ConfidenceCalibrator } from "./confidence-calibrator.js";
+import { resolveOperationRuntimePolicy } from "./ai-operation-policy.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -136,6 +137,10 @@ RULES:
 4. Look especially for QUANTIFIED VALUE (numbers, percentages, dollar amounts) which signals BOFU topics.
 5. Respond ONLY with valid JSON.`;
 
+const TAGGING_RUNTIME_POLICY = resolveOperationRuntimePolicy({
+  operation: "TRANSCRIPT_TAGGING",
+});
+
 // ─── Core Tagger ─────────────────────────────────────────────────────────────
 
 export class AITagger {
@@ -205,8 +210,9 @@ ${chunkText}
     if (options?.aiClient) {
       const completion = await options.aiClient.chatCompletion({
         messages,
-        temperature: 0.1,
-        jsonMode: true,
+        temperature: TAGGING_RUNTIME_POLICY.temperature,
+        maxTokens: TAGGING_RUNTIME_POLICY.maxTokens,
+        jsonMode: TAGGING_RUNTIME_POLICY.jsonMode,
         idempotencyKey: options.idempotencyKey,
       });
       this.rateLimiter.reportUsage(completion.totalTokens, estimatedTokens);
@@ -214,7 +220,8 @@ ${chunkText}
     } else {
       const response = await this.openai.chat.completions.create({
         model: this.model,
-        temperature: 0.1,
+        temperature: TAGGING_RUNTIME_POLICY.temperature,
+        max_tokens: TAGGING_RUNTIME_POLICY.maxTokens,
         response_format: { type: "json_object" },
         messages,
       });

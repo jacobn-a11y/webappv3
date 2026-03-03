@@ -39,11 +39,19 @@ export function pickFirstHeaderValue(
 export function validateWebhookTimestamp(
   options: ValidateWebhookTimestampOptions
 ): ValidateWebhookTimestampResult {
-  const observedAt = parseWebhookTimestamp(options.timestamp);
-  if (!observedAt) {
+  if (isMissingTimestamp(options.timestamp)) {
     return {
       ok: !options.required,
       reason: options.required ? "timestamp_missing" : null,
+      observedAt: null,
+    };
+  }
+
+  const observedAt = parseWebhookTimestamp(options.timestamp);
+  if (!observedAt) {
+    return {
+      ok: false,
+      reason: "timestamp_invalid",
       observedAt: null,
     };
   }
@@ -58,6 +66,14 @@ export function validateWebhookTimestamp(
     reason: withinWindow ? null : "timestamp_out_of_window",
     observedAt,
   };
+}
+
+function isMissingTimestamp(value: unknown): boolean {
+  if (value == null) return true;
+  if (typeof value === "string") {
+    return value.trim().length === 0;
+  }
+  return false;
 }
 
 function parseWebhookTimestamp(value: unknown): Date | null {

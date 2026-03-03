@@ -23,6 +23,7 @@ import {
   type StoryPromptDefaults,
   type StoryTypeInput,
 } from "../types/story-generation.js";
+import { resolveOperationRuntimePolicy } from "./ai-operation-policy.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -70,6 +71,7 @@ interface TranscriptSegment {
   callId: string;
   chunkId: string;
   callTitle: string | null;
+  recordingUrl: string | null;
   occurredAt: Date;
   startMs: number | null;
   chunkText: string;
@@ -84,6 +86,11 @@ interface ExtractedQuote {
   metricType: string | null;
   metricValue: string | null;
   callId: string;
+  sourceChunkId: string | null;
+  sourceTimestampMs: number | null;
+  sourceCallTitle: string | null;
+  sourceRecordingUrl: string | null;
+  confidenceScore?: number;
 }
 
 interface StoryResult {
@@ -126,6 +133,14 @@ RULES:
 2. The quote MUST contain a quantified value. Skip purely qualitative statements.
 3. Include enough of the quote for context but trim filler words.
 4. Respond with JSON: { "quotes": [...] }`;
+
+const STORY_RUNTIME_POLICY = resolveOperationRuntimePolicy({
+  operation: "STORY_GENERATION",
+});
+
+const QUOTE_RUNTIME_POLICY = resolveOperationRuntimePolicy({
+  operation: "QUOTE_EXTRACTION",
+});
 
 // ─── Story Builder ───────────────────────────────────────────────────────────
 
@@ -246,10 +261,19 @@ export class StoryBuilder {
 
     // Persist quotes
     for (const q of quotes) {
-      const sourceSegment = segments.find((s) =>
-        s.chunkText.toLowerCase().includes(q.quoteText.slice(0, 24).toLowerCase())
-      );
+      const sourceSegment =
+        segments.find((s) => s.chunkId === q.sourceChunkId) ??
+        segments.find((s) =>
+          s.chunkText.toLowerCase().includes(q.quoteText.slice(0, 24).toLowerCase())
+        );
       const quoteConfidence = this.computeQuoteConfidence(sourceSegment);
+      const sourceCallId = sourceSegment?.callId ?? q.callId;
+      const sourceChunkId = q.sourceChunkId ?? sourceSegment?.chunkId ?? null;
+      const sourceTimestampMs = q.sourceTimestampMs ?? sourceSegment?.startMs ?? null;
+      const sourceCallTitle = q.sourceCallTitle ?? sourceSegment?.callTitle ?? null;
+      const sourceRecordingUrl = q.sourceRecordingUrl ?? sourceSegment?.recordingUrl ?? null;
+      q.confidenceScore = quoteConfidence;
+
       await this.prisma.highValueQuote.create({
         data: {
           storyId: story.id,
@@ -262,9 +286,11 @@ export class StoryBuilder {
           confidenceScore: quoteConfidence,
           lineageMetadata: sourceSegment
             ? {
-                source_call_id: sourceSegment.callId,
-                source_chunk_id: sourceSegment.chunkId,
-                source_start_ms: sourceSegment.startMs,
+                source_call_id: sourceCallId,
+                source_chunk_id: sourceChunkId,
+                source_start_ms: sourceTimestampMs,
+                source_call_title: sourceCallTitle,
+                source_recording_url: sourceRecordingUrl,
                 topics: sourceSegment.tags.map((t) => t.topic),
               }
             : undefined,
@@ -277,15 +303,17 @@ export class StoryBuilder {
           storyId: story.id,
           claimType: "QUOTE",
           claimText: q.quoteText,
-          sourceCallId: sourceSegment?.callId ?? q.callId,
-          sourceChunkId: sourceSegment?.chunkId ?? null,
-          sourceTimestampMs: sourceSegment?.startMs ?? null,
+          sourceCallId,
+          sourceChunkId,
+          sourceTimestampMs,
           confidenceScore: quoteConfidence,
           metadata: {
             speaker: q.speaker,
             context: q.context,
             metric_type: q.metricType,
             metric_value: q.metricValue,
+            source_call_title: sourceCallTitle,
+            source_recording_url: sourceRecordingUrl,
           },
         },
       });
@@ -344,6 +372,7 @@ export class StoryBuilder {
           callId: call.id,
           chunkId: chunk.id,
           callTitle: call.title,
+          recordingUrl: call.recordingUrl,
           occurredAt: call.occurredAt,
           startMs: chunk.startMs,
           chunkText: chunk.text,
@@ -407,8 +436,8 @@ export class StoryBuilder {
     if (aiClient) {
       const completion = await aiClient.chatCompletion({
         messages,
-        temperature: 0.3,
-        maxTokens: 4000,
+        temperature: STORY_RUNTIME_POLICY.temperature,
+        maxTokens: STORY_RUNTIME_POLICY.maxTokens,
         idempotencyKey: aiIdempotencyKey
           ? `${aiIdempotencyKey}:narrative`
           : undefined,
@@ -425,8 +454,8 @@ export class StoryBuilder {
     if (onNarrativeToken) {
       const stream = await this.openai.chat.completions.create({
         model: this.model,
-        temperature: 0.3,
-        max_tokens: 4000,
+        temperature: STORY_RUNTIME_POLICY.temperature,
+        max_tokens: STORY_RUNTIME_POLICY.maxTokens,
         stream: true,
         messages,
       });
@@ -443,8 +472,8 @@ export class StoryBuilder {
 
     const response = await this.openai.chat.completions.create({
       model: this.model,
-      temperature: 0.3,
-      max_tokens: 4000,
+      temperature: STORY_RUNTIME_POLICY.temperature,
+      max_tokens: STORY_RUNTIME_POLICY.maxTokens,
       messages,
     });
 
@@ -470,8 +499,8 @@ export class StoryBuilder {
 
     const response = await this.openai.chat.completions.create({
       model: this.model,
-      temperature: 0.3,
-      max_tokens: 4000,
+      temperature: STORY_RUNTIME_POLICY.temperature,
+      max_tokens: STORY_RUNTIME_POLICY.maxTokens,
       messages: [
         { role: "system", content: JOURNEY_SUMMARY_PROMPT },
         {
@@ -589,6 +618,10 @@ ${input.mergedMarkdown}`;
     aiClient?: AIClient,
     aiIdempotencyKey?: string
   ): Promise<ExtractedQuote[]> {
+    if (segments.length === 0) {
+      return [];
+    }
+
     // Only send segments likely to contain quantified value (BoFu + Post-Sale)
     const valuableSegments = segments.filter((s) =>
       s.tags.some(
@@ -623,8 +656,9 @@ ${input.mergedMarkdown}`;
       ? (
           await aiClient.chatCompletion({
             messages,
-            temperature: 0.1,
-            jsonMode: true,
+            temperature: QUOTE_RUNTIME_POLICY.temperature,
+            maxTokens: QUOTE_RUNTIME_POLICY.maxTokens,
+            jsonMode: QUOTE_RUNTIME_POLICY.jsonMode,
             idempotencyKey: aiIdempotencyKey
               ? `${aiIdempotencyKey}:quotes`
               : undefined,
@@ -633,7 +667,8 @@ ${input.mergedMarkdown}`;
       : (
           await this.openai.chat.completions.create({
             model: this.model,
-            temperature: 0.1,
+            temperature: QUOTE_RUNTIME_POLICY.temperature,
+            max_tokens: QUOTE_RUNTIME_POLICY.maxTokens,
             response_format: { type: "json_object" },
             messages,
           })
@@ -655,13 +690,18 @@ ${input.mergedMarkdown}`;
         const matchingSegment = targetSegments.find((s) =>
           s.chunkText.includes(q.quote_text.slice(0, 50))
         );
+        const selectedSegment = matchingSegment ?? targetSegments[0];
         return {
           speaker: q.speaker ?? null,
           quoteText: q.quote_text,
           context: q.context ?? null,
           metricType: q.metric_type ?? null,
           metricValue: q.metric_value ?? null,
-          callId: matchingSegment?.callId ?? targetSegments[0].callId,
+          callId: selectedSegment.callId,
+          sourceChunkId: selectedSegment.chunkId,
+          sourceTimestampMs: selectedSegment.startMs,
+          sourceCallTitle: selectedSegment.callTitle,
+          sourceRecordingUrl: selectedSegment.recordingUrl,
         };
       });
     } catch {

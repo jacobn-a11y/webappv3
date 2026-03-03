@@ -25,6 +25,8 @@ import {
   normalizeCompanyName,
   extractEmailDomain,
 } from "../services/entity-resolution.js";
+import { decodeCredentials } from "../types/json-boundaries.js";
+import { resolveIntegrationProviderSelection } from "../services/provider-policy.js";
 import type {
   CallRecordingProvider,
   CRMDataProvider,
@@ -35,8 +37,29 @@ import type {
   ProviderCredentials,
   ProviderRegistry,
 } from "./types.js";
+import { coerceProviderCredentials } from "./types.js";
 
 // ─── Sync Engine ────────────────────────────────────────────────────────────
+
+const DEFAULT_DEAD_LETTER_REPLAY_WINDOW_HOURS = 72;
+const MAX_DEAD_LETTER_REPLAY_WINDOW_HOURS = 24 * 30;
+const DEFAULT_DEAD_LETTER_REPLAY_ATTEMPT_CAP = 3;
+const MAX_DEAD_LETTER_REPLAY_ATTEMPT_CAP = 20;
+
+interface ReplayPolicy {
+  replayWindowHours: number;
+  replayWindowMs: number;
+  replayAttemptCap: number;
+}
+
+export interface ReplayFailedRunResult {
+  sourceRunId: string;
+  replayRunId: string;
+  replayAttempt: number;
+  replayAttemptCap: number;
+  replayWindowHours: number;
+  sourceRunAgeHours: number;
+}
 
 export class SyncEngine {
   private prisma: PrismaClient;
@@ -120,6 +143,7 @@ export class SyncEngine {
     config: IntegrationConfig;
     runType: string;
     idempotencyKey: string;
+    metadata?: Record<string, unknown> | null;
   }) {
     const existing = await this.prisma.integrationRun.findUnique({
       where: {
@@ -143,6 +167,10 @@ export class SyncEngine {
           processedCount: 0,
           successCount: 0,
           failureCount: 0,
+          metadata: {
+            trigger: input.runType,
+            ...(input.metadata ?? {}),
+          } as Prisma.InputJsonValue,
         },
       });
       return { run: restarted, skipped: false };
@@ -156,7 +184,10 @@ export class SyncEngine {
         runType: input.runType,
         status: "RUNNING",
         idempotencyKey: input.idempotencyKey,
-        metadata: { trigger: input.runType },
+        metadata: {
+          trigger: input.runType,
+          ...(input.metadata ?? {}),
+        } as Prisma.InputJsonValue,
       },
     });
     return { run, skipped: false };
@@ -225,10 +256,11 @@ export class SyncEngine {
   async syncIntegration(
     config: IntegrationConfig,
     options?: {
-      runType?: "SCHEDULED" | "MANUAL" | "BACKFILL";
+      runType?: "SCHEDULED" | "MANUAL" | "BACKFILL" | "REPLAY";
       idempotencyKey?: string;
       sinceOverride?: Date | null;
       cursorOverride?: string | null;
+      metadata?: Record<string, unknown> | null;
     }
   ): Promise<string> {
     const runType = options?.runType ?? "MANUAL";
@@ -239,21 +271,27 @@ export class SyncEngine {
       config,
       runType,
       idempotencyKey,
+      metadata: options?.metadata ?? null,
     });
     if (started.skipped) return started.run.id;
 
     let processedCount = 0;
     let successCount = 0;
     let failureCount = 0;
-    const credentials = config.credentials as unknown as ProviderCredentials;
+    const credentials = coerceProviderCredentials(
+      decodeCredentials(config.credentials)
+    );
 
     try {
       // Route to the appropriate sync handler
-      const callProvider = this.registry.callRecording.get(config.provider);
-      if (callProvider) {
+      const selection = resolveIntegrationProviderSelection(
+        config.provider,
+        this.registry
+      );
+      if (selection.kind === "call_recording" && selection.callProvider) {
         const synced = await this.syncCallRecordingProvider(
           config,
-          callProvider,
+          selection.callProvider,
           credentials,
           {
             sinceOverride: options?.sinceOverride ?? null,
@@ -262,15 +300,18 @@ export class SyncEngine {
         );
         processedCount += synced;
         successCount += synced;
+      } else if (selection.kind === "crm" && selection.crmProvider) {
+        const synced = await this.syncCRMProvider(
+          config,
+          selection.crmProvider,
+          credentials
+        );
+        processedCount += synced;
+        successCount += synced;
       } else {
-        const crmProvider = this.registry.crm.get(config.provider);
-        if (crmProvider) {
-          const synced = await this.syncCRMProvider(config, crmProvider, credentials);
-          processedCount += synced;
-          successCount += synced;
-        } else {
-          throw new Error(`No provider implementation registered for ${config.provider}`);
-        }
+        throw new Error(
+          `No provider implementation registered for ${config.provider}`
+        );
       }
 
       await this.finishIntegrationRun({
@@ -295,7 +336,44 @@ export class SyncEngine {
     }
   }
 
-  async replayFailedRun(runId: string, organizationId: string): Promise<void> {
+  private resolveReplayPolicy(): ReplayPolicy {
+    const rawWindow = Number(
+      process.env.INTEGRATION_DEAD_LETTER_REPLAY_WINDOW_HOURS
+    );
+    const replayWindowHours = Number.isFinite(rawWindow)
+      ? Math.max(
+          1,
+          Math.min(
+            MAX_DEAD_LETTER_REPLAY_WINDOW_HOURS,
+            Math.floor(rawWindow)
+          )
+        )
+      : DEFAULT_DEAD_LETTER_REPLAY_WINDOW_HOURS;
+
+    const rawAttemptCap = Number(
+      process.env.INTEGRATION_DEAD_LETTER_REPLAY_ATTEMPT_CAP
+    );
+    const replayAttemptCap = Number.isFinite(rawAttemptCap)
+      ? Math.max(
+          1,
+          Math.min(
+            MAX_DEAD_LETTER_REPLAY_ATTEMPT_CAP,
+            Math.floor(rawAttemptCap)
+          )
+        )
+      : DEFAULT_DEAD_LETTER_REPLAY_ATTEMPT_CAP;
+
+    return {
+      replayWindowHours,
+      replayWindowMs: replayWindowHours * 60 * 60 * 1000,
+      replayAttemptCap,
+    };
+  }
+
+  async replayFailedRun(
+    runId: string,
+    organizationId: string
+  ): Promise<ReplayFailedRunResult> {
     const run = await this.prisma.integrationRun.findFirst({
       where: {
         id: runId,
@@ -306,11 +384,55 @@ export class SyncEngine {
     if (!run || !run.integrationConfig) {
       throw new Error("Integration run not found for this organization.");
     }
+    if (run.status !== "FAILED") {
+      throw new Error("Only failed integration runs can be replayed.");
+    }
 
-    await this.syncIntegration(run.integrationConfig, {
-      runType: "BACKFILL",
-      idempotencyKey: `replay:${run.id}:${Date.now()}`,
+    const replayPolicy = this.resolveReplayPolicy();
+    const replayReference = run.finishedAt ?? run.startedAt;
+    const sourceRunAgeMs = Date.now() - replayReference.getTime();
+    if (sourceRunAgeMs > replayPolicy.replayWindowMs) {
+      throw new Error(
+        `Replay window exceeded. Runs older than ${replayPolicy.replayWindowHours} hours cannot be replayed.`
+      );
+    }
+
+    const replayPrefix = `replay:${run.id}:`;
+    const previousReplayAttempts = await this.prisma.integrationRun.count({
+      where: {
+        organizationId,
+        runType: "REPLAY",
+        idempotencyKey: { startsWith: replayPrefix },
+      },
     });
+    if (previousReplayAttempts >= replayPolicy.replayAttemptCap) {
+      throw new Error(
+        `Replay attempt cap reached (${replayPolicy.replayAttemptCap}). Create a new backfill run instead.`
+      );
+    }
+    const replayAttempt = previousReplayAttempts + 1;
+
+    const replayRunId = await this.syncIntegration(run.integrationConfig, {
+      runType: "REPLAY",
+      idempotencyKey: `replay:${run.id}:${Date.now()}`,
+      metadata: {
+        replay_of_run_id: run.id,
+        replay_attempt: replayAttempt,
+        replay_attempt_cap: replayPolicy.replayAttemptCap,
+        replay_window_hours: replayPolicy.replayWindowHours,
+        source_run_started_at: run.startedAt.toISOString(),
+        source_run_finished_at: run.finishedAt?.toISOString() ?? null,
+      },
+    });
+
+    return {
+      sourceRunId: run.id,
+      replayRunId,
+      replayAttempt,
+      replayAttemptCap: replayPolicy.replayAttemptCap,
+      replayWindowHours: replayPolicy.replayWindowHours,
+      sourceRunAgeHours: Math.round((sourceRunAgeMs / (60 * 60 * 1000)) * 100) / 100,
+    };
   }
 
   // ─── Call Recording Sync ──────────────────────────────────────────────────

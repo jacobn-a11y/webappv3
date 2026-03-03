@@ -114,10 +114,26 @@ export function renderLandingPageHtml(page: {
   totalCallHours: number;
   heroImageUrl: string | null;
   customCss: string | null;
+  branding?: {
+    brandName?: string | null;
+    logoUrl?: string | null;
+    primaryColor?: string | null;
+    accentColor?: string | null;
+    surfaceColor?: string | null;
+  } | null;
 }): string {
+  const safeBranding = sanitizeBrandingSettings(page.branding);
   const bodyHtml = markdownToHtml(page.body);
   const safeCustomCss = sanitizeCustomCss(page.customCss) ?? "";
   const safeHeroImageUrl = sanitizeHeroImageUrl(page.heroImageUrl);
+  const brandingCssOverrides = [
+    safeBranding?.primaryColor ? `--color-accent: ${safeBranding.primaryColor};` : null,
+    safeBranding?.primaryColor ? `--color-focus: ${safeBranding.primaryColor};` : null,
+    safeBranding?.accentColor ? `--color-accent-hover: ${safeBranding.accentColor};` : null,
+    safeBranding?.surfaceColor ? `--color-surface: ${safeBranding.surfaceColor};` : null,
+  ]
+    .filter((value): value is string => value !== null)
+    .join("\n      ");
 
   // Reading time estimate (~200 words/min average reading speed)
   const wordCount = page.body.split(/\s+/).filter(Boolean).length;
@@ -149,6 +165,22 @@ export function renderLandingPageHtml(page: {
   const heroSection = safeHeroImageUrl
     ? `<div class="hero" role="img" aria-label="Page hero image" style="background-image: url('${escapeHtml(safeHeroImageUrl)}')"></div>`
     : "";
+
+  const brandingHeader =
+    safeBranding?.brandName || safeBranding?.logoUrl
+      ? `<div class="branding-header" aria-label="Organization branding">
+      ${
+        safeBranding.logoUrl
+          ? `<img class="branding-header__logo" src="${escapeHtml(safeBranding.logoUrl)}" alt="${escapeHtml(safeBranding.brandName ? `${safeBranding.brandName} logo` : "Organization logo")}" />`
+          : ""
+      }
+      ${
+        safeBranding.brandName
+          ? `<span class="branding-header__name">${escapeHtml(safeBranding.brandName)}</span>`
+          : ""
+      }
+    </div>`
+      : "";
 
   const hours = page.totalCallHours;
   const hoursLabel = hours === 1 ? "hour" : "hours";
@@ -187,6 +219,7 @@ export function renderLandingPageHtml(page: {
       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --font-serif: 'Georgia', 'Times New Roman', serif;
       --max-width: 720px;
+      ${brandingCssOverrides}
     }
 
     html { scroll-behavior: smooth; }
@@ -249,6 +282,30 @@ export function renderLandingPageHtml(page: {
       margin-bottom: 3rem;
       padding-bottom: 2rem;
       border-bottom: 2px solid var(--color-accent);
+    }
+    .branding-header {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+      padding: 0.4rem 0.7rem;
+      border: 1px solid var(--color-border);
+      border-radius: 999px;
+      background: var(--color-surface);
+    }
+    .branding-header__logo {
+      width: 24px;
+      height: 24px;
+      object-fit: contain;
+      border-radius: 6px;
+      border: 1px solid var(--color-border);
+      background: white;
+    }
+    .branding-header__name {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--color-text-secondary);
+      letter-spacing: 0.01em;
     }
     .page-header h1 {
       font-size: 2.25rem;
@@ -537,6 +594,7 @@ export function renderLandingPageHtml(page: {
 
   <main id="main-content" class="container">
     <header class="page-header">
+      ${brandingHeader}
       <h1>${escapeHtml(page.title)}</h1>
       ${page.subtitle ? `<p class="subtitle">${escapeHtml(page.subtitle)}</p>` : ""}
       <div class="reading-time" aria-label="Estimated reading time">
@@ -579,7 +637,14 @@ export function renderLandingPageHtml(page: {
 
   <!-- Footer -->
   <footer class="page-footer" role="contentinfo">
-    <p>Powered by <strong>StoryEngine</strong></p>
+    <p>
+      Powered by <strong>StoryEngine</strong>
+      ${
+        safeBranding?.brandName
+          ? ` for <strong>${escapeHtml(safeBranding.brandName)}</strong>`
+          : ""
+      }
+    </p>
   </footer>
 
   <!-- Floating AI Compilation Badge -->
@@ -952,6 +1017,56 @@ function sanitizeHeroImageUrl(url: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+function sanitizeBrandingSettings(branding: {
+  brandName?: string | null;
+  logoUrl?: string | null;
+  primaryColor?: string | null;
+  accentColor?: string | null;
+  surfaceColor?: string | null;
+} | null | undefined):
+  | {
+      brandName?: string;
+      logoUrl?: string;
+      primaryColor?: string;
+      accentColor?: string;
+      surfaceColor?: string;
+    }
+  | null {
+  if (!branding) {
+    return null;
+  }
+  const brandName = branding.brandName?.trim();
+  const safeBrandName = brandName ? brandName.slice(0, 120) : undefined;
+  const safeLogoUrl = sanitizeHeroImageUrl(branding.logoUrl ?? null) ?? undefined;
+  const safePrimaryColor = sanitizeHexColor(branding.primaryColor);
+  const safeAccentColor = sanitizeHexColor(branding.accentColor);
+  const safeSurfaceColor = sanitizeHexColor(branding.surfaceColor);
+  if (
+    !safeBrandName &&
+    !safeLogoUrl &&
+    !safePrimaryColor &&
+    !safeAccentColor &&
+    !safeSurfaceColor
+  ) {
+    return null;
+  }
+  return {
+    brandName: safeBrandName,
+    logoUrl: safeLogoUrl,
+    primaryColor: safePrimaryColor ?? undefined,
+    accentColor: safeAccentColor ?? undefined,
+    surfaceColor: safeSurfaceColor ?? undefined,
+  };
+}
+
+function sanitizeHexColor(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(trimmed) ? trimmed : null;
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────────────

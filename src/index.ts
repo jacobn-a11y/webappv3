@@ -102,10 +102,14 @@ process.on("SIGTERM", async () => {
   await workers.transcriptFetchWorker.close();
   await workers.syncWorker.close();
   await workers.storyRegenWorker.close();
+  await workers.postPublishValidationWorker.close();
+  await workers.scheduledPagePublishWorker.close();
   await queues.processingQueue.close();
   await queues.transcriptFetchQueue.close();
   await queues.syncQueue.close();
   await queues.storyRegenQueue.close();
+  await queues.postPublishValidationQueue.close();
+  await queues.scheduledPagePublishQueue.close();
   await shutdownOtel();
   await prisma.$disconnect();
   process.exit(0);

@@ -119,4 +119,55 @@ describe("call-processing-dead-letter-replay", () => {
     expect(second.replayed).toBe(0);
     expect(retry).toHaveBeenCalledTimes(1);
   });
+
+  it("enforces replay age windows and replay attempt caps", async () => {
+    const oldRetry = vi.fn().mockResolvedValue(undefined);
+    const cappedRetry = vi.fn().mockResolvedValue(undefined);
+    const now = Date.now();
+
+    const processingQueue = {
+      getJobs: vi.fn().mockResolvedValue([
+        {
+          id: "job-old",
+          data: {
+            callId: "call_old",
+            organizationId: "org_1",
+            accountId: null,
+            hasTranscript: true,
+          },
+          failedReason: "redis timeout",
+          failedOn: now - 2 * 60 * 60 * 1000,
+          attemptsMade: 1,
+          retry: oldRetry,
+        },
+        {
+          id: "job-capped",
+          data: {
+            callId: "call_capped",
+            organizationId: "org_1",
+            accountId: null,
+            hasTranscript: true,
+          },
+          failedReason: "503 upstream unavailable",
+          failedOn: now - 5 * 60 * 1000,
+          attemptsMade: 6,
+          retry: cappedRetry,
+        },
+      ]),
+    } as any;
+
+    const summary = await replayRetryableDeadLetterJobs({
+      processingQueue,
+      organizationId: "org_1",
+      trigger: "manual",
+      maxFailureAgeMinutes: 30,
+      replayAttemptCap: 6,
+    });
+
+    expect(summary.replayed).toBe(0);
+    expect(summary.skipped.outside_replay_window).toBe(1);
+    expect(summary.skipped.replay_attempt_cap).toBe(1);
+    expect(oldRetry).not.toHaveBeenCalled();
+    expect(cappedRetry).not.toHaveBeenCalled();
+  });
 });

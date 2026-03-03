@@ -7,6 +7,7 @@ import { EventEmitter } from "node:events";
 import type { NextFunction } from "express";
 import type { ApiKeyAuthRequest } from "../middleware/api-key-auth.js";
 import { createApiUsageLogger } from "../middleware/api-usage-logger.js";
+import appLogger from "../lib/logger.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -136,7 +137,9 @@ describe("createApiUsageLogger", () => {
 
   it("does not block the response if DB write fails", async () => {
     prisma.apiUsageLog.create.mockRejectedValue(new Error("DB down"));
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi
+      .spyOn(appLogger, "warn")
+      .mockImplementation(() => appLogger);
 
     const logger = createApiUsageLogger(prisma);
     const req = mockRequest();
@@ -148,10 +151,10 @@ describe("createApiUsageLogger", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    expect(consoleSpy).toHaveBeenCalledWith(
-      "Failed to log API usage:",
-      expect.any(Error)
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Failed to log API usage",
+      expect.objectContaining({ error: expect.any(Error) })
     );
-    consoleSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 });

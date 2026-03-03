@@ -148,4 +148,54 @@ describe("renderLandingPageHtml", () => {
 
     expect(html).not.toContain("background-image:");
   });
+
+  it("applies org branding styles and header when values are valid", () => {
+    const html = renderLandingPageHtml({
+      title: "Branded Page",
+      subtitle: null,
+      body: "Body",
+      calloutBoxes: [],
+      totalCallHours: 1,
+      heroImageUrl: null,
+      customCss: null,
+      branding: {
+        brandName: "Acme Corp",
+        logoUrl: "https://cdn.example.com/logo.png",
+        primaryColor: "#112233",
+        accentColor: "#334455",
+        surfaceColor: "#f7f7f7",
+      },
+    });
+
+    expect(html).toContain("Acme Corp");
+    expect(html).toContain("https://cdn.example.com/logo.png");
+    expect(html).toContain("--color-accent: #112233;");
+    expect(html).toContain("--color-accent-hover: #334455;");
+    expect(html).toContain("--color-surface: #f7f7f7;");
+  });
+
+  it("sanitizes unsafe branding values", () => {
+    const html = renderLandingPageHtml({
+      title: "Unsafe Branding",
+      subtitle: null,
+      body: "Body",
+      calloutBoxes: [],
+      totalCallHours: 1,
+      heroImageUrl: null,
+      customCss: null,
+      branding: {
+        brandName: "Unsafe Org",
+        logoUrl: "javascript:alert(1)",
+        primaryColor: "red",
+        accentColor: "var(--hack)",
+        surfaceColor: "#zzzzzz",
+      },
+    });
+
+    expect(html).toContain("Unsafe Org");
+    expect(html).not.toContain("javascript:alert(1)");
+    expect(html).not.toContain("--color-accent: red;");
+    expect(html).not.toContain("--color-accent-hover: var(--hack);");
+    expect(html).not.toContain("--color-surface: #zzzzzz;");
+  });
 });

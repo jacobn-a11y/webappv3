@@ -8,16 +8,21 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient, UserRole } from "@prisma/client";
+import type { Queue } from "bullmq";
 import {
+  ConcurrencyConflictError,
   LandingPageEditor,
   PublishValidationError,
   ScrubValidationError,
 } from "../services/landing-page-editor.js";
+import type { PostPublishValidationJobData } from "../services/post-publish-validation.js";
+import type { ScheduledPagePublishJobData } from "../services/scheduled-page-publish.js";
 import { AccountAccessService } from "../services/account-access.js";
 import { RoleProfileService } from "../services/role-profiles.js";
 import { AuditLogService } from "../services/audit-log.js";
 import { isLegalHoldEnabled } from "../services/data-governance.js";
 import { renderLandingPageHtml } from "./public-page-renderer.js";
+import { dispatchOutboundWebhookEvent } from "../services/outbound-webhooks.js";
 import {
   requireLandingPagesEnabled,
   requirePermission,
@@ -64,6 +69,7 @@ const UpdatePageSchema = z.object({
     .optional(),
   custom_css: z.string().max(10000).optional(),
   edit_summary: z.string().max(500).optional(),
+  expected_updated_at: z.string().datetime().optional(),
 });
 
 const PublishSchema = z.object({
@@ -71,6 +77,10 @@ const PublishSchema = z.object({
   password: z.string().min(4).max(100).optional(),
   expires_at: z.string().datetime().optional(),
   release_notes: z.string().max(1000).optional(),
+});
+
+const SchedulePublishSchema = PublishSchema.extend({
+  publish_at: z.string().datetime(),
 });
 
 const ReviewPublishApprovalSchema = z.object({
@@ -118,12 +128,55 @@ interface AuthReq extends Request {
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
-export function createLandingPageRoutes(prisma: PrismaClient): Router {
+interface LandingPageRouteDeps {
+  postPublishValidationQueue?: Queue<PostPublishValidationJobData>;
+  scheduledPublishQueue?: Queue<ScheduledPagePublishJobData>;
+}
+
+export function createLandingPageRoutes(
+  prisma: PrismaClient,
+  deps: LandingPageRouteDeps = {}
+): Router {
   const router = Router();
   const editor = new LandingPageEditor(prisma);
   const accessService = new AccountAccessService(prisma);
   const roleProfiles = new RoleProfileService(prisma);
   const auditLogs = new AuditLogService(prisma);
+  const postPublishValidationQueue = deps.postPublishValidationQueue;
+  const scheduledPublishQueue = deps.scheduledPublishQueue;
+
+  async function enqueuePostPublishValidation(input: PostPublishValidationJobData) {
+    if (!postPublishValidationQueue) {
+      return;
+    }
+    try {
+      await postPublishValidationQueue.add(
+        `validate-page-${input.pageId}`,
+        input,
+        {
+          attempts: 2,
+          backoff: { type: "exponential", delay: 30_000 },
+          removeOnComplete: 100,
+          removeOnFail: 500,
+        }
+      );
+    } catch (err) {
+      console.error("Failed to enqueue post-publish validation job:", err);
+    }
+  }
+
+  const scheduledPublishJobId = (pageId: string): string =>
+    `scheduled-publish:${pageId}`;
+
+  async function clearScheduledPublish(pageId: string): Promise<void> {
+    if (!scheduledPublishQueue) {
+      return;
+    }
+    const job = await scheduledPublishQueue.getJob(scheduledPublishJobId(pageId));
+    if (job) {
+      await job.remove();
+    }
+  }
 
   const isAdminRole = (userRole?: string): boolean =>
     !!userRole && ["OWNER", "ADMIN"].includes(userRole);
@@ -482,6 +535,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           visibility: page.visibility,
           includeCompanyName: page.includeCompanyName,
           canPublishNamed,
+          updatedAt: page.updatedAt.toISOString(),
         });
       } catch (err) {
         console.error("Get editor data error:", err);
@@ -569,7 +623,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           return;
         }
 
-        await editor.update(req.params.pageId as string, req.userId!, {
+        const updated = await editor.update(req.params.pageId as string, req.userId!, {
           title: parse.data.title,
           subtitle: parse.data.subtitle,
           editableBody: parse.data.editable_body,
@@ -577,12 +631,187 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           calloutBoxes: parse.data.callout_boxes,
           customCss: parse.data.custom_css,
           editSummary: parse.data.edit_summary,
+          expectedUpdatedAt: parse.data.expected_updated_at
+            ? new Date(parse.data.expected_updated_at)
+            : undefined,
         });
 
-        res.json({ updated: true });
+        res.json({
+          updated: true,
+          updated_at: updated.updatedAt.toISOString(),
+        });
       } catch (err) {
+        if (err instanceof ConcurrencyConflictError) {
+          res.status(409).json({
+            error: "concurrency_conflict",
+            message:
+              "This page has newer changes from another editor. Refresh or resolve the conflict before saving.",
+            expected_updated_at: err.expectedUpdatedAt.toISOString(),
+            current_updated_at: err.currentUpdatedAt.toISOString(),
+            latest_editable_body: err.currentEditableBody,
+          });
+          return;
+        }
         console.error("Update landing page error:", err);
         res.status(500).json({ error: "Failed to update landing page" });
+      }
+    }
+  );
+
+  // ── SCHEDULED PUBLISH CONTROLS ─────────────────────────────────────
+
+  router.get(
+    "/:pageId/scheduled-publish",
+    requirePermission(prisma, "publish"),
+    requirePageOwnerOrPermission(prisma),
+    async (req: AuthReq, res: Response) => {
+      if (!scheduledPublishQueue) {
+        res.json({ enabled: false, scheduled: false });
+        return;
+      }
+      try {
+        const pageId = String(req.params.pageId);
+        const job = await scheduledPublishQueue.getJob(scheduledPublishJobId(pageId));
+        if (!job) {
+          res.json({ enabled: true, scheduled: false });
+          return;
+        }
+        const state = await job.getState();
+        if (state === "completed" || state === "failed") {
+          await job.remove();
+          res.json({ enabled: true, scheduled: false });
+          return;
+        }
+        if (job.data.organizationId !== req.organizationId) {
+          res.status(403).json({ error: "permission_denied" });
+          return;
+        }
+        res.json({
+          enabled: true,
+          scheduled: true,
+          job_id: job.id,
+          state,
+          publish_at: job.data.publishAt,
+          visibility: job.data.visibility,
+          expires_at: job.data.expiresAt ?? null,
+        });
+      } catch (err) {
+        console.error("Get scheduled publish error:", err);
+        res.status(500).json({ error: "Failed to load scheduled publish state" });
+      }
+    }
+  );
+
+  router.post(
+    "/:pageId/schedule-publish",
+    requirePermission(prisma, "publish"),
+    requirePageOwnerOrPermission(prisma),
+    async (req: AuthReq, res: Response) => {
+      if (!scheduledPublishQueue) {
+        res.status(503).json({ error: "scheduling_unavailable" });
+        return;
+      }
+      const parse = SchedulePublishSchema.safeParse(req.body);
+      if (!parse.success) {
+        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        return;
+      }
+      try {
+        if (!req.organizationId || !req.userId) {
+          res.status(401).json({ error: "Authentication required" });
+          return;
+        }
+        const page = await editor.getForEditing(req.params.pageId as string);
+        if (page.includeCompanyName && !(await canGenerateNamedStories(req))) {
+          res.status(403).json({
+            error: "permission_denied",
+            message: "Your role cannot generate named stories.",
+          });
+          return;
+        }
+        const governance = await getArtifactPublishGovernance(req.organizationId);
+        if (governance.approvalChainEnabled && governance.steps.length > 0) {
+          res.status(409).json({
+            error: "approval_chain_enabled",
+            message:
+              "Scheduled publish requires direct publish mode. Disable approval chain or publish through approvals.",
+          });
+          return;
+        }
+        const publishAt = new Date(parse.data.publish_at);
+        const now = Date.now();
+        const delayMs = publishAt.getTime() - now;
+        if (delayMs < 15_000) {
+          res.status(400).json({
+            error: "publish_time_too_soon",
+            message: "Choose a publish time at least 15 seconds in the future.",
+          });
+          return;
+        }
+        await clearScheduledPublish(page.id);
+        await scheduledPublishQueue.add(
+          "scheduled-page-publish",
+          {
+            pageId: page.id,
+            organizationId: req.organizationId,
+            userId: req.userId,
+            publishAt: publishAt.toISOString(),
+            visibility: parse.data.visibility,
+            password: parse.data.password,
+            expiresAt: parse.data.expires_at,
+            releaseNotes: parse.data.release_notes,
+          },
+          {
+            jobId: scheduledPublishJobId(page.id),
+            delay: delayMs,
+            attempts: 2,
+            backoff: { type: "exponential", delay: 30_000 },
+            removeOnComplete: 100,
+            removeOnFail: 500,
+          }
+        );
+        await auditLogs.record({
+          organizationId: req.organizationId,
+          actorUserId: req.userId,
+          category: "PUBLISH",
+          action: "PAGE_PUBLISH_SCHEDULED",
+          targetType: "landing_page",
+          targetId: page.id,
+          severity: "INFO",
+          metadata: {
+            publish_at: publishAt.toISOString(),
+            visibility: parse.data.visibility,
+          },
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+        });
+        res.status(202).json({
+          scheduled: true,
+          publish_at: publishAt.toISOString(),
+        });
+      } catch (err) {
+        console.error("Schedule publish error:", err);
+        res.status(500).json({ error: "Failed to schedule publish" });
+      }
+    }
+  );
+
+  router.delete(
+    "/:pageId/scheduled-publish",
+    requirePermission(prisma, "publish"),
+    requirePageOwnerOrPermission(prisma),
+    async (req: AuthReq, res: Response) => {
+      if (!scheduledPublishQueue) {
+        res.status(204).send();
+        return;
+      }
+      try {
+        const pageId = String(req.params.pageId);
+        await clearScheduledPublish(pageId);
+        res.status(204).send();
+      } catch (err) {
+        console.error("Cancel scheduled publish error:", err);
+        res.status(500).json({ error: "Failed to cancel scheduled publish" });
       }
     }
   );
@@ -711,6 +940,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
             request_ip: req.ip ?? null,
           },
         });
+        await clearScheduledPublish(req.params.pageId as string);
         await auditLogs.record({
           organizationId: req.organizationId!,
           actorUserId: req.userId,
@@ -726,6 +956,23 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           },
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
+        });
+        await enqueuePostPublishValidation({
+          organizationId: req.organizationId,
+          pageId: req.params.pageId as string,
+          publishedByUserId: req.userId,
+        });
+        await dispatchOutboundWebhookEvent(prisma, {
+          organizationId: req.organizationId,
+          eventType: "landing_page_published",
+          payload: {
+            page_id: req.params.pageId as string,
+            slug: result.slug,
+            url: result.url,
+            published_by_user_id: req.userId,
+          },
+        }).catch((err) => {
+          console.error("Outbound webhook dispatch failed:", err);
         });
 
         res.json({
@@ -1040,6 +1287,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
             finalized_at: new Date().toISOString(),
           },
         });
+        await clearScheduledPublish(request.targetId);
 
         await prisma.approvalRequest.update({
           where: { id: request.id },
@@ -1072,6 +1320,24 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
         });
+        await enqueuePostPublishValidation({
+          organizationId: req.organizationId,
+          pageId: request.targetId,
+          publishedByUserId: req.userId,
+        });
+        await dispatchOutboundWebhookEvent(prisma, {
+          organizationId: req.organizationId,
+          eventType: "landing_page_published",
+          payload: {
+            page_id: request.targetId,
+            slug: result.slug,
+            url: result.url,
+            published_by_user_id: req.userId,
+            approval_request_id: request.id,
+          },
+        }).catch((err) => {
+          console.error("Outbound webhook dispatch failed:", err);
+        });
 
         res.json({
           status: "APPROVED",
@@ -1080,6 +1346,15 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           slug: result.slug,
         });
       } catch (err) {
+        if (err instanceof PublishValidationError) {
+          res.status(400).json({
+            error: "publish_validation_failed",
+            message:
+              "Publishing blocked because required content is incomplete. Fix the highlighted fields and retry.",
+            issues: err.issues,
+          });
+          return;
+        }
         if (err instanceof ScrubValidationError) {
           res.status(400).json({
             error: "scrub_validation_failed",
@@ -1112,6 +1387,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
         }
 
         await editor.unpublish(req.params.pageId as string);
+        await clearScheduledPublish(req.params.pageId as string);
         await auditLogs.record({
           organizationId: req.organizationId!,
           actorUserId: req.userId,
@@ -1148,6 +1424,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
         }
 
         await editor.archive(req.params.pageId as string);
+        await clearScheduledPublish(req.params.pageId as string);
         await auditLogs.record({
           organizationId: req.organizationId!,
           actorUserId: req.userId,
@@ -1192,6 +1469,7 @@ export function createLandingPageRoutes(prisma: PrismaClient): Router {
           return;
         }
 
+        await clearScheduledPublish(page.id);
         await prisma.landingPage.delete({ where: { id: page.id } });
         await auditLogs.record({
           organizationId: req.organizationId!,

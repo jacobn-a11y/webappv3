@@ -136,7 +136,7 @@ export function AuthPage() {
             {mode === "signup" ? "Create account" : "Sign in"}
           </button>
         </form>
-        <button className="btn btn--secondary auth-card__submit" onClick={startSso} disabled={submitting}>
+        <button type="button" className="btn btn--secondary auth-card__submit" onClick={startSso} disabled={submitting}>
           Continue with Google SSO
         </button>
 

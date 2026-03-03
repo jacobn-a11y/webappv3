@@ -23,6 +23,10 @@ import type {
   SetupWizardStep,
   UserRole,
 } from "@prisma/client";
+import {
+  decodeDataGovernancePolicy,
+  decodeJsonObject,
+} from "../types/json-boundaries.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -147,11 +151,7 @@ export class SetupWizardService {
         }),
       ]);
 
-    const rawStoryContext = settings?.storyContext;
-    const storyContext =
-      rawStoryContext && typeof rawStoryContext === "object" && !Array.isArray(rawStoryContext)
-        ? (rawStoryContext as Record<string, unknown>)
-        : {};
+    const storyContext = decodeJsonObject(settings?.storyContext);
     const products =
       Array.isArray(storyContext.products) && storyContext.products.length > 0;
     const companyOverview =
@@ -160,8 +160,7 @@ export class SetupWizardService {
     const orgProfileComplete = companyOverview || products;
 
     const governanceDefaultsComplete =
-      Boolean(settings?.dataGovernancePolicy) &&
-      typeof settings?.dataGovernancePolicy === "object";
+      Object.keys(decodeDataGovernancePolicy(settings?.dataGovernancePolicy)).length > 0;
     const rolePresetsComplete = rolePresetCount >= 3;
     const connectorsComplete = integrationCount >= 1;
     const firstValueComplete = storyCount > 0 && pageCount > 0;

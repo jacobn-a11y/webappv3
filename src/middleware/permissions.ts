@@ -17,6 +17,7 @@ import type { PrismaClient, PermissionType, UserRole, TranscriptTruncationMode }
 import { RoleProfileService } from "../services/role-profiles.js";
 import { PolicyService, legacyPermissionActionToPolicyAction } from "../services/policy-engine.js";
 import logger from "../lib/logger.js";
+import { decodeDataGovernancePolicy } from "../types/json-boundaries.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -112,8 +113,9 @@ export function requirePermission(prisma: PrismaClient, action: string) {
         organizationId,
         userId,
         userRole,
-        orgDataGovernancePolicy:
-          (settings?.dataGovernancePolicy as Record<string, unknown> | null) ?? null,
+        orgDataGovernancePolicy: decodeDataGovernancePolicy(
+          settings?.dataGovernancePolicy
+        ),
       });
       if (decision.allowed) {
         next();

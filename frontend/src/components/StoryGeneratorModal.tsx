@@ -1,9 +1,14 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { Link } from "react-router-dom";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { MultiSelect } from "./MultiSelect";
 import { FormatSelector } from "./FormatSelector";
+import {
+  StoryErrorSection,
+  StoryLoadingSection,
+  StoryPreviewSection,
+} from "./story-generator/StoryModalSections";
+import { usePublishFlow } from "./story-generator/usePublishFlow";
+import { useQuoteSelection } from "./story-generator/useQuoteSelection";
+import { useStoryGeneration } from "./story-generator/useStoryGeneration";
 import {
   type FunnelStage,
   type TaxonomyTopic,
@@ -12,24 +17,25 @@ import {
   type StoryOutline,
   type StoryTypeInput,
   FUNNEL_STAGE_LABELS,
-  STAGE_TOPICS,
   TOPIC_LABELS,
   STORY_LENGTH_LABELS,
   STORY_OUTLINE_LABELS,
 } from "../types/taxonomy";
 import {
-  buildStoryStream,
-  buildStory,
-  createLandingPage,
-  downloadStoryExport,
+  createSharedAsset,
+  deleteSharedAsset,
+  getSharedAssets,
   getStoryContextSettings,
-  savePageDraft,
-  type BuildStoryResponse,
+  trackSellerAdoptionEvent,
+  type SharedAsset,
+  type StoryQuote,
   type StoryContextSettings,
 } from "../lib/api";
+import { useToast } from "./Toast";
 
-type ModalPhase = "form" | "loading" | "preview" | "error";
 type StoryTypeMode = "FULL" | "TOPIC";
+type StoryVisibilityMode = "ANONYMOUS" | "NAMED";
+type StoryAudienceMode = "CHAMPION" | "EXEC" | "PROCUREMENT";
 
 interface StoryGeneratorModalProps {
   accountId: string;
@@ -67,7 +73,39 @@ const STORY_OUTLINE_OPTIONS = Object.entries(
   STORY_OUTLINE_LABELS
 ) as [StoryOutline, string][];
 
-const STORY_TEMPLATES = [
+interface StoryTemplateValues {
+  storyLength: StoryLength;
+  storyOutline: StoryOutline;
+  storyType: StoryTypeInput;
+  storyFormat: StoryFormat | "";
+  selectedStages?: FunnelStage[];
+  selectedTopics?: TaxonomyTopic[];
+}
+
+interface StoryTemplateOption {
+  id: string;
+  label: string;
+  description: string;
+  values: StoryTemplateValues;
+  source: "built_in" | "saved";
+  assetId?: string;
+}
+
+interface DealStagePreset {
+  id: string;
+  label: string;
+  description: string;
+  values: StoryTemplateValues;
+}
+
+interface PackagingTemplate {
+  id: "executive_recap" | "champion_forward" | "roi_proof";
+  label: string;
+  description: string;
+  body: string;
+}
+
+const BUILT_IN_STORY_TEMPLATES: StoryTemplateOption[] = [
   {
     id: "roi_snapshot",
     label: "Quick ROI Snapshot",
@@ -78,6 +116,7 @@ const STORY_TEMPLATES = [
       storyType: "roi_financial_outcomes" as StoryTypeInput,
       storyFormat: "by_the_numbers_snapshot" as StoryFormat,
     },
+    source: "built_in",
   },
   {
     id: "full_journey",
@@ -89,6 +128,7 @@ const STORY_TEMPLATES = [
       storyType: "FULL_ACCOUNT_JOURNEY" as StoryTypeInput,
       storyFormat: "before_after_transformation" as StoryFormat,
     },
+    source: "built_in",
   },
   {
     id: "exec_brief",
@@ -100,42 +140,153 @@ const STORY_TEMPLATES = [
       storyType: "executive_strategic_impact" as StoryTypeInput,
       storyFormat: "analyst_validated_study" as StoryFormat,
     },
+    source: "built_in",
   },
 ];
 
-const PROGRESS_TO_PERCENT: Record<string, number> = {
-  STARTED: 8,
-  MERGING_TRANSCRIPTS: 20,
-  GATHERING_SEGMENTS: 38,
-  GENERATING_NARRATIVE: 68,
-  EXTRACTING_QUOTES: 84,
-  SAVING_STORY: 94,
-  DONE: 100,
-};
+const DEAL_STAGE_PRESETS: DealStagePreset[] = [
+  {
+    id: "discovery",
+    label: "Discovery",
+    description: "Pain points and baseline context for early validation.",
+    values: {
+      storyLength: "SHORT",
+      storyOutline: "PROBLEM_SOLUTION_IMPACT",
+      storyType: "problem_challenge_identification",
+      storyFormat: "day_in_the_life",
+      selectedStages: ["TOFU"],
+    },
+  },
+  {
+    id: "evaluation",
+    label: "Evaluation",
+    description: "Decision criteria and implementation confidence signals.",
+    values: {
+      storyLength: "MEDIUM",
+      storyOutline: "CHRONOLOGICAL_JOURNEY",
+      storyType: "implementation_onboarding",
+      storyFormat: "before_after_transformation",
+      selectedStages: ["MOFU", "BOFU"],
+    },
+  },
+  {
+    id: "business_case",
+    label: "Business Case",
+    description: "ROI framing for executive and finance stakeholders.",
+    values: {
+      storyLength: "EXECUTIVE",
+      storyOutline: "BY_THE_NUMBERS",
+      storyType: "roi_financial_outcomes",
+      storyFormat: "by_the_numbers_snapshot",
+      selectedStages: ["BOFU"],
+    },
+  },
+  {
+    id: "negotiation",
+    label: "Negotiation",
+    description: "Risk handling and proof for final-stage objections.",
+    values: {
+      storyLength: "SHORT",
+      storyOutline: "DEAL_ANATOMY",
+      storyType: "risk_mitigation_continuity",
+      storyFormat: "analyst_validated_study",
+      selectedStages: ["BOFU"],
+    },
+  },
+  {
+    id: "expansion",
+    label: "Expansion",
+    description: "Post-sale value proof and growth narrative.",
+    values: {
+      storyLength: "MEDIUM",
+      storyOutline: "CHRONOLOGICAL_JOURNEY",
+      storyType: "upsell_cross_sell_expansion",
+      storyFormat: "joint_webinar_presentation",
+      selectedStages: ["POST_SALE"],
+    },
+  },
+];
 
-const PROGRESS_COPY: Record<string, string> = {
-  STARTED: "Preparing story generation.",
-  MERGING_TRANSCRIPTS: "Merging account transcripts into a unified timeline.",
-  GATHERING_SEGMENTS: "Gathering tagged evidence from transcript segments.",
-  GENERATING_NARRATIVE: "Generating draft narrative from transcript evidence.",
-  EXTRACTING_QUOTES: "Extracting quantified high-value quotes.",
-  SAVING_STORY: "Saving your story and quote lineage.",
-  DONE: "Finalizing story output.",
-};
+const STORY_LENGTH_VALUES = Object.keys(STORY_LENGTH_LABELS) as StoryLength[];
+const STORY_OUTLINE_VALUES = Object.keys(STORY_OUTLINE_LABELS) as StoryOutline[];
+const STORY_FORMAT_LIST = [
+  "before_after_transformation",
+  "day_in_the_life",
+  "by_the_numbers_snapshot",
+  "video_testimonial_soundbite",
+  "joint_webinar_presentation",
+  "peer_reference_call_guide",
+  "analyst_validated_study",
+] as const satisfies readonly StoryFormat[];
 
-function buildTopicOptions(selectedStages: FunnelStage[]) {
-  const stages =
-    selectedStages.length > 0
-      ? selectedStages
-      : (Object.keys(STAGE_TOPICS) as FunnelStage[]);
+function parseSavedTemplate(asset: SharedAsset): StoryTemplateOption | null {
+  if (asset.asset_type !== "TEMPLATE") {
+    return null;
+  }
+  const metadata =
+    asset.metadata && typeof asset.metadata === "object"
+      ? (asset.metadata as Record<string, unknown>)
+      : null;
+  const rawValues =
+    metadata?.template_values && typeof metadata.template_values === "object"
+      ? (metadata.template_values as Record<string, unknown>)
+      : null;
+  if (!rawValues) {
+    return null;
+  }
 
-  return stages.flatMap((stage) =>
-    STAGE_TOPICS[stage].map((topic) => ({
-      value: topic,
-      label: TOPIC_LABELS[topic],
-      group: FUNNEL_STAGE_LABELS[stage],
-    }))
-  );
+  const rawLength = rawValues.story_length;
+  const rawOutline = rawValues.story_outline;
+  const rawType = rawValues.story_type;
+  const rawFormat = rawValues.story_format;
+  if (
+    typeof rawLength !== "string" ||
+    !STORY_LENGTH_VALUES.includes(rawLength as StoryLength) ||
+    typeof rawOutline !== "string" ||
+    !STORY_OUTLINE_VALUES.includes(rawOutline as StoryOutline) ||
+    typeof rawType !== "string" ||
+    !(
+      rawType === "FULL_ACCOUNT_JOURNEY" ||
+      STORY_TYPE_TOPIC_OPTIONS.some(([topic]) => topic === rawType)
+    )
+  ) {
+    return null;
+  }
+
+  const selectedStages = Array.isArray(rawValues.selected_stages)
+    ? rawValues.selected_stages.filter(
+        (stage): stage is FunnelStage =>
+          typeof stage === "string" && stage in FUNNEL_STAGE_LABELS
+      )
+    : undefined;
+  const selectedTopics = Array.isArray(rawValues.selected_topics)
+    ? rawValues.selected_topics.filter(
+        (topic): topic is TaxonomyTopic =>
+          typeof topic === "string" && topic in TOPIC_LABELS
+      )
+    : undefined;
+
+  const storyFormat =
+    typeof rawFormat === "string" &&
+    STORY_FORMAT_LIST.includes(rawFormat as StoryFormat)
+      ? (rawFormat as StoryFormat)
+      : "";
+
+  return {
+    id: `saved-${asset.id}`,
+    label: asset.title,
+    description: asset.description ?? "Reusable team preset",
+    source: "saved",
+    assetId: asset.id,
+    values: {
+      storyLength: rawLength as StoryLength,
+      storyOutline: rawOutline as StoryOutline,
+      storyType: rawType as StoryTypeInput,
+      storyFormat,
+      selectedStages,
+      selectedTopics,
+    },
+  };
 }
 
 function loadPersistedSettings(): PersistedStorySettings | null {
@@ -156,23 +307,15 @@ function savePersistedSettings(settings: PersistedStorySettings): void {
   }
 }
 
-function sanitizeFileName(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-}
-
-function saveBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  URL.revokeObjectURL(url);
+function loadDefaultStoryModePreference(): StoryVisibilityMode {
+  try {
+    const raw = localStorage.getItem("user_preferences_v1");
+    if (!raw) return "ANONYMOUS";
+    const parsed = JSON.parse(raw) as { default_story_mode?: string };
+    return parsed.default_story_mode === "named" ? "NAMED" : "ANONYMOUS";
+  } catch {
+    return "ANONYMOUS";
+  }
 }
 
 function countWords(markdown: string): number {
@@ -184,22 +327,118 @@ function countWords(markdown: string): number {
     .filter(Boolean).length;
 }
 
+function createFlowId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `story-flow-${crypto.randomUUID()}`;
+  }
+  return `story-flow-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function stripMarkdown(markdown: string): string {
+  return markdown
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[>#*_~-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractSummarySentences(markdown: string, max = 4): string[] {
+  const plain = stripMarkdown(markdown);
+  return plain
+    .split(/(?<=[.!?])\s+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 18)
+    .slice(0, max);
+}
+
+function buildPackagingTemplates(input: {
+  accountName: string;
+  markdown: string;
+  quotes: StoryQuote[];
+  stageLabel: string;
+  visibilityMode: StoryVisibilityMode;
+}): PackagingTemplate[] {
+  const subject =
+    input.visibilityMode === "NAMED" ? input.accountName : "the customer";
+  const summary = extractSummarySentences(input.markdown, 5);
+  const topQuote = input.quotes[0]?.quote_text ?? "No quote available.";
+  const metricQuote = input.quotes.find((quote) => !!quote.metric_value);
+  const metricLine = metricQuote?.metric_value
+    ? `${metricQuote.metric_value}${metricQuote.metric_type ? ` (${metricQuote.metric_type})` : ""}`
+    : "No quantified metric captured.";
+
+  return [
+    {
+      id: "executive_recap",
+      label: "Executive Recap",
+      description: "Tight readout for leadership and deal sponsors.",
+      body: [
+        `Executive Recap (${input.stageLabel})`,
+        `Account: ${subject}`,
+        "",
+        ...summary.slice(0, 3).map((line) => `- ${line}`),
+      ].join("\n"),
+    },
+    {
+      id: "champion_forward",
+      label: "Champion Forward",
+      description: "Forwardable package for your internal champion.",
+      body: [
+        `Champion Forward (${input.stageLabel})`,
+        `Account: ${subject}`,
+        "",
+        "Proof quote:",
+        `"${topQuote}"`,
+        "",
+        "Recommended next step:",
+        summary[3] ?? summary[0] ?? "Align this evidence to current stakeholder objections.",
+      ].join("\n"),
+    },
+    {
+      id: "roi_proof",
+      label: "ROI Proof",
+      description: "Metric-first package for procurement and finance.",
+      body: [
+        `ROI Proof (${input.stageLabel})`,
+        `Account: ${subject}`,
+        "",
+        `Primary KPI: ${metricLine}`,
+        "",
+        ...summary.slice(0, 2).map((line) => `- ${line}`),
+      ].join("\n"),
+    },
+  ];
+}
+
 export function StoryGeneratorModal({
   accountId,
   accountName,
   onClose,
   onLandingPageCreated,
 }: StoryGeneratorModalProps) {
+  const flowIdRef = useRef<string>(createFlowId());
+  const flowOpenedAtRef = useRef<number>(Date.now());
+  const generationStartedAtRef = useRef<number | null>(null);
+  const completionTelemetryRef = useRef<{ success: boolean; failed: boolean }>({
+    success: false,
+    failed: false,
+  });
   const persistedRef = useRef<PersistedStorySettings | null>(
     loadPersistedSettings()
   );
 
-  const [selectedStages, setSelectedStages] = useState<FunnelStage[]>(
-    persistedRef.current?.selectedStages ?? []
-  );
-  const [selectedTopics, setSelectedTopics] = useState<TaxonomyTopic[]>(
-    persistedRef.current?.selectedTopics ?? []
-  );
+  const {
+    selectedStages,
+    selectedTopics,
+    topicOptions,
+    setSelectedTopics,
+    handleStagesChange,
+  } = useQuoteSelection({
+    selectedStages: persistedRef.current?.selectedStages,
+    selectedTopics: persistedRef.current?.selectedTopics,
+  });
   const [customTitle, setCustomTitle] = useState(
     persistedRef.current?.customTitle ?? ""
   );
@@ -226,31 +465,46 @@ export function StoryGeneratorModal({
       : "TOPIC"
   );
   const [storyTypeSearch, setStoryTypeSearch] = useState("");
-
-  const [phase, setPhase] = useState<ModalPhase>("form");
-  const [result, setResult] = useState<BuildStoryResponse | null>(null);
-  const [previewMarkdown, setPreviewMarkdown] = useState("");
-  const [editMode, setEditMode] = useState(false);
-  const [streamedMarkdown, setStreamedMarkdown] = useState("");
-  const [lastProgressStep, setLastProgressStep] = useState("STARTED");
-  const [error, setError] = useState("");
-  const [copyFeedback, setCopyFeedback] = useState(false);
-  const [creatingPage, setCreatingPage] = useState(false);
-  const [exportingFormat, setExportingFormat] = useState<"pdf" | "docx" | null>(
-    null
+  const [dealStagePresetId, setDealStagePresetId] = useState<string>("evaluation");
+  const [audienceMode, setAudienceMode] = useState<StoryAudienceMode>("CHAMPION");
+  const [visibilityMode, setVisibilityMode] = useState<StoryVisibilityMode>(
+    loadDefaultStoryModePreference()
   );
-  const [loadingProgress, setLoadingProgress] = useState(8);
+  const [namedPermissionConfirmed, setNamedPermissionConfirmed] = useState(false);
+
+  const {
+    abortGeneration,
+    editMode,
+    error,
+    handleBackToForm,
+    handleCancelGeneration,
+    loadingMessage,
+    loadingProgress,
+    phase,
+    previewMarkdown,
+    result,
+    runGeneration: runStoryGeneration,
+    setEditMode,
+    setError,
+    setPhase,
+    setPreviewMarkdown,
+    stream: streamedMarkdown,
+  } = useStoryGeneration(onClose);
+
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [firstStoryGenerated, setFirstStoryGenerated] = useState(false);
+  const [firstStoryShared, setFirstStoryShared] = useState(false);
+  const [onboardingElapsedSeconds, setOnboardingElapsedSeconds] = useState(0);
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
   const [orgDefaults, setOrgDefaults] = useState<StoryContextSettings | null>(
     null
   );
+  const [savedTemplates, setSavedTemplates] = useState<StoryTemplateOption[]>([]);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const { showToast } = useToast();
 
   const modalRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
-  const requestControllerRef = useRef<AbortController | null>(null);
-
-  const topicOptions = buildTopicOptions(selectedStages);
 
   const filteredStoryTypeOptions = useMemo(() => {
     const needle = storyTypeSearch.trim().toLowerCase();
@@ -260,6 +514,54 @@ export function StoryGeneratorModal({
     );
   }, [storyTypeSearch]);
 
+  const allTemplates = useMemo(
+    () => [...BUILT_IN_STORY_TEMPLATES, ...savedTemplates],
+    [savedTemplates]
+  );
+  const stageLabel = useMemo(
+    () =>
+      DEAL_STAGE_PRESETS.find((preset) => preset.id === dealStagePresetId)?.label ??
+      "Evaluation",
+    [dealStagePresetId]
+  );
+
+  const trackSellerEvent = useCallback(
+    (
+      eventType:
+        | "modal_open"
+        | "preset_selected"
+        | "visibility_mode_selected"
+        | "generation_started"
+        | "story_generated"
+        | "generation_failed"
+        | "share_action"
+        | "library_action",
+      metadata?: {
+        step?: string;
+        story_id?: string;
+        action_name?: string;
+        duration_ms?: number;
+        metadata?: Record<string, unknown>;
+      }
+    ) => {
+      void trackSellerAdoptionEvent({
+        event_type: eventType,
+        flow_id: flowIdRef.current,
+        account_id: accountId,
+        story_id: metadata?.story_id,
+        stage_preset: stageLabel,
+        visibility_mode: visibilityMode,
+        step: metadata?.step,
+        action_name: metadata?.action_name,
+        duration_ms: metadata?.duration_ms,
+        metadata: metadata?.metadata,
+      }).catch(() => {
+        // Telemetry should never block story generation UX.
+      });
+    },
+    [accountId, stageLabel, visibilityMode]
+  );
+
   const storyStats = useMemo(() => {
     const markdown = result ? previewMarkdown : "";
     if (!markdown) return null;
@@ -268,16 +570,71 @@ export function StoryGeneratorModal({
     return { wordCount, readingMinutes };
   }, [result, previewMarkdown]);
 
+  const safeToShare = useMemo(() => {
+    if (!result) {
+      return {
+        status: "pending" as const,
+        label: "Review Needed",
+        reason: "Generate a story to evaluate quote confidence and source coverage.",
+        avgConfidence: 0,
+      };
+    }
+    const quoteConfidences = result.quotes
+      .map((quote) => quote.confidence_score)
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    const avgConfidence =
+      quoteConfidences.length > 0
+        ? quoteConfidences.reduce((sum, value) => sum + value, 0) / quoteConfidences.length
+        : 0;
+    const confidenceOk = avgConfidence >= 0.72;
+    if (confidenceOk && (visibilityMode === "ANONYMOUS" || namedPermissionConfirmed)) {
+      return {
+        status: "ready" as const,
+        label: "Safe to Share",
+        reason: `Average quote confidence is ${Math.round(avgConfidence * 100)}%.`,
+        avgConfidence,
+      };
+    }
+    if (visibilityMode === "NAMED" && !namedPermissionConfirmed) {
+      return {
+        status: "warning" as const,
+        label: "Review Permission",
+        reason: "Named mode requires customer permission confirmation before sharing.",
+        avgConfidence,
+      };
+    }
+    return {
+      status: "warning" as const,
+      label: "Review Needed",
+      reason: `Average quote confidence is ${Math.round(avgConfidence * 100)}%.`,
+      avgConfidence,
+    };
+  }, [namedPermissionConfirmed, result, visibilityMode]);
+
+  const packagingTemplates = useMemo(
+    () =>
+      result
+        ? buildPackagingTemplates({
+            accountName,
+            markdown: previewMarkdown,
+            quotes: result.quotes,
+            stageLabel,
+            visibilityMode,
+          })
+        : [],
+    [accountName, previewMarkdown, result, stageLabel, visibilityMode]
+  );
+
   const loadingStep =
     loadingProgress < 34 ? 0 : loadingProgress < 67 ? 1 : 2;
   const activeMarkdown = result ? previewMarkdown : "";
-  const loadingMessage =
-    PROGRESS_COPY[lastProgressStep] ?? PROGRESS_COPY.STARTED;
+  const namedModeBlocked = visibilityMode === "NAMED" && !namedPermissionConfirmed;
 
   const isLengthDefault = orgDefaults?.default_story_length === storyLength;
   const isOutlineDefault = orgDefaults?.default_story_outline === storyOutline;
   const isTypeDefault = orgDefaults?.default_story_type === storyType;
   const isFormatDefault = orgDefaults?.default_story_format === selectedFormat;
+  const onboardingWithinTarget = onboardingElapsedSeconds <= 60;
 
   useEffect(() => {
     savePersistedSettings({
@@ -307,7 +664,7 @@ export function StoryGeneratorModal({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (phase === "loading") {
-          requestControllerRef.current?.abort();
+          abortGeneration();
         }
         onClose();
         return;
@@ -338,12 +695,28 @@ export function StoryGeneratorModal({
     });
 
     return () => {
-      requestControllerRef.current?.abort();
+      abortGeneration();
       document.removeEventListener("keydown", handleKeyDown);
       cancelAnimationFrame(timer);
       previousFocusRef.current?.focus();
     };
-  }, [onClose, phase]);
+  }, [abortGeneration, onClose, phase]);
+
+  const loadSavedTemplates = useCallback(async () => {
+    try {
+      const response = await getSharedAssets();
+      const templates = response.assets
+        .map((asset) => parseSavedTemplate(asset))
+        .filter((template): template is StoryTemplateOption => template !== null);
+      setSavedTemplates(templates);
+    } catch {
+      // Shared template loading is best-effort.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSavedTemplates();
+  }, [loadSavedTemplates]);
 
   useEffect(() => {
     getStoryContextSettings()
@@ -365,238 +738,295 @@ export function StoryGeneratorModal({
 
   useEffect(() => {
     try {
-      setShowOnboarding(localStorage.getItem(ONBOARDING_KEY) !== "1");
+      const seen = localStorage.getItem(ONBOARDING_KEY) === "1";
+      setShowOnboarding(!seen);
+      if (seen) {
+        setFirstStoryShared(true);
+      }
     } catch {
       setShowOnboarding(false);
     }
   }, []);
 
   useEffect(() => {
-    if (phase !== "loading") {
+    trackSellerEvent("modal_open", {
+      step: "opened",
+      metadata: {
+        onboarding_visible: true,
+      },
+    });
+    // Intentionally once per modal mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!showOnboarding) {
       return;
     }
+    const interval = window.setInterval(() => {
+      const elapsed = Math.max(0, Math.floor((Date.now() - flowOpenedAtRef.current) / 1000));
+      setOnboardingElapsedSeconds(elapsed);
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [showOnboarding]);
 
-    setLoadingProgress(8);
-    const id = window.setInterval(() => {
-      setLoadingProgress((prev) => Math.min(prev + 4, 94));
-    }, 700);
-
-    return () => {
-      window.clearInterval(id);
-    };
-  }, [phase]);
-
-  const handleStagesChange = (stages: string[]) => {
-    const newStages = stages as FunnelStage[];
-    setSelectedStages(newStages);
-
-    if (newStages.length > 0) {
-      const validTopics = new Set(newStages.flatMap((s) => STAGE_TOPICS[s]));
-      setSelectedTopics((prev) => prev.filter((t) => validTopics.has(t)));
+  useEffect(() => {
+    if (phase === "preview" && result && !completionTelemetryRef.current.success) {
+      completionTelemetryRef.current.success = true;
+      setFirstStoryGenerated(true);
+      const generationDuration =
+        generationStartedAtRef.current != null
+          ? Date.now() - generationStartedAtRef.current
+          : undefined;
+      trackSellerEvent("story_generated", {
+        step: "preview",
+        story_id: result.story_id ?? undefined,
+        duration_ms: generationDuration,
+      });
     }
-  };
+  }, [phase, result, trackSellerEvent]);
 
-  const runGeneration = useCallback(async () => {
-    setPhase("loading");
-    setError("");
-    setLoadingProgress(8);
-    setLastProgressStep("STARTED");
-    setStreamedMarkdown("");
-    setPreviewMarkdown("");
-    setEditMode(false);
-    const controller = new AbortController();
-    requestControllerRef.current = controller;
+  useEffect(() => {
+    if (phase === "error" && error && !completionTelemetryRef.current.failed) {
+      completionTelemetryRef.current.failed = true;
+      const generationDuration =
+        generationStartedAtRef.current != null
+          ? Date.now() - generationStartedAtRef.current
+          : undefined;
+      trackSellerEvent("generation_failed", {
+        step: "error",
+        action_name: "story_generation_error",
+        duration_ms: generationDuration,
+        metadata: { error_message: error },
+      });
+    }
+  }, [error, phase, trackSellerEvent]);
 
-    const requestBody = {
-      account_id: accountId,
-      funnel_stages: selectedStages.length > 0 ? selectedStages : undefined,
-      filter_topics: selectedTopics.length > 0 ? selectedTopics : undefined,
-      title: customTitle.trim() || undefined,
-      format: selectedFormat || undefined,
-      story_length: storyLength,
-      story_outline: storyOutline,
-      story_type: storyType,
-    };
-
-    try {
-      const res = await buildStoryStream(
-        requestBody,
-        {
-          onProgress: (step) => {
-            setLastProgressStep(step);
-            const mapped = PROGRESS_TO_PERCENT[step];
-            if (mapped != null) {
-              setLoadingProgress((prev) => Math.max(prev, mapped));
-            }
-          },
-          onToken: (token) => {
-            setStreamedMarkdown((prev) => prev + token);
-            setLoadingProgress((prev) => Math.max(prev, 72));
-          },
-        },
-        { signal: controller.signal }
-      );
-
-      setLoadingProgress(100);
-      setLastProgressStep("DONE");
-      setResult(res);
-      setPreviewMarkdown(res.markdown);
-      setPhase("preview");
-    } catch (err) {
-      const isAbort =
-        (err instanceof DOMException && err.name === "AbortError") ||
-        (err instanceof Error && err.name === "AbortError");
-      if (isAbort) {
-        setPhase("form");
-        setError("");
+  const triggerGeneration = useCallback(
+    (overrides?: Partial<{
+      storyLength: StoryLength;
+      storyOutline: StoryOutline;
+      storyType: StoryTypeInput;
+      selectedFormat: StoryFormat | "";
+      selectedStages: FunnelStage[];
+      selectedTopics: TaxonomyTopic[];
+    }>) => {
+      if (visibilityMode === "NAMED" && !namedPermissionConfirmed) {
+        setError(
+          "Named mode requires explicit customer permission confirmation before generation."
+        );
+        setPhase("error");
         return;
       }
+      const effectiveStoryLength = overrides?.storyLength ?? storyLength;
+      const effectiveStoryOutline = overrides?.storyOutline ?? storyOutline;
+      const effectiveStoryType = overrides?.storyType ?? storyType;
+      const effectiveStoryFormat = overrides?.selectedFormat ?? selectedFormat;
+      const effectiveStages = overrides?.selectedStages ?? selectedStages;
+      const effectiveTopics = overrides?.selectedTopics ?? selectedTopics;
 
-      const errorMessage =
-        err instanceof Error ? err.message : "Failed to generate story";
-
-      const canFallback =
-        errorMessage.toLowerCase().includes("stream") ||
-        errorMessage.toLowerCase().includes("event") ||
-        errorMessage.toLowerCase().includes("browser");
-
-      if (canFallback) {
-        try {
-          const fallbackRes = await buildStory(requestBody, {
-            signal: controller.signal,
-          });
-          setLoadingProgress(100);
-          setLastProgressStep("DONE");
-          setResult(fallbackRes);
-          setPreviewMarkdown(fallbackRes.markdown);
-          setPhase("preview");
-          return;
-        } catch (fallbackErr) {
-          const fallbackMessage =
-            fallbackErr instanceof Error
-              ? fallbackErr.message
-              : "Failed to generate story";
-          setError(fallbackMessage);
-          setPhase("error");
-          return;
-        }
+      if (overrides?.storyLength) {
+        setStoryLength(overrides.storyLength);
+      }
+      if (overrides?.storyOutline) {
+        setStoryOutline(overrides.storyOutline);
+      }
+      if (overrides?.storyType) {
+        setStoryType(overrides.storyType);
+      }
+      if (overrides?.selectedFormat !== undefined) {
+        setSelectedFormat(overrides.selectedFormat);
+      }
+      if (overrides?.selectedStages) {
+        handleStagesChange(overrides.selectedStages);
+      }
+      if (overrides?.selectedTopics) {
+        setSelectedTopics(overrides.selectedTopics);
       }
 
-      setError(errorMessage);
-      setPhase("error");
-    } finally {
-      requestControllerRef.current = null;
-    }
-  }, [
-    accountId,
-    selectedStages,
-    selectedTopics,
-    customTitle,
-    selectedFormat,
-    storyLength,
-    storyOutline,
-    storyType,
-  ]);
-
-  const handleCancelGeneration = useCallback(() => {
-    requestControllerRef.current?.abort();
-    requestControllerRef.current = null;
-    onClose();
-  }, [onClose]);
-
-  const handleCopyToClipboard = useCallback(async () => {
-    if (!result) return;
-    const content = previewMarkdown;
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopyFeedback(true);
-      setTimeout(() => setCopyFeedback(false), 2000);
-    } catch {
-      const textarea = document.createElement("textarea");
-      textarea.value = content;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
-      setCopyFeedback(true);
-      setTimeout(() => setCopyFeedback(false), 2000);
-    }
-  }, [result, previewMarkdown]);
-
-  const handleDownloadMarkdown = useCallback(() => {
-    if (!result) return;
-    const content = previewMarkdown;
-    const title = sanitizeFileName(result.title || `${accountName}-story`);
-    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
-    saveBlob(blob, `${title || "story"}.md`);
-  }, [previewMarkdown, result, accountName]);
-
-  const handleDownloadExport = useCallback(
-    async (format: "pdf" | "docx") => {
-      if (!result?.story_id) return;
-      const title = sanitizeFileName(result.title || `${accountName}-story`);
-      setExportingFormat(format);
-      try {
-        const blob = await downloadStoryExport(result.story_id, format);
-        saveBlob(blob, `${title || "story"}.${format}`);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to export story");
-        setPhase("error");
-      } finally {
-        setExportingFormat(null);
-      }
+      const audienceLabel =
+        audienceMode === "EXEC"
+          ? "Executive"
+          : audienceMode === "PROCUREMENT"
+            ? "Procurement"
+            : "Champion";
+      generationStartedAtRef.current = Date.now();
+      completionTelemetryRef.current = { success: false, failed: false };
+      trackSellerEvent("generation_started", {
+        step: "generate_click",
+        action_name: "generate_package",
+        duration_ms: Date.now() - flowOpenedAtRef.current,
+        metadata: {
+          audience_mode: audienceMode,
+          title_override: customTitle.trim().length > 0,
+        },
+      });
+      void runStoryGeneration({
+        account_id: accountId,
+        funnel_stages: effectiveStages.length > 0 ? effectiveStages : undefined,
+        filter_topics: effectiveTopics.length > 0 ? effectiveTopics : undefined,
+        title:
+          customTitle.trim() || `${accountName} ${stageLabel} ${audienceLabel} Story`,
+        format: effectiveStoryFormat || undefined,
+        story_length: effectiveStoryLength,
+        story_outline: effectiveStoryOutline,
+        story_type: effectiveStoryType,
+      });
     },
-    [result, accountName]
+    [
+      accountId,
+      accountName,
+      audienceMode,
+      customTitle,
+      handleStagesChange,
+      runStoryGeneration,
+      selectedFormat,
+      selectedStages,
+      selectedTopics,
+      setSelectedTopics,
+      setError,
+      setPhase,
+      storyLength,
+      storyOutline,
+      storyType,
+      stageLabel,
+      trackSellerEvent,
+      visibilityMode,
+      namedPermissionConfirmed,
+    ]
   );
 
-  const handleCreateLandingPage = useCallback(async () => {
-    if (!result?.story_id) {
-      setError("Could not find generated story id. Please regenerate and try again.");
-      setPhase("error");
+  const runGeneration = useCallback(() => {
+    triggerGeneration();
+  }, [triggerGeneration]);
+
+  const handleRegenerateVariant = useCallback((variant: "same" | "shorter" | "executive" | "proof") => {
+    trackSellerEvent("library_action", {
+      action_name: `regenerate_${variant}`,
+      step: "preview_toolbar",
+    });
+    if (variant === "same") {
+      triggerGeneration();
       return;
     }
-
-    setCreatingPage(true);
-    try {
-      const page = await createLandingPage({
-        story_id: result.story_id,
-        title: result.title,
-      });
-
-      if (previewMarkdown && previewMarkdown !== result.markdown) {
-        await savePageDraft(page.id, previewMarkdown);
-      }
-
-      onLandingPageCreated?.(page.id, page.slug);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to create landing page"
-      );
-      setPhase("error");
-    } finally {
-      setCreatingPage(false);
+    if (variant === "shorter") {
+      triggerGeneration({ storyLength: "SHORT" });
+      return;
     }
-  }, [previewMarkdown, result, onLandingPageCreated]);
+    if (variant === "executive") {
+      triggerGeneration({
+        storyLength: "EXECUTIVE",
+        storyOutline: "EXECUTIVE_BRIEF",
+        storyType: "executive_strategic_impact",
+      });
+      return;
+    }
+    triggerGeneration({
+      storyOutline: "BY_THE_NUMBERS",
+      storyType: "quantified_operational_metrics",
+      selectedFormat: "by_the_numbers_snapshot",
+    });
+  }, [trackSellerEvent, triggerGeneration]);
 
-  const handleBackToForm = () => {
-    setPhase("form");
-    setError("");
-  };
+  const {
+    copyFeedback,
+    creatingPage,
+    exportingFormat,
+    handleCopyToClipboard,
+    handleCreateLandingPage,
+    handleDownloadExport,
+    handleDownloadMarkdown,
+  } = usePublishFlow({
+    accountName,
+    includeCompanyName: visibilityMode === "NAMED",
+    namedModeConfirmed: namedPermissionConfirmed,
+    onError: (message) => {
+      setError(message);
+      setPhase("error");
+    },
+    onPackagingAction: (actionName, metadata) => {
+      trackSellerEvent("share_action", {
+        action_name: actionName,
+        step: "preview_package",
+        story_id: result?.story_id ?? undefined,
+        duration_ms: Date.now() - flowOpenedAtRef.current,
+        metadata,
+      });
+      setFirstStoryShared(true);
+      try {
+        localStorage.setItem(ONBOARDING_KEY, "1");
+      } catch {
+        // Ignore storage errors in restricted environments.
+      }
+      setShowOnboarding(false);
+    },
+    onLandingPageCreated,
+    previewMarkdown,
+    result,
+  });
+
+  const handleCopyPackagingTemplate = useCallback(
+    async (templateId: PackagingTemplate["id"]) => {
+      const template = packagingTemplates.find((entry) => entry.id === templateId);
+      if (!template) {
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(template.body);
+      } catch {
+        const textarea = document.createElement("textarea");
+        textarea.value = template.body;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      trackSellerEvent("share_action", {
+        action_name: `copy_package_${templateId}`,
+        step: "preview_package_templates",
+        story_id: result?.story_id ?? undefined,
+        duration_ms: Date.now() - flowOpenedAtRef.current,
+      });
+      setFirstStoryShared(true);
+      setShowOnboarding(false);
+      try {
+        localStorage.setItem(ONBOARDING_KEY, "1");
+      } catch {
+        // Ignore storage errors in restricted environments.
+      }
+    },
+    [packagingTemplates, result?.story_id, trackSellerEvent]
+  );
 
   const handleDismissOnboarding = useCallback(() => {
     setShowOnboarding(false);
+    trackSellerEvent("library_action", {
+      action_name: "dismiss_onboarding",
+      step: "onboarding",
+    });
     try {
       localStorage.setItem(ONBOARDING_KEY, "1");
     } catch {
       // Ignore storage errors in restricted environments.
     }
-  }, []);
+  }, [trackSellerEvent]);
+
+  const handleVisibilityModeChange = useCallback(
+    (mode: StoryVisibilityMode) => {
+      setVisibilityMode(mode);
+      trackSellerEvent("visibility_mode_selected", {
+        action_name: mode.toLowerCase(),
+        step: "quick_flow",
+      });
+    },
+    [trackSellerEvent]
+  );
 
   const handleApplyTemplate = useCallback(
     (templateId: string) => {
-      const template = STORY_TEMPLATES.find((item) => item.id === templateId);
+      const template = allTemplates.find((item) => item.id === templateId);
       if (!template) return;
 
       setActiveTemplateId(template.id);
@@ -604,13 +1034,91 @@ export function StoryGeneratorModal({
       setStoryOutline(template.values.storyOutline);
       setStoryType(template.values.storyType);
       setSelectedFormat(template.values.storyFormat);
+      handleStagesChange(template.values.selectedStages ?? []);
+      setSelectedTopics(template.values.selectedTopics ?? []);
       setStoryTypeMode(
         template.values.storyType === "FULL_ACCOUNT_JOURNEY" ? "FULL" : "TOPIC"
       );
       setIsAdvanced(true);
+      trackSellerEvent("preset_selected", {
+        action_name: template.id,
+        step: "template_gallery",
+      });
     },
-    []
+    [allTemplates, handleStagesChange, setSelectedTopics, trackSellerEvent]
   );
+
+  const handleSaveCurrentTemplate = useCallback(async () => {
+    const title = window.prompt("Name this reusable preset", "My Deal Preset");
+    if (!title || title.trim().length < 2) {
+      return;
+    }
+    setSavingTemplate(true);
+    try {
+      await createSharedAsset({
+        asset_type: "TEMPLATE",
+        title: title.trim(),
+        description: "Saved from Story Generator",
+        visibility: "ORG",
+        metadata: {
+          template_values: {
+            story_length: storyLength,
+            story_outline: storyOutline,
+            story_type: storyType,
+            story_format: selectedFormat || null,
+            selected_stages: selectedStages,
+            selected_topics: selectedTopics,
+          },
+        },
+      });
+      await loadSavedTemplates();
+      showToast("Preset saved to template gallery", "success");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save preset");
+      setPhase("error");
+    } finally {
+      setSavingTemplate(false);
+    }
+  }, [
+    loadSavedTemplates,
+    selectedFormat,
+    selectedStages,
+    selectedTopics,
+    setError,
+    setPhase,
+    showToast,
+    storyLength,
+    storyOutline,
+    storyType,
+  ]);
+
+  const handleApplyDealStagePreset = useCallback(
+    (presetId: string) => {
+      const preset = DEAL_STAGE_PRESETS.find((item) => item.id === presetId);
+      if (!preset) return;
+      setDealStagePresetId(preset.id);
+      setStoryLength(preset.values.storyLength);
+      setStoryOutline(preset.values.storyOutline);
+      setStoryType(preset.values.storyType);
+      setSelectedFormat(preset.values.storyFormat);
+      handleStagesChange(preset.values.selectedStages ?? []);
+      setSelectedTopics(preset.values.selectedTopics ?? []);
+      setStoryTypeMode(
+        preset.values.storyType === "FULL_ACCOUNT_JOURNEY" ? "FULL" : "TOPIC"
+      );
+      trackSellerEvent("preset_selected", {
+        action_name: preset.id,
+        step: "deal_stage",
+      });
+    },
+    [handleStagesChange, setSelectedTopics, trackSellerEvent]
+  );
+
+  useEffect(() => {
+    if (visibilityMode === "ANONYMOUS") {
+      setNamedPermissionConfirmed(false);
+    }
+  }, [visibilityMode]);
 
   useEffect(() => {
     if (storyTypeMode === "FULL") {
@@ -623,7 +1131,7 @@ export function StoryGeneratorModal({
   }, [storyTypeMode, storyType]);
 
   useEffect(() => {
-    const matched = STORY_TEMPLATES.find(
+    const matched = allTemplates.find(
       (template) =>
         template.values.storyLength === storyLength &&
         template.values.storyOutline === storyOutline &&
@@ -631,7 +1139,7 @@ export function StoryGeneratorModal({
         template.values.storyFormat === selectedFormat
     );
     setActiveTemplateId(matched?.id ?? null);
-  }, [selectedFormat, storyLength, storyOutline, storyType]);
+  }, [allTemplates, selectedFormat, storyLength, storyOutline, storyType]);
 
   return (
     <div className="modal-overlay" role="presentation" onClick={onClose}>
@@ -666,47 +1174,205 @@ export function StoryGeneratorModal({
                 <p className="story-form__helper">
                   Generate in one click using your saved settings and org defaults.
                 </p>
+                <div className="story-form__guided">
+                  <h4 className="story-form__group-title">Guided Quick Flow</h4>
+                  <div className="story-type-toggle" role="radiogroup" aria-label="Deal stage preset">
+                    {DEAL_STAGE_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className={`story-type-toggle__option ${dealStagePresetId === preset.id ? "story-type-toggle__option--active" : ""}`}
+                        onClick={() => handleApplyDealStagePreset(preset.id)}
+                        role="radio"
+                        aria-checked={dealStagePresetId === preset.id}
+                        title={preset.description}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="form-grid-2">
+                    <div className="form-field">
+                      <label className="form-field__label" htmlFor="story-audience-mode">
+                        Audience
+                      </label>
+                      <select
+                        id="story-audience-mode"
+                        className="form-field__input"
+                        value={audienceMode}
+                        onChange={(e) => {
+                          const mode = e.target.value as StoryAudienceMode;
+                          setAudienceMode(mode);
+                          trackSellerEvent("library_action", {
+                            action_name: `audience_${mode.toLowerCase()}`,
+                            step: "quick_flow",
+                          });
+                        }}
+                      >
+                        <option value="CHAMPION">Champion Forward</option>
+                        <option value="EXEC">Executive Recap</option>
+                        <option value="PROCUREMENT">Proof for Procurement</option>
+                      </select>
+                    </div>
+                    <div className="form-field">
+                      <label className="form-field__label">Anonymization Mode</label>
+                      <div className="story-type-toggle" role="radiogroup" aria-label="Anonymization mode">
+                        <button
+                          type="button"
+                          className={`story-type-toggle__option ${visibilityMode === "ANONYMOUS" ? "story-type-toggle__option--active" : ""}`}
+                          onClick={() => handleVisibilityModeChange("ANONYMOUS")}
+                          role="radio"
+                          aria-checked={visibilityMode === "ANONYMOUS"}
+                        >
+                          Anonymous
+                        </button>
+                        <button
+                          type="button"
+                          className={`story-type-toggle__option ${visibilityMode === "NAMED" ? "story-type-toggle__option--active" : ""}`}
+                          onClick={() => handleVisibilityModeChange("NAMED")}
+                          role="radio"
+                          aria-checked={visibilityMode === "NAMED"}
+                        >
+                          Named
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  {visibilityMode === "NAMED" && (
+                    <div className="alert alert--warning" role="note">
+                      <label className="form-row" style={{ marginTop: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={namedPermissionConfirmed}
+                          onChange={(e) => setNamedPermissionConfirmed(e.target.checked)}
+                        />
+                        I confirm customer permission for named publishing.
+                      </label>
+                    </div>
+                  )}
+                </div>
                 {showOnboarding && (
                   <div className="story-onboarding" role="note" aria-live="polite">
-                    <div>
-                      <strong>First run:</strong> choose a template or use defaults,
-                      then generate. You can edit inline before creating a page.
+                    <div className="story-onboarding__header">
+                      <strong>60-second first story sprint</strong>
+                      <span
+                        className={`story-onboarding__timer ${
+                          onboardingWithinTarget ? "story-onboarding__timer--ok" : "story-onboarding__timer--late"
+                        }`}
+                      >
+                        {onboardingElapsedSeconds}s
+                      </span>
                     </div>
-                    <button
-                      type="button"
-                      className="btn btn--ghost btn--sm"
-                      onClick={handleDismissOnboarding}
-                    >
-                      Dismiss
-                    </button>
+                    <div className="story-onboarding__copy">
+                      Pick a stage, generate, then use a package action to share.
+                    </div>
+                    <div className="story-onboarding__steps">
+                      <div className="story-onboarding__step">
+                        <span className="badge badge--success">Done</span>
+                        Stage preset selected
+                      </div>
+                      <div className="story-onboarding__step">
+                        <span className="badge badge--success">Done</span>
+                        Visibility mode selected
+                      </div>
+                      <div className="story-onboarding__step">
+                        <span
+                          className={`badge ${
+                            firstStoryGenerated ? "badge--success" : "badge--draft"
+                          }`}
+                        >
+                          {firstStoryGenerated ? "Done" : "Pending"}
+                        </span>
+                        Generate first story
+                      </div>
+                      <div className="story-onboarding__step">
+                        <span
+                          className={`badge ${
+                            firstStoryShared ? "badge--success" : "badge--draft"
+                          }`}
+                        >
+                          {firstStoryShared ? "Done" : "Pending"}
+                        </span>
+                        Share or package output
+                      </div>
+                    </div>
+                    <div className="story-onboarding__actions">
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        onClick={handleDismissOnboarding}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
                   </div>
                 )}
                 <div className="story-template-grid" role="list" aria-label="Story templates">
-                  {STORY_TEMPLATES.map((template) => {
+                  {allTemplates.map((template) => {
                     const selected = activeTemplateId === template.id;
+                    const assetId = template.assetId;
                     return (
-                      <button
+                      <div
                         key={template.id}
-                        type="button"
                         role="listitem"
                         className={`story-template ${selected ? "story-template--active" : ""}`}
-                        onClick={() => handleApplyTemplate(template.id)}
-                        aria-pressed={selected}
                       >
-                        <span className="story-template__title">{template.label}</span>
-                        <span className="story-template__description">
-                          {template.description}
-                        </span>
-                      </button>
+                        <button
+                          type="button"
+                          className="story-template__button"
+                          onClick={() => handleApplyTemplate(template.id)}
+                          aria-pressed={selected}
+                        >
+                          <span className="story-template__title">{template.label}</span>
+                          <span className="story-template__description">
+                            {template.description}
+                          </span>
+                          {template.source === "saved" ? (
+                            <span className="form-default-badge">Saved Preset</span>
+                          ) : null}
+                        </button>
+                        {template.source === "saved" && assetId ? (
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            onClick={async () => {
+                              try {
+                                await deleteSharedAsset(assetId);
+                                await loadSavedTemplates();
+                                showToast("Preset deleted", "info");
+                              } catch (err) {
+                                setError(
+                                  err instanceof Error
+                                    ? err.message
+                                    : "Failed to delete preset"
+                                );
+                                setPhase("error");
+                              }
+                            }}
+                          >
+                            Delete
+                          </button>
+                        ) : null}
+                      </div>
                     );
                   })}
                 </div>
                 <div className="story-form__quick-actions">
-                  <button type="button" className="btn btn--primary" onClick={runGeneration}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={runGeneration}
+                    disabled={namedModeBlocked}
+                    title={
+                      namedModeBlocked
+                        ? "Confirm customer permission to use named mode."
+                        : undefined
+                    }
+                  >
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                       <path d="M8 2v12M2 8h12" />
                     </svg>
-                    Generate Story
+                    Generate + Package
                   </button>
                   <button
                     type="button"
@@ -715,6 +1381,14 @@ export function StoryGeneratorModal({
                     aria-expanded={isAdvanced}
                   >
                     {isAdvanced ? "Hide Customization" : "Customize Settings"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    onClick={() => void handleSaveCurrentTemplate()}
+                    disabled={savingTemplate}
+                  >
+                    {savingTemplate ? "Saving..." : "Save as Preset"}
                   </button>
                 </div>
               </section>
@@ -869,11 +1543,21 @@ export function StoryGeneratorModal({
                     <button type="button" className="btn btn--secondary" onClick={onClose}>
                       Cancel
                     </button>
-                    <button type="button" className="btn btn--primary" onClick={runGeneration}>
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      onClick={runGeneration}
+                      disabled={namedModeBlocked}
+                      title={
+                        namedModeBlocked
+                          ? "Confirm customer permission to use named mode."
+                          : undefined
+                      }
+                    >
                       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                         <path d="M8 2v12M2 8h12" />
                       </svg>
-                      Generate Story
+                      Generate + Package
                     </button>
                   </div>
                 </>
@@ -882,227 +1566,47 @@ export function StoryGeneratorModal({
           )}
 
           {phase === "loading" && (
-            <div className="loading-state" role="status" aria-live="polite">
-              <div
-                className="loading-state__progress"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={loadingProgress}
-                aria-label="Story generation progress"
-              >
-                <div className="loading-state__progress-fill" style={{ width: `${loadingProgress}%` }} />
-              </div>
-              <div className="loading-state__spinner" aria-hidden="true" />
-              <h3 className="loading-state__title">Generating your story...</h3>
-              <p className="loading-state__text">
-                Analyzing transcripts, extracting insights, and composing a structured narrative.
-              </p>
-              <p className="loading-state__hint">{loadingMessage}</p>
-              <div className="loading-state__steps">
-                <div className={`loading-state__step ${loadingStep > 0 ? "loading-state__step--complete" : loadingStep === 0 ? "loading-state__step--active" : ""}`}>
-                  <span className="loading-state__step-dot" />
-                  Gathering transcript segments
-                </div>
-                <div className={`loading-state__step ${loadingStep > 1 ? "loading-state__step--complete" : loadingStep === 1 ? "loading-state__step--active" : ""}`}>
-                  <span className="loading-state__step-dot" />
-                  Building journey narrative
-                </div>
-                <div className={`loading-state__step ${loadingStep === 2 ? "loading-state__step--active" : ""}`}>
-                  <span className="loading-state__step-dot" />
-                  Extracting high-value quotes
-                </div>
-              </div>
-              <button
-                type="button"
-                className="btn btn--ghost loading-state__cancel"
-                onClick={handleCancelGeneration}
-              >
-                Cancel generation
-              </button>
-              {streamedMarkdown.trim().length > 0 && (
-                <div className="loading-state__live">
-                  <div className="loading-state__live-title">Live draft preview</div>
-                  <article className="markdown-body loading-state__live-markdown">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {`${streamedMarkdown}▍`}
-                    </ReactMarkdown>
-                  </article>
-                </div>
-              )}
-            </div>
+            <StoryLoadingSection
+              handleCancelGeneration={handleCancelGeneration}
+              loadingMessage={loadingMessage}
+              loadingProgress={loadingProgress}
+              loadingStep={loadingStep}
+              streamedMarkdown={streamedMarkdown}
+            />
           )}
 
           {phase === "preview" && result && (
-            <div className="story-preview">
-              <div className="story-preview__toolbar">
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  onClick={handleBackToForm}
-                >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    <path d="M10 12L6 8l4-4" />
-                  </svg>
-                  Back
-                </button>
-                {storyStats && (
-                  <div className="story-preview__stats" aria-label="Story length details">
-                    {storyStats.wordCount.toLocaleString()} words · {storyStats.readingMinutes} min read
-                  </div>
-                )}
-                <div className="story-preview__toolbar-actions">
-                  <button type="button" className="btn btn--ghost" onClick={runGeneration}>
-                    Regenerate
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--ghost"
-                    onClick={() => setEditMode((prev) => !prev)}
-                  >
-                    {editMode ? "Preview Mode" : "Edit Inline"}
-                  </button>
-                  {editMode && previewMarkdown !== result.markdown && (
-                    <button
-                      type="button"
-                      className="btn btn--ghost"
-                      onClick={() => setPreviewMarkdown(result.markdown)}
-                    >
-                      Reset Edits
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className={`btn btn--secondary ${copyFeedback ? "btn--success" : ""}`}
-                    onClick={handleCopyToClipboard}
-                  >
-                    {copyFeedback ? "Copied!" : "Copy to Clipboard"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    onClick={handleDownloadMarkdown}
-                  >
-                    Download .md
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    onClick={() => void handleDownloadExport("pdf")}
-                    disabled={!result.story_id || exportingFormat !== null}
-                  >
-                    {exportingFormat === "pdf" ? "Exporting..." : "PDF"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    onClick={() => void handleDownloadExport("docx")}
-                    disabled={!result.story_id || exportingFormat !== null}
-                  >
-                    {exportingFormat === "docx" ? "Exporting..." : "DOCX"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--primary"
-                    onClick={handleCreateLandingPage}
-                    disabled={creatingPage}
-                  >
-                    {creatingPage ? (
-                      <>
-                        <span className="btn__spinner" />
-                        Opening editor...
-                      </>
-                    ) : (
-                      "Edit as Landing Page"
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              <div className="sr-only" role="status" aria-live="polite">
-                {copyFeedback ? "Story copied to clipboard." : ""}
-              </div>
-
-              <div className="story-preview__layout">
-                <div className="story-preview__content">
-                  {editMode ? (
-                    <div className="story-preview__editor">
-                      <label className="form-field__label" htmlFor="story-inline-editor">
-                        Edit Story
-                      </label>
-                      <textarea
-                        id="story-inline-editor"
-                        className="story-preview__editor-input"
-                        value={activeMarkdown}
-                        onChange={(e) => setPreviewMarkdown(e.target.value)}
-                      />
-                    </div>
-                  ) : (
-                    <article className="markdown-body">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {activeMarkdown}
-                      </ReactMarkdown>
-                    </article>
-                  )}
-                </div>
-
-                {result.quotes.length > 0 && (
-                  <aside className="story-preview__sidebar">
-                    <h3 className="story-preview__sidebar-title">
-                      High-Value Quotes
-                    </h3>
-                    {result.quotes.map((q, i) => (
-                      <div key={i} className="quote-card">
-                        <blockquote className="quote-card__text">
-                          "{q.quote_text}"
-                        </blockquote>
-                        {q.speaker && (
-                          <p className="quote-card__speaker">- {q.speaker}</p>
-                        )}
-                        {q.metric_value && (
-                          <div className="quote-card__metric">
-                            <span className="quote-card__metric-value">
-                              {q.metric_value}
-                            </span>
-                            {q.metric_type && (
-                              <span className="quote-card__metric-type">
-                                {q.metric_type.replace(/_/g, " ")}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                        {q.call_id && (
-                          <Link to={`/calls/${q.call_id}/transcript`} className="quote-card__source-link">
-                            View transcript source
-                          </Link>
-                        )}
-                      </div>
-                    ))}
-                  </aside>
-                )}
-              </div>
-            </div>
+            <StoryPreviewSection
+              activeMarkdown={activeMarkdown}
+              copyFeedback={copyFeedback}
+              creatingPage={creatingPage}
+              editMode={editMode}
+              exportingFormat={exportingFormat}
+              handleBackToForm={handleBackToForm}
+              handleCopyToClipboard={() => void handleCopyToClipboard()}
+              handleCreateLandingPage={() => void handleCreateLandingPage()}
+              handleDownloadExport={handleDownloadExport}
+              handleDownloadMarkdown={handleDownloadMarkdown}
+              handleRegenerateVariant={handleRegenerateVariant}
+              handleCopyPackagingTemplate={(templateId) =>
+                void handleCopyPackagingTemplate(templateId)
+              }
+              packagingTemplates={packagingTemplates}
+              result={result}
+              runGeneration={runGeneration}
+              safeToShare={safeToShare}
+              setEditMode={setEditMode}
+              setPreviewMarkdown={setPreviewMarkdown}
+              storyStats={storyStats}
+            />
           )}
 
           {phase === "error" && (
-            <div className="error-state" role="alert">
-              <div className="error-state__icon">
-                <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="#dc2626" strokeWidth="2" aria-hidden="true">
-                  <circle cx="24" cy="24" r="20" />
-                  <path d="M24 16v10M24 30v2" />
-                </svg>
-              </div>
-              <h3 className="error-state__title">Generation Failed</h3>
-              <p className="error-state__message">{error}</p>
-              <div className="error-state__actions">
-                <button type="button" className="btn btn--secondary" onClick={handleBackToForm}>
-                  Back to Form
-                </button>
-                <button type="button" className="btn btn--primary" onClick={runGeneration}>
-                  Retry
-                </button>
-              </div>
-            </div>
+            <StoryErrorSection
+              error={error}
+              handleBackToForm={handleBackToForm}
+              runGeneration={runGeneration}
+            />
           )}
         </div>
       </div>

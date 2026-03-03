@@ -5,7 +5,7 @@ import {
   useCallback,
   useMemo,
 } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { getTranscriptData, type TranscriptData } from "../lib/api";
 import { formatEnumLabel } from "../lib/format";
 import { TOPIC_LABELS, type TaxonomyTopic } from "../types/taxonomy";
@@ -134,6 +134,15 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function parseNonNegativeInt(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+  return parsed;
+}
+
 // ─── Search Highlight Helper ────────────────────────────────────────────────
 
 interface HighlightResult {
@@ -224,6 +233,8 @@ interface SegmentProps {
   activeMatchIndex: number;
   matchStartIndex: number;
   matchRefs: React.MutableRefObject<Map<number, HTMLElement>>;
+  segmentRefs: React.MutableRefObject<Map<string, HTMLDivElement>>;
+  highlightedSegmentId: string | null;
 }
 
 function Segment({
@@ -232,6 +243,8 @@ function Segment({
   activeMatchIndex,
   matchStartIndex,
   matchRefs,
+  segmentRefs,
+  highlightedSegmentId,
 }: SegmentProps) {
   const speaker = segment.speaker ?? "Unknown Speaker";
   const color = speakerColor(speaker);
@@ -241,7 +254,14 @@ function Segment({
 
   return (
     <div
-      className="transcript__seg"
+      ref={(el) => {
+        if (el) {
+          segmentRefs.current.set(segment.id, el);
+        } else {
+          segmentRefs.current.delete(segment.id);
+        }
+      }}
+      className={`transcript__seg${segment.id === highlightedSegmentId ? " transcript__seg--deep-linked" : ""}`}
       data-speaker={speaker}
       data-chunk-id={segment.id}
     >
@@ -517,6 +537,7 @@ function Sidebar({
 
 export function TranscriptViewerPage() {
   const { callId } = useParams<{ callId: string }>();
+  const location = useLocation();
 
   const [data, setData] = useState<TranscriptData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -528,10 +549,22 @@ export function TranscriptViewerPage() {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [activeMatchIndex, setActiveMatchIndex] = useState(-1);
   const [totalMatches, setTotalMatches] = useState(0);
+  const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const matchRefs = useRef<Map<number, HTMLElement>>(new Map());
+  const segmentRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deepLinkHandledRef = useRef<string | null>(null);
+  const deepLinkClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const deepLinkTarget = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return {
+      timestampMs: parseNonNegativeInt(params.get("tms")),
+      chunkId: params.get("chunk")?.trim() || null,
+    };
+  }, [location.search]);
 
   // ─── Data Fetching ──────────────────────────────────────────────────────
 
@@ -625,6 +658,70 @@ export function TranscriptViewerPage() {
       }
     });
   }, [activeMatchIndex, debouncedQuery]);
+
+  // ─── Deep-Link Jump (quote provenance) ──────────────────────────────────
+
+  useEffect(() => {
+    if (!data) {
+      return;
+    }
+    const { timestampMs, chunkId } = deepLinkTarget;
+    if (timestampMs == null && !chunkId) {
+      return;
+    }
+
+    const fingerprint = `${callId ?? ""}:${chunkId ?? ""}:${timestampMs ?? ""}`;
+    if (deepLinkHandledRef.current === fingerprint) {
+      return;
+    }
+
+    let targetSegment = chunkId
+      ? data.segments.find((segment) => segment.id === chunkId)
+      : undefined;
+
+    if (!targetSegment && timestampMs != null) {
+      const segmentsWithTimestamp = data.segments.filter(
+        (segment) => typeof segment.startMs === "number"
+      );
+      if (segmentsWithTimestamp.length > 0) {
+        targetSegment = segmentsWithTimestamp.reduce((closest, current) => {
+          const closestDistance = Math.abs((closest.startMs as number) - timestampMs);
+          const currentDistance = Math.abs((current.startMs as number) - timestampMs);
+          return currentDistance < closestDistance ? current : closest;
+        });
+      }
+    }
+
+    if (!targetSegment) {
+      return;
+    }
+
+    deepLinkHandledRef.current = fingerprint;
+    setHighlightedSegmentId(targetSegment.id);
+
+    requestAnimationFrame(() => {
+      segmentRefs.current
+        .get(targetSegment.id)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+
+    if (deepLinkClearTimerRef.current) {
+      clearTimeout(deepLinkClearTimerRef.current);
+    }
+    deepLinkClearTimerRef.current = setTimeout(() => {
+      setHighlightedSegmentId((current) =>
+        current === targetSegment?.id ? null : current
+      );
+    }, 3500);
+  }, [callId, data, deepLinkTarget]);
+
+  useEffect(() => {
+    return () => {
+      if (deepLinkClearTimerRef.current) {
+        clearTimeout(deepLinkClearTimerRef.current);
+      }
+    };
+  }, []);
 
   // ─── Navigation Callbacks ────────────────────────────────────────────
 
@@ -744,6 +841,9 @@ export function TranscriptViewerPage() {
 
   return (
     <div className="transcript__layout">
+      <h1 className="sr-only">
+        {data.meta.title ? `${data.meta.title} Transcript` : "Transcript"}
+      </h1>
       <div className={mainClasses}>
         {/* Header */}
         <div className="transcript__header">
@@ -845,6 +945,8 @@ export function TranscriptViewerPage() {
                 activeMatchIndex={activeMatchIndex}
                 matchStartIndex={segmentMatchStarts[i] ?? 0}
                 matchRefs={matchRefs}
+                segmentRefs={segmentRefs}
+                highlightedSegmentId={highlightedSegmentId}
               />
             ))
           ) : (

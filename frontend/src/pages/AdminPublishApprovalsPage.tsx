@@ -5,6 +5,8 @@ import {
   type PublishApprovalRequestRow,
 } from "../lib/api";
 import { badgeClass, formatEnumLabel } from "../lib/format";
+import { AdminErrorState } from "../components/admin/AdminErrorState";
+import { AdminSection } from "../components/admin/AdminLayoutPrimitives";
 
 export function AdminPublishApprovalsPage() {
   const [rows, setRows] = useState<PublishApprovalRequestRow[]>([]);
@@ -43,7 +45,7 @@ export function AdminPublishApprovalsPage() {
     <div className="page">
       <div className="page__header"><div className="page__header-text"><h1 className="page__title">Publish Approvals</h1><p className="page__subtitle">Review and approve content publishing requests</p></div></div>
 
-      <div className="card card--elevated">
+      <AdminSection title="Filters">
         <div className="form-group" style={{ maxWidth: 200 }}>
           <label className="form-group__label">Filter by Status</label>
           <select className="form-select" value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -52,13 +54,24 @@ export function AdminPublishApprovalsPage() {
             <option value="REJECTED">Rejected</option>
           </select>
         </div>
-      </div>
+      </AdminSection>
 
-      {error && <div className="alert alert--error">{error}</div>}
+      {error && (
+        <AdminErrorState
+          title="Publish Approvals Request Failed"
+          message={error}
+          onRetry={() => void load()}
+        />
+      )}
 
-      <div className="card card--elevated">
+      <AdminSection
+        title="Approval Queue"
+        subtitle={`${rows.length} request${rows.length === 1 ? "" : "s"}`}
+      >
         {loading ? (
-          <div className="state-view" style={{ minHeight: 120 }}><div className="spinner spinner--sm" /></div>
+          <div className="state-view" style={{ minHeight: 120 }} role="status" aria-live="polite">
+            <div className="spinner spinner--sm" />
+          </div>
         ) : (
           <table className="data-table">
             <thead>
@@ -104,7 +117,7 @@ export function AdminPublishApprovalsPage() {
             </tbody>
           </table>
         )}
-      </div>
+      </AdminSection>
     </div>
   );
 }

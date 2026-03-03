@@ -20,6 +20,14 @@ import {
 import {
   type WeeklyRegenJobData,
 } from "./services/weekly-story-regeneration.js";
+import {
+  PostPublishValidationService,
+  type PostPublishValidationJobData,
+} from "./services/post-publish-validation.js";
+import {
+  ScheduledPagePublishService,
+  type ScheduledPagePublishJobData,
+} from "./services/scheduled-page-publish.js";
 import { startUsageReportingCron } from "./services/usage-reporter.js";
 import { startAuditRetentionCron } from "./services/audit-retention.js";
 import { startDataRetentionCron } from "./services/data-retention.js";
@@ -34,6 +42,8 @@ export interface Queues {
   transcriptFetchQueue: Queue;
   syncQueue: Queue;
   storyRegenQueue: Queue;
+  postPublishValidationQueue: Queue<PostPublishValidationJobData>;
+  scheduledPagePublishQueue: Queue<ScheduledPagePublishJobData>;
 }
 
 export interface Workers {
@@ -41,6 +51,8 @@ export interface Workers {
   transcriptFetchWorker: Worker<TranscriptFetchJob>;
   syncWorker: Worker;
   storyRegenWorker: Worker<WeeklyRegenJobData>;
+  postPublishValidationWorker: Worker<PostPublishValidationJobData>;
+  scheduledPagePublishWorker: Worker<ScheduledPagePublishJobData>;
   usageCron: ReturnType<typeof startUsageReportingCron>;
   auditRetentionCron: ReturnType<typeof startAuditRetentionCron>;
   dataRetentionCron: ReturnType<typeof startDataRetentionCron>;
@@ -93,7 +105,28 @@ export function createQueues(redisUrl: string): Queues {
     }
   );
 
-  return { processingQueue, transcriptFetchQueue, syncQueue, storyRegenQueue };
+  const postPublishValidationQueue = new Queue<PostPublishValidationJobData>(
+    "post-publish-validation",
+    {
+      connection: { url: redisUrl },
+    }
+  );
+
+  const scheduledPagePublishQueue = new Queue<ScheduledPagePublishJobData>(
+    "scheduled-page-publish",
+    {
+      connection: { url: redisUrl },
+    }
+  );
+
+  return {
+    processingQueue,
+    transcriptFetchQueue,
+    syncQueue,
+    storyRegenQueue,
+    postPublishValidationQueue,
+    scheduledPagePublishQueue,
+  };
 }
 
 /**
@@ -231,6 +264,56 @@ export function createWorkers(
     }
   );
 
+  const postPublishValidation = new PostPublishValidationService(prisma);
+  const postPublishValidationWorker = new Worker<PostPublishValidationJobData>(
+    "post-publish-validation",
+    async (job) => {
+      logger.info("Running post-publish validation", {
+        jobId: job.id,
+        pageId: job.data.pageId,
+        organizationId: job.data.organizationId,
+      });
+      const result = await postPublishValidation.runAndPersist(job.data);
+      logger.info("Post-publish validation complete", {
+        jobId: job.id,
+        pageId: job.data.pageId,
+        status: result?.status ?? "SKIPPED",
+        linksChecked: result?.links_checked ?? 0,
+        brokenLinks: result?.broken_links.length ?? 0,
+      });
+      return result;
+    },
+    {
+      connection: { url: redisUrl },
+      concurrency: 2,
+    }
+  );
+
+  const scheduledPagePublish = new ScheduledPagePublishService(prisma);
+  const scheduledPagePublishWorker = new Worker<ScheduledPagePublishJobData>(
+    "scheduled-page-publish",
+    async (job) => {
+      logger.info("Running scheduled page publish", {
+        jobId: job.id,
+        pageId: job.data.pageId,
+        organizationId: job.data.organizationId,
+        publishAt: job.data.publishAt,
+      });
+      const result = await scheduledPagePublish.run(job.data);
+      logger.info("Scheduled page publish complete", {
+        jobId: job.id,
+        pageId: job.data.pageId,
+        published: result.published,
+        reason: result.reason ?? null,
+      });
+      return result;
+    },
+    {
+      connection: { url: redisUrl },
+      concurrency: 1,
+    }
+  );
+
   // Usage reporting cron
   const usageCron = startUsageReportingCron(prisma, stripe);
   const auditRetentionCron = startAuditRetentionCron(prisma);
@@ -243,6 +326,8 @@ export function createWorkers(
     transcriptFetchWorker,
     syncWorker,
     storyRegenWorker,
+    postPublishValidationWorker,
+    scheduledPagePublishWorker,
     usageCron,
     auditRetentionCron,
     dataRetentionCron,

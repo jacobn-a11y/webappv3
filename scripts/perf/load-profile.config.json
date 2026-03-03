@@ -1,0 +1,59 @@
+{
+  "thresholds": {
+    "p95Ms": 750,
+    "p99Ms": 1500,
+    "maxFailureRatePct": 5
+  },
+  "failureBehavior": {
+    "abortOnStatuses": [500, 502, 503, 504],
+    "maxConsecutiveAbortStatuses": 15,
+    "allowedNon2xxStatuses": [401, 402, 403]
+  },
+  "profiles": [
+    {
+      "name": "dashboard-sustained",
+      "requests": 300,
+      "concurrency": 14,
+      "endpoints": [
+        {
+          "path": "/api/dashboard/home",
+          "method": "GET",
+          "weight": 4
+        },
+        {
+          "path": "/api/analytics",
+          "method": "GET",
+          "weight": 2
+        },
+        {
+          "path": "/api/dashboard/ops/diagnostics",
+          "method": "GET",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "name": "story-sustained",
+      "requests": 220,
+      "concurrency": 10,
+      "endpoints": [
+        {
+          "path": "/api/stories/build",
+          "method": "POST",
+          "weight": 3,
+          "body": {
+            "account_id": "acct-test-001",
+            "funnel_stages": ["BOFU"],
+            "filter_topics": ["roi_financial_outcomes"],
+            "title": "Load profile story"
+          }
+        },
+        {
+          "path": "/api/stories/library",
+          "method": "GET",
+          "weight": 2
+        }
+      ]
+    }
+  ]
+}
