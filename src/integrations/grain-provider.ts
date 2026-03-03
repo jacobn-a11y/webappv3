@@ -23,6 +23,7 @@ import type {
   ProviderCredentials,
   SyncResult,
 } from "./types.js";
+import { OutboundRateLimiter } from "./outbound-rate-limiter.js";
 
 // ─── Grain API Response Types ───────────────────────────────────────────────
 
@@ -80,6 +81,7 @@ function asGrainCredentials(creds: ProviderCredentials): GrainCredentials {
 export class GrainProvider implements CallRecordingProvider {
   readonly name: IntegrationProvider = "GRAIN";
   readonly callProvider: CallProvider = "GRAIN";
+  private rateLimiter = new OutboundRateLimiter(5, 5);
 
   private baseUrl(creds: GrainCredentials): string {
     return (creds.baseUrl ?? "https://api.grain.com/_/public-api").replace(
@@ -100,6 +102,7 @@ export class GrainProvider implements CallRecordingProvider {
   ): Promise<boolean> {
     const creds = asGrainCredentials(credentials);
     try {
+      await this.rateLimiter.acquire();
       const res = await fetch(`${this.baseUrl(creds)}/v1/recordings?limit=1`, {
         method: "GET",
         headers: this.headers(creds),
@@ -130,6 +133,7 @@ export class GrainProvider implements CallRecordingProvider {
       params.set("started_after", since.toISOString());
     }
 
+    await this.rateLimiter.acquire();
     const res = await fetch(`${base}/v1/recordings?${params.toString()}`, {
       method: "GET",
       headers: this.headers(creds),
@@ -172,6 +176,7 @@ export class GrainProvider implements CallRecordingProvider {
     const creds = asGrainCredentials(credentials);
     const base = this.baseUrl(creds);
 
+    await this.rateLimiter.acquire();
     const res = await fetch(
       `${base}/v1/recordings/${encodeURIComponent(externalCallId)}?include_transcript=true`,
       {

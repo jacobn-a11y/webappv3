@@ -33,11 +33,39 @@ import { decodeCredentials } from "../types/json-boundaries.js";
 
 // ─── Validation Schemas ─────────────────────────────────────────────────────
 
+const gongCredentialsSchema = z.object({
+  accessKey: z.string().min(1),
+  accessKeySecret: z.string().min(1),
+});
+
+const grainCredentialsSchema = z.object({
+  apiToken: z.string().min(1),
+});
+
+const salesforceCredentialsSchema = z.object({
+  instanceUrl: z.string().url(),
+  accessToken: z.string().min(1),
+  refreshToken: z.string().optional(),
+});
+
+const credentialsByProvider = {
+  GONG: gongCredentialsSchema,
+  GRAIN: grainCredentialsSchema,
+  SALESFORCE: salesforceCredentialsSchema,
+} as const;
+
 const createIntegrationSchema = z.object({
   provider: z.enum(DIRECT_INTEGRATION_PROVIDERS),
   credentials: z.record(z.unknown()),
   settings: z.record(z.unknown()).optional(),
   webhookSecret: z.string().optional(),
+}).refine((data) => {
+  const schema = credentialsByProvider[data.provider as keyof typeof credentialsByProvider];
+  if (!schema) return true;
+  return schema.safeParse(data.credentials).success;
+}, {
+  message: "Invalid credentials for the specified provider",
+  path: ["credentials"],
 });
 
 const updateIntegrationSchema = z.object({

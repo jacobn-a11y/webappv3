@@ -1,6 +1,7 @@
-import { type Router } from "express";
+import { type Router, type Response } from "express";
 import type { PrismaClient } from "@prisma/client";
 import logger from "../../lib/logger.js";
+import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 
 interface RegisterTenantSupportRoutesOptions {
   router: Router;
@@ -13,7 +14,7 @@ export function registerTenantSupportRoutes({
 }: RegisterTenantSupportRoutesOptions): void {
   // ─── Support Account Info (Tenant-Side) ──────────────────────────────────
 
-  router.get("/support-account", async (req: any, res) => {
+  router.get("/support-account", async (req: AuthenticatedRequest, res: Response) => {
     try {
       const platformSettings = await prisma.platformSettings.findFirst();
       const optOut = await prisma.tenantSupportOptOut.findUnique({
@@ -30,7 +31,7 @@ export function registerTenantSupportRoutes({
     }
   });
 
-  router.post("/support-account/opt-out", async (req: any, res) => {
+  router.post("/support-account/opt-out", async (req: AuthenticatedRequest, res: Response) => {
     try {
       if (req.userRole !== "OWNER" && req.userRole !== "ADMIN") {
         return res.status(403).json({ error: "Only account owner or admin can manage support access" });
@@ -53,7 +54,7 @@ export function registerTenantSupportRoutes({
     }
   });
 
-  router.post("/support-account/opt-in", async (req: any, res) => {
+  router.post("/support-account/opt-in", async (req: AuthenticatedRequest, res: Response) => {
     try {
       if (req.userRole !== "OWNER" && req.userRole !== "ADMIN") {
         return res.status(403).json({ error: "Only account owner or admin can manage support access" });
@@ -70,7 +71,7 @@ export function registerTenantSupportRoutes({
 
   // ─── Account Deletion (Tenant-Side) ─────────────────────────────────────
 
-  router.post("/account/request-deletion", async (req: any, res) => {
+  router.post("/account/request-deletion", async (req: AuthenticatedRequest, res: Response) => {
     try {
       if (req.userRole !== "OWNER") {
         return res.status(403).json({ error: "Only the account owner can request account deletion" });
@@ -107,7 +108,7 @@ export function registerTenantSupportRoutes({
     }
   });
 
-  router.post("/account/cancel-deletion", async (req: any, res) => {
+  router.post("/account/cancel-deletion", async (req: AuthenticatedRequest, res: Response) => {
     try {
       if (req.userRole !== "OWNER") {
         return res.status(403).json({ error: "Only the account owner can cancel deletion" });
@@ -133,7 +134,7 @@ export function registerTenantSupportRoutes({
     }
   });
 
-  router.get("/account/deletion-status", async (req: any, res) => {
+  router.get("/account/deletion-status", async (req: AuthenticatedRequest, res: Response) => {
     try {
       const existing = await prisma.tenantDeletionRequest.findUnique({
         where: { organizationId: req.organizationId },

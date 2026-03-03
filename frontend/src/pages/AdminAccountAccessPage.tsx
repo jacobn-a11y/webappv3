@@ -573,12 +573,15 @@ export function AdminAccountAccessPage() {
     }
 
     return (
-      <div className="admin-access__search-results active">
+      <div className="admin-access__search-results active" role="listbox">
         {filtered.map((account) => (
           <div
             key={account.id}
             className="admin-access__search-result-item"
+            role="option"
+            tabIndex={0}
             onMouseDown={() => onSelect(account)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(account); } }}
           >
             <span className="admin-access__search-result-name">{account.name}</span>
             {account.domain && (
@@ -786,13 +789,19 @@ export function AdminAccountAccessPage() {
     return (
       <div
         className="admin-access__modal-overlay active"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="admin-access-modal-title"
         onMouseDown={(e) => {
           if (e.target === e.currentTarget) closeModal();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") closeModal();
         }}
       >
         <div className="admin-access__modal">
           <div className="admin-access__modal-header">
-            <h2>Grant Account Access</h2>
+            <h2 id="admin-access-modal-title">Grant Account Access</h2>
             <button
               type="button"
               className="admin-access__modal-close"

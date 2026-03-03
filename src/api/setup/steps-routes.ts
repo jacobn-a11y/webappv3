@@ -21,6 +21,7 @@ import {
   SkipStepSchema,
 } from "./schemas.js";
 import type { AuthReq, SetupRouteContext } from "./types.js";
+import logger from "../../lib/logger.js";
 
 export function registerSetupStepRoutes({
   prisma,
@@ -44,7 +45,7 @@ export function registerSetupStepRoutes({
       const linkToken = await wizardService.initRecordingProviderLink(req.organizationId);
       res.json(linkToken);
     } catch (err) {
-      console.error("Recording provider link error:", err);
+      logger.error("Recording provider link error", { error: err });
       res.status(500).json({ error: "Failed to create Merge.dev link session" });
     }
   });
@@ -73,7 +74,7 @@ export function registerSetupStepRoutes({
         const status = await wizardService.getStatus(req.organizationId);
         res.json({ completed: true, status });
       } catch (err) {
-        console.error("Complete recording provider error:", err);
+        logger.error("Complete recording provider error", { error: err });
         res.status(500).json({ error: "Failed to complete recording provider setup" });
       }
     }
@@ -90,7 +91,7 @@ export function registerSetupStepRoutes({
       const linkToken = await wizardService.initCrmLink(req.organizationId);
       res.json(linkToken);
     } catch (err) {
-      console.error("CRM link error:", err);
+      logger.error("CRM link error", { error: err });
       res.status(500).json({ error: "Failed to create Merge.dev CRM link session" });
     }
   });
@@ -117,7 +118,7 @@ export function registerSetupStepRoutes({
       const status = await wizardService.getStatus(req.organizationId);
       res.json({ completed: true, status });
     } catch (err) {
-      console.error("Complete CRM error:", err);
+      logger.error("Complete CRM error", { error: err });
       res.status(500).json({ error: "Failed to complete CRM setup" });
     }
   });
@@ -133,7 +134,7 @@ export function registerSetupStepRoutes({
       const preview = await wizardService.getAccountSyncPreview(req.organizationId);
       res.json(preview);
     } catch (err) {
-      console.error("Account sync preview error:", err);
+      logger.error("Account sync preview error", { error: err });
       res.status(500).json({ error: "Failed to load account sync preview" });
     }
   });
@@ -160,7 +161,7 @@ export function registerSetupStepRoutes({
       );
       res.json(result);
     } catch (err) {
-      console.error("Entity resolution fix error:", err);
+      logger.error("Entity resolution fix error", { error: err });
       res.status(500).json({ error: "Failed to apply entity resolution fixes" });
     }
   });
@@ -177,7 +178,7 @@ export function registerSetupStepRoutes({
       const status = await wizardService.getStatus(req.organizationId);
       res.json({ completed: true, status });
     } catch (err) {
-      console.error("Complete account sync error:", err);
+      logger.error("Complete account sync error", { error: err });
       res.status(500).json({ error: "Failed to complete account sync review" });
     }
   });
@@ -220,7 +221,7 @@ export function registerSetupStepRoutes({
           status,
         });
       } catch (err) {
-        console.error("Plan selection error (billing disabled):", err);
+        logger.error("Plan selection error (billing disabled)", { error: err });
         res.status(500).json({ error: "Failed to complete plan selection" });
       }
       return;
@@ -282,7 +283,7 @@ export function registerSetupStepRoutes({
         status,
       });
     } catch (err) {
-      console.error("Plan selection error:", err);
+      logger.error("Plan selection error", { error: err });
       const message =
         err instanceof Error ? err.message : "Failed to complete plan selection";
       const statusCode = message.includes("not configured") ? 400 : 500;
@@ -312,7 +313,7 @@ export function registerSetupStepRoutes({
       const status = await wizardService.getStatus(req.organizationId);
       res.json({ completed: true, status });
     } catch (err) {
-      console.error("Permissions setup error:", err);
+      logger.error("Permissions setup error", { error: err });
       res.status(500).json({ error: "Failed to configure permissions" });
     }
   });
@@ -354,7 +355,7 @@ export function registerSetupStepRoutes({
       const status = await wizardService.getStatus(req.organizationId);
       res.json({ updated: true, status });
     } catch (err) {
-      console.error("Org profile setup error:", err);
+      logger.error("Org profile setup error", { error: err });
       res.status(500).json({ error: "Failed to save org profile setup" });
     }
   });
@@ -404,7 +405,7 @@ export function registerSetupStepRoutes({
       const status = await wizardService.getStatus(req.organizationId);
       res.json({ updated: true, status });
     } catch (err) {
-      console.error("Governance defaults setup error:", err);
+      logger.error("Governance defaults setup error", { error: err });
       res.status(500).json({ error: "Failed to save governance defaults" });
     }
   });
@@ -421,7 +422,7 @@ export function registerSetupStepRoutes({
       const status = await wizardService.getStatus(req.organizationId);
       res.json({ updated: true, status });
     } catch (err) {
-      console.error("Role presets setup error:", err);
+      logger.error("Role presets setup error", { error: err });
       res.status(500).json({ error: "Failed to apply role presets" });
     }
   });
@@ -443,7 +444,7 @@ export function registerSetupStepRoutes({
       const status = await wizardService.getStatus(req.organizationId);
       res.json({ skipped: true, status });
     } catch (err) {
-      console.error("Skip step error:", err);
+      logger.error("Skip step error", { error: err });
       res.status(500).json({ error: "Failed to skip step" });
     }
   });

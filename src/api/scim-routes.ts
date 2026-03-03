@@ -199,6 +199,13 @@ export function createScimRoutes(prisma: PrismaClient): Router {
       }),
     ]);
 
+    if (parsed.data.active === false) {
+      await prisma.userSession.updateMany({
+        where: { userId: scimIdentity.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+
     await prisma.scimProvisioning.updateMany({
       where: { id: auth.provisioningId },
       data: { lastSyncAt: new Date() },
@@ -234,6 +241,11 @@ export function createScimRoutes(prisma: PrismaClient): Router {
     await prisma.scimIdentity.update({
       where: { id: scimIdentity.id },
       data: { active: false, lastSyncedAt: new Date() },
+    });
+
+    await prisma.userSession.updateMany({
+      where: { userId: scimIdentity.userId, revokedAt: null },
+      data: { revokedAt: new Date() },
     });
 
     await prisma.scimProvisioning.updateMany({

@@ -24,6 +24,7 @@ import type {
   SalesforceCredentials,
   SyncResult,
 } from "./types.js";
+import { OutboundRateLimiter } from "./outbound-rate-limiter.js";
 
 // ─── Salesforce API Response Types ──────────────────────────────────────────
 
@@ -96,6 +97,7 @@ function extractDomainFromUrl(url: string): string | null {
 
 export class SalesforceProvider implements CRMDataProvider {
   readonly name: IntegrationProvider = "SALESFORCE";
+  private rateLimiter = new OutboundRateLimiter(5, 5);
 
   private baseUrl(creds: SalesforceCredentials): string {
     return `${creds.instanceUrl.replace(/\/$/, "")}/services/data/${API_VERSION}`;
@@ -113,14 +115,15 @@ export class SalesforceProvider implements CRMDataProvider {
   ): Promise<boolean> {
     const creds = asSalesforceCredentials(credentials);
     try {
+      await this.rateLimiter.acquire();
       const res = await fetch(`${this.baseUrl(creds)}/limits`, {
         method: "GET",
         headers: this.headers(creds),
       });
       if (res.status === 401) {
-        // Try refreshing the token
         const refreshed = await this.refreshAccessToken(creds);
         if (!refreshed) return false;
+        await this.rateLimiter.acquire();
         const retryRes = await fetch(`${this.baseUrl(creds)}/limits`, {
           method: "GET",
           headers: {
@@ -231,18 +234,19 @@ export class SalesforceProvider implements CRMDataProvider {
     const base = this.baseUrl(creds);
     const url = `${base}/query?q=${encodeURIComponent(soql)}`;
 
+    await this.rateLimiter.acquire();
     let res = await fetch(url, {
       method: "GET",
       headers: this.headers(creds),
     });
 
-    // Handle token expiry with one refresh attempt
     if (res.status === 401) {
       const newToken = await this.refreshAccessToken(creds);
       if (!newToken) {
         throw new Error("Salesforce token refresh failed");
       }
       creds.accessToken = newToken;
+      await this.rateLimiter.acquire();
       res = await fetch(url, {
         method: "GET",
         headers: this.headers(creds),
@@ -271,6 +275,7 @@ export class SalesforceProvider implements CRMDataProvider {
     const instanceBase = creds.instanceUrl.replace(/\/$/, "");
     const url = `${instanceBase}${nextRecordsUrl}`;
 
+    await this.rateLimiter.acquire();
     const res = await fetch(url, {
       method: "GET",
       headers: this.headers(creds),

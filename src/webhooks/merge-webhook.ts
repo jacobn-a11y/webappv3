@@ -220,7 +220,7 @@ export function createMergeWebhookHandler(deps: {
           ? dataRecord.remote_id
           : payload.linked_account.id;
     const dedupeKey = `merge:${orgId}:${eventType}:${dataId}`;
-    if (!markWebhookEventIfNew(dedupeKey)) {
+    if (!(await markWebhookEventIfNew(dedupeKey))) {
       res.json({
         received: true,
         processed: true,

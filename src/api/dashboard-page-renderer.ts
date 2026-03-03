@@ -12,6 +12,7 @@
 import { Router, type Request, type Response } from "express";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import { LandingPageEditor, type LandingPageSummary } from "../services/landing-page-editor.js";
+import { escapeHtml, escapeAttr } from "../lib/html-utils.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -977,20 +978,3 @@ function formatNumber(n: number): string {
   return n.toString();
 }
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function escapeAttr(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}

@@ -1,6 +1,13 @@
 import type { NextFunction, Request, Response } from "express";
+import crypto from "crypto";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+const CSRF_SECRET = process.env.CSRF_SECRET || crypto.randomBytes(32).toString("hex");
+
+function computeCsrfToken(sessionToken: string): string {
+  return crypto.createHmac("sha256", CSRF_SECRET).update(sessionToken).digest("hex");
+}
 
 function readHeader(value: string | string[] | undefined): string | null {
   if (!value) return null;
@@ -20,8 +27,9 @@ function resolveAllowedOrigins(): Set<string> {
   const defaults = [
     process.env.APP_URL,
     process.env.FRONTEND_URL,
-    "http://localhost:3000",
-    "http://localhost:5173",
+    ...(process.env.NODE_ENV !== "production"
+      ? ["http://localhost:3000", "http://localhost:5173"]
+      : []),
   ].filter((origin): origin is string => !!origin);
   return new Set([...configured, ...defaults]);
 }
@@ -51,7 +59,8 @@ export function createCsrfProtection() {
     }
 
     const csrfToken = readHeader(req.headers["x-csrf-token"]);
-    if (!csrfToken || csrfToken !== sessionToken) {
+    const expectedCsrf = computeCsrfToken(sessionToken);
+    if (!csrfToken || !crypto.timingSafeEqual(Buffer.from(csrfToken), Buffer.from(expectedCsrf))) {
       res.status(403).json({
         error: "csrf_validation_failed",
         message:
@@ -73,4 +82,8 @@ export function createCsrfProtection() {
 
     next();
   };
+}
+
+export function getCsrfToken(sessionToken: string): string {
+  return computeCsrfToken(sessionToken);
 }

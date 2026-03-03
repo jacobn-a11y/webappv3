@@ -5,6 +5,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { z } from "zod";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import {
@@ -168,14 +169,10 @@ export function createStoryRoutes(
       return;
     }
 
-    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
-    const userId = (req as unknown as Record<string, unknown>).userId as string;
-    const userRole = (req as unknown as Record<string, unknown>).userRole as
-      | "OWNER"
-      | "ADMIN"
-      | "MEMBER"
-      | "VIEWER"
-      | undefined;
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = authReq.organizationId;
+    const userId = authReq.userId;
+    const userRole = authReq.userRole;
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
@@ -223,7 +220,7 @@ export function createStoryRoutes(
         aiClient: (
           await resolveStoryAIClient({
             organizationId,
-            userId,
+            userId: userId!,
             userRole: normalizeRole(userRole),
           })
         ).client,
@@ -282,14 +279,10 @@ export function createStoryRoutes(
       return;
     }
 
-    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
-    const userId = (req as unknown as Record<string, unknown>).userId as string;
-    const userRole = (req as unknown as Record<string, unknown>).userRole as
-      | "OWNER"
-      | "ADMIN"
-      | "MEMBER"
-      | "VIEWER"
-      | undefined;
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = authReq.organizationId;
+    const userId = authReq.userId;
+    const userRole = authReq.userRole;
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
@@ -416,14 +409,10 @@ export function createStoryRoutes(
       return;
     }
 
-    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
-    const userId = (req as unknown as Record<string, unknown>).userId as string;
-    const userRole = (req as unknown as Record<string, unknown>).userRole as
-      | "OWNER"
-      | "ADMIN"
-      | "MEMBER"
-      | "VIEWER"
-      | undefined;
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = authReq.organizationId;
+    const userId = authReq.userId;
+    const userRole = authReq.userRole;
 
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
@@ -576,14 +565,10 @@ export function createStoryRoutes(
       return;
     }
 
-    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
-    const userId = (req as unknown as Record<string, unknown>).userId as string;
-    const userRole = (req as unknown as Record<string, unknown>).userRole as
-      | "OWNER"
-      | "ADMIN"
-      | "MEMBER"
-      | "VIEWER"
-      | undefined;
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = authReq.organizationId;
+    const userId = authReq.userId;
+    const userRole = authReq.userRole;
 
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
@@ -660,14 +645,10 @@ export function createStoryRoutes(
   });
 
   router.delete("/:storyId", async (req: Request, res: Response) => {
-    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
-    const userId = (req as unknown as Record<string, unknown>).userId as string;
-    const userRole = (req as unknown as Record<string, unknown>).userRole as
-      | "OWNER"
-      | "ADMIN"
-      | "MEMBER"
-      | "VIEWER"
-      | undefined;
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = authReq.organizationId;
+    const userId = authReq.userId;
+    const userRole = authReq.userRole;
 
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
@@ -732,14 +713,10 @@ export function createStoryRoutes(
   });
 
   router.get("/:accountId", async (req: Request, res: Response) => {
-    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
-    const userId = (req as unknown as Record<string, unknown>).userId as string;
-    const userRole = (req as unknown as Record<string, unknown>).userRole as
-      | "OWNER"
-      | "ADMIN"
-      | "MEMBER"
-      | "VIEWER"
-      | undefined;
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = authReq.organizationId;
+    const userId = authReq.userId;
+    const userRole = authReq.userRole;
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
@@ -815,14 +792,10 @@ export function createStoryRoutes(
       return;
     }
 
-    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
-    const userId = (req as unknown as Record<string, unknown>).userId as string;
-    const userRole = (req as unknown as Record<string, unknown>).userRole as
-      | "OWNER"
-      | "ADMIN"
-      | "MEMBER"
-      | "VIEWER"
-      | undefined;
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = authReq.organizationId;
+    const userId = authReq.userId;
+    const userRole = authReq.userRole;
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;

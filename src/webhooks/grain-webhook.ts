@@ -88,9 +88,10 @@ export function createGrainWebhookHandler(deps: {
       return;
     }
 
-    if (grainConfigs.some((c: { webhookSecret: string | null }) => !c.webhookSecret)) {
+    const validConfigs = grainConfigs.filter((c: { webhookSecret: string | null }) => c.webhookSecret);
+    if (validConfigs.length === 0) {
       res.status(500).json({
-        error: "All active Grain integrations must configure webhookSecret",
+        error: "No active Grain integrations with configured webhookSecret",
       });
       return;
     }
@@ -100,8 +101,8 @@ export function createGrainWebhookHandler(deps: {
     }
 
     // Try to match signature to a specific org's webhook secret
-    type GrainConfig = (typeof grainConfigs)[number];
-    const matchedConfig = grainConfigs.find(
+    type GrainConfig = (typeof validConfigs)[number];
+    const matchedConfig = validConfigs.find(
       (c: GrainConfig) =>
         c.webhookSecret &&
         verifyGrainSignature(rawBody, signature, c.webhookSecret)
@@ -158,7 +159,7 @@ export function createGrainWebhookHandler(deps: {
         }
 
         const eventKey = `grain:${organizationId}:${payload.event}:${payload.recording_id}`;
-        if (!markWebhookEventIfNew(eventKey)) {
+        if (!(await markWebhookEventIfNew(eventKey))) {
           res.json({
             received: true,
             processed: true,

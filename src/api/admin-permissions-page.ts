@@ -11,6 +11,7 @@ import { Router, type Request, type Response } from "express";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import { PermissionManager, requirePermission } from "../middleware/permissions.js";
 import { AccountAccessService } from "../services/account-access.js";
+import { escapeHtml } from "../lib/html-utils.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -778,13 +779,3 @@ function renderAccessGrant(grant: AccessGrant): string {
           </div>`;
 }
 
-// ─── Utility ──────────────────────────────────────────────────────────────────
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}

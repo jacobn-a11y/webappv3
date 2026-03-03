@@ -16,7 +16,6 @@ import type {
   PrismaClient,
   Plan,
   SubscriptionStatus,
-  UserRole,
 } from "@prisma/client";
 import { z } from "zod";
 import {
@@ -26,13 +25,7 @@ import {
 } from "../config/stripe-plans.js";
 import { buildPublicAppUrl } from "../lib/public-app-url.js";
 import logger from "../lib/logger.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-interface AuthenticatedRequest extends Request {
-  organizationId?: string;
-  userRole?: UserRole;
-}
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 
 const BILLING_ADMIN_ROLES: UserRole[] = ["OWNER", "ADMIN"];
 

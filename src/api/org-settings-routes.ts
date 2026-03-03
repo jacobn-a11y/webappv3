@@ -15,6 +15,8 @@ import type { PrismaClient, UserRole } from "@prisma/client";
 import { Resend } from "resend";
 import { requirePermission } from "../middleware/permissions.js";
 import { buildPublicAppUrl } from "../lib/public-app-url.js";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -31,11 +33,7 @@ const UpdateMemberRoleSchema = z.object({
   role: z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"]),
 });
 
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
+type AuthReq = AuthenticatedRequest;
 
 function renderInviteEmailHtml(options: {
   orgName: string;
@@ -110,7 +108,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
           },
         });
       } catch (err) {
-        console.error("Get org error:", err);
+        logger.error("Get org error", { error: err });
         res.status(500).json({ error: "Failed to load organization" });
       }
     }
@@ -142,7 +140,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
           anonymization_enabled: settings?.anonymizationEnabled ?? true,
         });
       } catch (err) {
-        console.error("Get anonymization setting error:", err);
+        logger.error("Get anonymization setting error", { error: err });
         res.status(500).json({ error: "Failed to load anonymization setting" });
       }
     }
@@ -189,7 +187,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
           anonymization_enabled: parse.data.enabled,
         });
       } catch (err) {
-        console.error("Update anonymization setting error:", err);
+        logger.error("Update anonymization setting error", { error: err });
         res.status(500).json({ error: "Failed to update anonymization setting" });
       }
     }
@@ -220,7 +218,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
 
         res.json({ updated: true });
       } catch (err) {
-        console.error("Update org name error:", err);
+        logger.error("Update org name error", { error: err });
         res.status(500).json({ error: "Failed to update organization name" });
       }
     }
@@ -252,7 +250,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
 
         res.json({ members });
       } catch (err) {
-        console.error("List members error:", err);
+        logger.error("List members error", { error: err });
         res.status(500).json({ error: "Failed to load members" });
       }
     }
@@ -322,7 +320,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
 
         res.json({ updated: true, role: newRole });
       } catch (err) {
-        console.error("Update member role error:", err);
+        logger.error("Update member role error", { error: err });
         res.status(500).json({ error: "Failed to update member role" });
       }
     }
@@ -377,7 +375,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         await prisma.user.delete({ where: { id: memberId } });
         res.json({ removed: true });
       } catch (err) {
-        console.error("Remove member error:", err);
+        logger.error("Remove member error", { error: err });
         res.status(500).json({ error: "Failed to remove member" });
       }
     }
@@ -478,7 +476,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
           } catch (sendErr) {
             emailDeliveryError =
               sendErr instanceof Error ? sendErr.message : "email_delivery_failed";
-            console.error("Invite email delivery error:", sendErr);
+            logger.error("Invite email delivery error", { error: sendErr });
           }
         }
 
@@ -494,7 +492,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
           email_delivery_error: emailDeliveryError,
         });
       } catch (err) {
-        console.error("Create invite error:", err);
+        logger.error("Create invite error", { error: err });
         res.status(500).json({ error: "Failed to create invite" });
       }
     }
@@ -534,7 +532,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
           })),
         });
       } catch (err) {
-        console.error("List invites error:", err);
+        logger.error("List invites error", { error: err });
         res.status(500).json({ error: "Failed to load invites" });
       }
     }
@@ -567,7 +565,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         await prisma.orgInvite.delete({ where: { id: invite.id } });
         res.json({ revoked: true });
       } catch (err) {
-        console.error("Revoke invite error:", err);
+        logger.error("Revoke invite error", { error: err });
         res.status(500).json({ error: "Failed to revoke invite" });
       }
     }

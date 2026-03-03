@@ -8,6 +8,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import type { MergeApiClient } from "../services/merge-api-client.js";
 import type { PrismaClient } from "@prisma/client";
 
@@ -27,7 +28,8 @@ export function createMergeRoutes(
    * Body: { publicToken: string }
    */
   router.post("/link", async (req: Request, res: Response) => {
-    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = authReq.organizationId;
 
     if (!organizationId) {
       res.status(401).json({ error: "Missing organization context" });
@@ -66,7 +68,8 @@ export function createMergeRoutes(
    * Returns all linked accounts for the current organization.
    */
   router.get("/linked", async (req: Request, res: Response) => {
-    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = authReq.organizationId;
 
     if (!organizationId) {
       res.status(401).json({ error: "Missing organization context" });
@@ -97,7 +100,8 @@ export function createMergeRoutes(
    * Useful when an admin wants to force a re-sync outside the 15-min interval.
    */
   router.post("/sync/:linkedAccountId", async (req: Request, res: Response) => {
-    const organizationId = (req as unknown as Record<string, unknown>).organizationId as string;
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = authReq.organizationId;
 
     if (!organizationId) {
       res.status(401).json({ error: "Missing organization context" });

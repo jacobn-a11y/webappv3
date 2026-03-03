@@ -80,6 +80,7 @@ import { requireOrgSecurityPolicy } from "./middleware/security-policy.js";
 
 // ─── Observability ───────────────────────────────────────────────────────────
 import { Sentry } from "./lib/sentry.js";
+import logger from "./lib/logger.js";
 
 import type { Services } from "./services.js";
 import type { Queues } from "./queues.js";
@@ -118,8 +119,9 @@ export function createApp(deps: AppDeps): express.Application {
       [
         process.env.APP_URL,
         process.env.FRONTEND_URL,
-        "http://localhost:3000",
-        "http://localhost:5173",
+        ...(process.env.NODE_ENV !== "production"
+          ? ["http://localhost:3000", "http://localhost:5173"]
+          : []),
       ].filter((origin): origin is string => !!origin)
     )
   );
@@ -133,7 +135,6 @@ export function createApp(deps: AppDeps): express.Application {
         "Authorization",
         "x-session-token",
         "x-csrf-token",
-        "x-mfa-verified",
         "x-support-impersonation-token",
       ],
     })
@@ -207,9 +208,9 @@ export function createApp(deps: AppDeps): express.Application {
   );
 
   // ─── Auth Routes (public — no JWT required) ────────────────────────────
-  app.use("/api/auth", createAuthRoutes(prisma, workos));
+  app.use("/api/auth", passwordRateLimiter, createAuthRoutes(prisma, workos));
   // SCIM provisioning endpoints (bearer token authenticated per organization)
-  app.use("/api/scim/v2", createScimRoutes(prisma));
+  app.use("/api/scim/v2", apiRateLimiter, createScimRoutes(prisma));
 
   // Local development convenience: inject seeded auth context when enabled.
   app.use(createDevAuthBypass(prisma));
@@ -420,6 +421,14 @@ export function createApp(deps: AppDeps): express.Application {
 
   // Chatbot Connector UI
   app.use("/chat", trialGate, createChatbotConnectorRoutes());
+
+  app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    logger.error("Unhandled route error", { error: err.message, stack: err.stack });
+    Sentry.captureException(err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "internal_server_error" });
+    }
+  });
 
   return app;
 }

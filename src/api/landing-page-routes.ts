@@ -8,6 +8,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient, UserRole } from "@prisma/client";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import type { Queue } from "bullmq";
 import {
   ConcurrencyConflictError,
@@ -28,6 +29,7 @@ import {
   requirePermission,
   requirePageOwnerOrPermission,
 } from "../middleware/permissions.js";
+import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -118,13 +120,7 @@ interface PublishApprovalPayload {
   current_step_order?: number;
 }
 
-// ─── Authenticated request type ──────────────────────────────────────────────
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: string;
-}
+type AuthReq = AuthenticatedRequest;
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
@@ -161,7 +157,7 @@ export function createLandingPageRoutes(
         }
       );
     } catch (err) {
-      console.error("Failed to enqueue post-publish validation job:", err);
+      logger.error("Failed to enqueue post-publish validation job", { error: err });
     }
   }
 
@@ -450,7 +446,7 @@ export function createLandingPageRoutes(
           total_call_hours: page.totalCallHours,
         });
       } catch (err) {
-        console.error("Create landing page error:", err);
+        logger.error("Create landing page error", { error: err });
         res.status(500).json({ error: "Failed to create landing page" });
       }
     }
@@ -502,7 +498,7 @@ export function createLandingPageRoutes(
           })),
         });
       } catch (err) {
-        console.error("Get landing page error:", err);
+        logger.error("Get landing page error", { error: err });
         res.status(404).json({ error: "Landing page not found" });
       }
     }
@@ -538,7 +534,7 @@ export function createLandingPageRoutes(
           updatedAt: page.updatedAt.toISOString(),
         });
       } catch (err) {
-        console.error("Get editor data error:", err);
+        logger.error("Get editor data error", { error: err });
         res.status(404).json({ error: "Landing page not found" });
       }
     }
@@ -567,7 +563,7 @@ export function createLandingPageRoutes(
           replacements_made: page.editableBody !== preview.body ? 1 : 0,
         });
       } catch (err) {
-        console.error("Preview scrub error:", err);
+        logger.error("Preview scrub error", { error: err });
         res.status(500).json({ error: "Failed to generate scrub preview" });
       }
     }
@@ -595,7 +591,7 @@ export function createLandingPageRoutes(
         res.setHeader("Cache-Control", "private, no-store");
         res.send(renderLandingPageHtml(preview));
       } catch (err) {
-        console.error("Preview landing page error:", err);
+        logger.error("Preview landing page error", { error: err });
         res.status(404).json({ error: "Landing page not found" });
       }
     }
@@ -652,7 +648,7 @@ export function createLandingPageRoutes(
           });
           return;
         }
-        console.error("Update landing page error:", err);
+        logger.error("Update landing page error", { error: err });
         res.status(500).json({ error: "Failed to update landing page" });
       }
     }
@@ -696,7 +692,7 @@ export function createLandingPageRoutes(
           expires_at: job.data.expiresAt ?? null,
         });
       } catch (err) {
-        console.error("Get scheduled publish error:", err);
+        logger.error("Get scheduled publish error", { error: err });
         res.status(500).json({ error: "Failed to load scheduled publish state" });
       }
     }
@@ -790,7 +786,7 @@ export function createLandingPageRoutes(
           publish_at: publishAt.toISOString(),
         });
       } catch (err) {
-        console.error("Schedule publish error:", err);
+        logger.error("Schedule publish error", { error: err });
         res.status(500).json({ error: "Failed to schedule publish" });
       }
     }
@@ -810,7 +806,7 @@ export function createLandingPageRoutes(
         await clearScheduledPublish(pageId);
         res.status(204).send();
       } catch (err) {
-        console.error("Cancel scheduled publish error:", err);
+        logger.error("Cancel scheduled publish error", { error: err });
         res.status(500).json({ error: "Failed to cancel scheduled publish" });
       }
     }
@@ -972,7 +968,7 @@ export function createLandingPageRoutes(
             published_by_user_id: req.userId,
           },
         }).catch((err) => {
-          console.error("Outbound webhook dispatch failed:", err);
+          logger.error("Outbound webhook dispatch failed", { error: err });
         });
 
         res.json({
@@ -999,7 +995,7 @@ export function createLandingPageRoutes(
           });
           return;
         }
-        console.error("Publish landing page error:", err);
+        logger.error("Publish landing page error", { error: err });
         res.status(500).json({ error: "Failed to publish landing page" });
       }
     }
@@ -1035,7 +1031,7 @@ export function createLandingPageRoutes(
           })),
         });
       } catch (err) {
-        console.error("List artifact versions error:", err);
+        logger.error("List artifact versions error", { error: err });
         res.status(500).json({ error: "Failed to list artifact versions" });
       }
     }
@@ -1069,7 +1065,7 @@ export function createLandingPageRoutes(
         });
         res.json({ rolled_back: true });
       } catch (err) {
-        console.error("Rollback artifact version error:", err);
+        logger.error("Rollback artifact version error", { error: err });
         res.status(500).json({ error: "Failed to rollback artifact version" });
       }
     }
@@ -1115,7 +1111,7 @@ export function createLandingPageRoutes(
           })),
         });
       } catch (err) {
-        console.error("List publish approvals error:", err);
+        logger.error("List publish approvals error", { error: err });
         res.status(500).json({ error: "Failed to list publish approvals" });
       }
     }
@@ -1336,7 +1332,7 @@ export function createLandingPageRoutes(
             approval_request_id: request.id,
           },
         }).catch((err) => {
-          console.error("Outbound webhook dispatch failed:", err);
+          logger.error("Outbound webhook dispatch failed", { error: err });
         });
 
         res.json({
@@ -1364,7 +1360,7 @@ export function createLandingPageRoutes(
           });
           return;
         }
-        console.error("Review publish approval error:", err);
+        logger.error("Review publish approval error", { error: err });
         res.status(500).json({ error: "Failed to review publish approval" });
       }
     }
@@ -1401,7 +1397,7 @@ export function createLandingPageRoutes(
         });
         res.json({ unpublished: true });
       } catch (err) {
-        console.error("Unpublish error:", err);
+        logger.error("Unpublish error", { error: err });
         res.status(500).json({ error: "Failed to unpublish" });
       }
     }
@@ -1438,7 +1434,7 @@ export function createLandingPageRoutes(
         });
         res.json({ archived: true });
       } catch (err) {
-        console.error("Archive error:", err);
+        logger.error("Archive error", { error: err });
         res.status(500).json({ error: "Failed to archive" });
       }
     }
@@ -1484,7 +1480,7 @@ export function createLandingPageRoutes(
         });
         res.json({ deleted: true });
       } catch (err) {
-        console.error("Delete landing page error:", err);
+        logger.error("Delete landing page error", { error: err });
         res.status(500).json({ error: "Failed to delete landing page" });
       }
     }

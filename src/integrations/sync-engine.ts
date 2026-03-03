@@ -546,17 +546,15 @@ export class SyncEngine {
         });
 
     // Store participants (only for new calls to avoid duplicates)
-    if (!existing) {
-      for (const p of normalizedCall.participants) {
-        await this.prisma.callParticipant.create({
-          data: {
-            callId: call.id,
-            email: p.email,
-            name: p.name,
-            isHost: p.isHost,
-          },
-        });
-      }
+    if (!existing && normalizedCall.participants.length > 0) {
+      await this.prisma.callParticipant.createMany({
+        data: normalizedCall.participants.map((p) => ({
+          callId: call.id,
+          email: p.email,
+          name: p.name,
+          isHost: p.isHost,
+        })),
+      });
     }
 
     // Entity resolution

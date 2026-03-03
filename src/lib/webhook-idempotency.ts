@@ -1,29 +1,55 @@
-const seenWebhookEvents = new Map<string, number>();
+import { createClient, type RedisClientType } from "redis";
 
-function pruneExpired(nowMs: number): void {
-  for (const [key, expiresAt] of seenWebhookEvents.entries()) {
+let redisClient: RedisClientType | null = null;
+
+async function getRedisClient(): Promise<RedisClientType | null> {
+  if (redisClient) return redisClient;
+  const url = process.env.REDIS_URL;
+  if (!url) return null;
+  try {
+    redisClient = createClient({ url }) as RedisClientType;
+    await redisClient.connect();
+    return redisClient;
+  } catch {
+    return null;
+  }
+}
+
+const fallbackMap = new Map<string, number>();
+
+function pruneFallback(nowMs: number): void {
+  for (const [key, expiresAt] of fallbackMap.entries()) {
     if (expiresAt <= nowMs) {
-      seenWebhookEvents.delete(key);
+      fallbackMap.delete(key);
     }
   }
 }
 
 /**
  * Returns true if this webhook event key has not been seen recently.
- * Returns false for likely duplicate deliveries inside the TTL window.
+ * Uses Redis when available, falls back to in-memory for dev/test.
  */
-export function markWebhookEventIfNew(
+export async function markWebhookEventIfNew(
   key: string,
   ttlMs = 5 * 60 * 1000
-): boolean {
+): Promise<boolean> {
   const normalizedKey = key.trim();
   if (!normalizedKey) return true;
+
+  const redis = await getRedisClient();
+  if (redis) {
+    const redisKey = `webhook:idempotency:${normalizedKey}`;
+    const ttlSeconds = Math.max(1, Math.ceil(ttlMs / 1000));
+    const result = await redis.set(redisKey, "1", { NX: true, EX: ttlSeconds });
+    return result !== null;
+  }
+
   const now = Date.now();
-  pruneExpired(now);
-  const existing = seenWebhookEvents.get(normalizedKey);
+  pruneFallback(now);
+  const existing = fallbackMap.get(normalizedKey);
   if (existing && existing > now) {
     return false;
   }
-  seenWebhookEvents.set(normalizedKey, now + Math.max(1000, ttlMs));
+  fallbackMap.set(normalizedKey, now + Math.max(1000, ttlMs));
   return true;
 }

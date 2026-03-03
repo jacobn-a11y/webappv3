@@ -13,6 +13,7 @@
 
 import { Router, type Request, type Response } from "express";
 import { LandingPageEditor } from "../services/landing-page-editor.js";
+import { escapeHtml } from "../lib/html-utils.js";
 import { requirePageOwnerOrPermission } from "../middleware/permissions.js";
 import { RoleProfileService } from "../services/role-profiles.js";
 import type { PrismaClient, UserRole } from "@prisma/client";
@@ -951,13 +952,3 @@ function render404(): string {
   return `<!DOCTYPE html><html><head><meta name="robots" content="noindex"><title>Not Found</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fafafa}h1{color:#555}</style></head><body><h1>Page not found</h1></body></html>`;
 }
 
-// ─── Utility ──────────────────────────────────────────────────────────────
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}

@@ -11,8 +11,10 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import type { PrismaClient } from "@prisma/client";
 import { TOPIC_LABELS, type TaxonomyTopic } from "../types/taxonomy.js";
+import { escapeHtml } from "../lib/html-utils.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -59,15 +61,6 @@ interface CallMetadata {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
 
 function formatMs(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -1174,8 +1167,8 @@ export function createTranscriptViewerRoutes(prisma: PrismaClient): Router {
    * Requires authentication (organizationId on request).
    */
   router.get("/:callId/transcript", async (req: Request, res: Response) => {
-    const organizationId = (req as unknown as Record<string, unknown>)
-      .organizationId as string;
+    const authReq = req as AuthenticatedRequest;
+    const organizationId = authReq.organizationId;
     if (!organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;

@@ -4,6 +4,7 @@ export const BASE_URL = "/api";
 const SUPPORT_IMPERSONATION_TOKEN_KEY = "support_impersonation_token";
 const APP_SESSION_TOKEN_KEY = "app_session_token";
 const APP_AUTH_USER_KEY = "app_auth_user";
+const APP_CSRF_TOKEN_KEY = "app_csrf_token";
 const AUTH_CHANGED_EVENT = "storyengine-auth-changed";
 
 function emitAuthChanged(): void {
@@ -51,6 +52,9 @@ export async function request<T>(
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error ?? `Request failed: ${res.status}`);
   }
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as T;
+  }
   return res.json();
 }
 
@@ -61,7 +65,10 @@ export function buildRequestHeaders(existing?: HeadersInit): Headers {
   const sessionToken = getSessionToken();
   if (sessionToken) {
     headers.set("x-session-token", sessionToken);
-    headers.set("x-csrf-token", sessionToken);
+    const csrfToken = getCsrfToken();
+    if (csrfToken) {
+      headers.set("x-csrf-token", csrfToken);
+    }
   }
   const supportToken = getSupportImpersonationToken();
   if (supportToken) {
@@ -86,13 +93,37 @@ export function readSupportImpersonationToken(): string | null {
   return getSupportImpersonationToken();
 }
 
+export function getCsrfToken(): string | null {
+  try {
+    return localStorage.getItem(APP_CSRF_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setCsrfToken(token: string | null): void {
+  try {
+    if (!token) {
+      localStorage.removeItem(APP_CSRF_TOKEN_KEY);
+      return;
+    }
+    localStorage.setItem(APP_CSRF_TOKEN_KEY, token);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 export function persistAuthState(payload: {
   sessionToken: string;
   user: AuthUser;
+  csrfToken?: string;
 }): void {
   try {
     localStorage.setItem(APP_SESSION_TOKEN_KEY, payload.sessionToken);
     localStorage.setItem(APP_AUTH_USER_KEY, JSON.stringify(payload.user));
+    if (payload.csrfToken) {
+      setCsrfToken(payload.csrfToken);
+    }
     emitAuthChanged();
   } catch {
     // Ignore storage failures in restricted environments.
@@ -104,6 +135,7 @@ export function clearAuthState(): void {
     localStorage.removeItem(APP_SESSION_TOKEN_KEY);
     localStorage.removeItem(APP_AUTH_USER_KEY);
     localStorage.removeItem(SUPPORT_IMPERSONATION_TOKEN_KEY);
+    localStorage.removeItem(APP_CSRF_TOKEN_KEY);
     emitAuthChanged();
   } catch {
     // Ignore storage failures in restricted environments.

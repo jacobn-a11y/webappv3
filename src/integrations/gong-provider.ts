@@ -18,6 +18,7 @@ import {
   extractGongCallAccountNames,
   gongCallMatchesSelectedAccounts,
 } from "./gong-account-utils.js";
+import { OutboundRateLimiter } from "./outbound-rate-limiter.js";
 
 const GONG_GLOBAL_HISTORY_START_ISO = "2000-01-01T00:00:00.000Z";
 
@@ -273,6 +274,7 @@ function selectedAccountsFromSettings(
 export class GongProvider implements CallRecordingProvider {
   readonly name: IntegrationProvider = "GONG";
   readonly callProvider: CallProvider = "GONG";
+  private rateLimiter = new OutboundRateLimiter(3, 3);
 
   private buildAuthHeader(creds: GongCredentials): string {
     const encoded = Buffer.from(`${creds.accessKey}:${creds.accessKeySecret}`).toString("base64");
@@ -287,6 +289,7 @@ export class GongProvider implements CallRecordingProvider {
     const creds = asGongCredentials(credentials);
     try {
       const now = new Date().toISOString();
+      await this.rateLimiter.acquire();
       const res = await fetch(
         `${this.baseUrl(creds)}/v2/calls?fromDateTime=${now}&toDateTime=${now}`,
         {
@@ -489,6 +492,7 @@ export class GongProvider implements CallRecordingProvider {
     };
     if (input.cursor) body.cursor = input.cursor;
 
+    await this.rateLimiter.acquire();
     const res = await fetch(`${this.baseUrl(creds)}/v2/calls/extensive`, {
       method: "POST",
       headers: {
@@ -510,6 +514,7 @@ export class GongProvider implements CallRecordingProvider {
     creds: GongCredentials,
     callIds: string[]
   ): Promise<Map<string, string>> {
+    await this.rateLimiter.acquire();
     const res = await fetch(`${this.baseUrl(creds)}/v2/calls/transcript`, {
       method: "POST",
       headers: {

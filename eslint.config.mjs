@@ -32,7 +32,7 @@ export default tseslint.config(
       "no-console": "off",
 
       // Allow explicit `any` — too many to fix in one pass
-      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-explicit-any": "warn",
 
       // Allow `require` imports (some dynamic imports use this)
       "@typescript-eslint/no-require-imports": "off",

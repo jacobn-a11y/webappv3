@@ -65,6 +65,17 @@ export function applySupportImpersonation(prisma: PrismaClient) {
       return;
     }
 
+    const optOut = await prisma.tenantSupportOptOut.findUnique({
+      where: { organizationId },
+    });
+    if (optOut) {
+      res.status(403).json({
+        error: "support_access_disabled",
+        message: "This organization has opted out of support access.",
+      });
+      return;
+    }
+
     const sessionTokenHash = hashSessionToken(rawToken.trim());
     const now = new Date();
     const session = await prisma.supportImpersonationSession.findFirst({

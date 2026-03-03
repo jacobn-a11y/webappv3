@@ -2,6 +2,7 @@ import type { UserRole } from "@prisma/client";
 import type { Response } from "express";
 import { requirePermission } from "../../middleware/permissions.js";
 import { respondAuthRequired } from "../_shared/errors.js";
+import logger from "../../lib/logger.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import { PROVIDER_MODELS, type AIProviderName } from "../../services/ai-client.js";
 import { parseAIProviderName } from "../../services/provider-policy.js";
@@ -37,7 +38,7 @@ export function registerAISettingsAdminRoutes({
 
         res.json({ settings: settings ?? null });
       } catch (err) {
-        console.error("Get org AI settings error:", err);
+        logger.error("Get org AI settings error", { error: err });
         res.status(500).json({ error: "Failed to get AI settings" });
       }
     }
@@ -79,7 +80,7 @@ export function registerAISettingsAdminRoutes({
 
         res.json({ saved: true });
       } catch (err) {
-        console.error("Update org AI settings error:", err);
+        logger.error("Update org AI settings error", { error: err });
         res.status(500).json({ error: "Failed to update AI settings" });
       }
     }
@@ -113,7 +114,7 @@ export function registerAISettingsAdminRoutes({
           })),
         });
       } catch (err) {
-        console.error("Admin list providers error:", err);
+        logger.error("Admin list providers error", { error: err });
         res.status(500).json({ error: "Failed to list AI providers" });
       }
     }
@@ -145,7 +146,7 @@ export function registerAISettingsAdminRoutes({
 
         res.json({ id: configId, saved: true });
       } catch (err) {
-        console.error("Upsert provider error:", err);
+        logger.error("Upsert provider error", { error: err });
         res.status(500).json({ error: "Failed to save AI provider config" });
       }
     }
@@ -168,7 +169,7 @@ export function registerAISettingsAdminRoutes({
 
         res.json(result);
       } catch (err) {
-        console.error("Validate key error:", err);
+        logger.error("Validate key error", { error: err });
         res.status(500).json({ error: "Failed to validate API key" });
       }
     }
@@ -193,7 +194,7 @@ export function registerAISettingsAdminRoutes({
         await configService.deleteOrgConfig(req.organizationId, provider);
         res.json({ deleted: true });
       } catch (err) {
-        console.error("Delete provider error:", err);
+        logger.error("Delete provider error", { error: err });
         res.status(500).json({ error: "Failed to delete AI provider" });
       }
     }
@@ -216,7 +217,7 @@ export function registerAISettingsAdminRoutes({
 
         res.json({ role_defaults: defaults });
       } catch (err) {
-        console.error("List role defaults error:", err);
+        logger.error("List role defaults error", { error: err });
         res.status(500).json({ error: "Failed to list role defaults" });
       }
     }
@@ -266,7 +267,7 @@ export function registerAISettingsAdminRoutes({
 
         res.json({ saved: true });
       } catch (err) {
-        console.error("Set role default error:", err);
+        logger.error("Set role default error", { error: err });
         res.status(500).json({ error: "Failed to set role default" });
       }
     }
@@ -291,7 +292,7 @@ export function registerAISettingsAdminRoutes({
 
         res.json({ deleted: true });
       } catch (err) {
-        console.error("Delete role default error:", err);
+        logger.error("Delete role default error", { error: err });
         res.status(500).json({ error: "Failed to delete role default" });
       }
     }
@@ -316,7 +317,7 @@ export function registerAISettingsAdminRoutes({
 
         res.json({ user_access: access });
       } catch (err) {
-        console.error("List user access error:", err);
+        logger.error("List user access error", { error: err });
         res.status(500).json({ error: "Failed to list user access" });
       }
     }
@@ -364,7 +365,7 @@ export function registerAISettingsAdminRoutes({
 
         res.json({ saved: true });
       } catch (err) {
-        console.error("Set user access error:", err);
+        logger.error("Set user access error", { error: err });
         res.status(500).json({ error: "Failed to set user access" });
       }
     }
@@ -389,7 +390,7 @@ export function registerAISettingsAdminRoutes({
 
         res.json({ deleted: true });
       } catch (err) {
-        console.error("Delete user access error:", err);
+        logger.error("Delete user access error", { error: err });
         res.status(500).json({ error: "Failed to delete user access" });
       }
     }
@@ -424,7 +425,7 @@ export function registerAISettingsAdminRoutes({
           })),
         });
       } catch (err) {
-        console.error("List limits error:", err);
+        logger.error("List limits error", { error: err });
         res.status(500).json({ error: "Failed to list usage limits" });
       }
     }
@@ -458,7 +459,7 @@ export function registerAISettingsAdminRoutes({
 
         res.json({ saved: true });
       } catch (err) {
-        console.error("Set limit error:", err);
+        logger.error("Set limit error", { error: err });
         res.status(500).json({ error: "Failed to set usage limit" });
       }
     }
@@ -482,7 +483,7 @@ export function registerAISettingsAdminRoutes({
         await usageTracker.removeLimit(req.organizationId, userId);
         res.json({ deleted: true });
       } catch (err) {
-        console.error("Remove limit error:", err);
+        logger.error("Remove limit error", { error: err });
         res.status(500).json({ error: "Failed to remove usage limit" });
       }
     }
@@ -518,7 +519,7 @@ export function registerAISettingsAdminRoutes({
           })),
         });
       } catch (err) {
-        console.error("Usage history error:", err);
+        logger.error("Usage history error", { error: err });
         res.status(500).json({ error: "Failed to get usage history" });
       }
     }
@@ -570,7 +571,7 @@ export function registerAISettingsAdminRoutes({
           }),
         });
       } catch (err) {
-        console.error("Usage summary error:", err);
+        logger.error("Usage summary error", { error: err });
         res.status(500).json({ error: "Failed to get usage summary" });
       }
     }

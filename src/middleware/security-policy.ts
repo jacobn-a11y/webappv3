@@ -5,20 +5,13 @@ import {
   decodeSecurityPolicy,
   type SecurityPolicyBoundary,
 } from "../types/json-boundaries.js";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 
 interface EnforceOptions {
   requireMfaIfConfigured?: boolean;
   enforceIpAllowlistIfConfigured?: boolean;
   requireSessionIfConfigured?: boolean;
   requireRecentAuthIfConfigured?: boolean;
-}
-
-interface AuthenticatedRequest extends Request {
-  organizationId?: string;
-  userId?: string;
-  mfaVerified?: boolean;
-  authContext?: { amr?: string[] };
-  sessionId?: string;
 }
 
 const policyCache = new Map<
@@ -34,19 +27,10 @@ function requestIp(req: Request): string {
 }
 
 function hasMfa(req: Request): boolean {
-  const header = req.headers["x-mfa-verified"];
-  if (Array.isArray(header)) {
-    if (header.some((h) => h.toLowerCase() === "true")) return true;
-  } else if (typeof header === "string" && header.toLowerCase() === "true") {
-    return true;
-  }
-
   const authReq = req as AuthenticatedRequest;
   if (authReq.mfaVerified === true) return true;
-
   const authContext = authReq.authContext;
   if (authContext?.amr?.includes("mfa")) return true;
-
   return false;
 }
 

@@ -13,7 +13,7 @@ initOtel();
 
 // ─── Environment validation (fail fast) ───────────────────────────────────────
 
-const requiredEnv = ["DATABASE_URL", "REDIS_URL"] as const;
+const requiredEnv = ["DATABASE_URL", "REDIS_URL", "WORKOS_API_KEY", "WORKOS_CLIENT_ID"] as const;
 const missing = requiredEnv.filter((k) => !process.env[k]?.trim());
 if (missing.length > 0) {
   console.error(
@@ -21,6 +21,15 @@ if (missing.length > 0) {
       "Set them in .env or your environment. See README for details."
   );
   process.exit(1);
+}
+
+const recommendedEnv = ["STRIPE_SECRET_KEY", "OPENAI_API_KEY", "CSRF_SECRET"] as const;
+const missingRecommended = recommendedEnv.filter((k) => !process.env[k]?.trim());
+if (missingRecommended.length > 0) {
+  console.warn(
+    `StoryEngine warning: missing recommended environment variables: ${missingRecommended.join(", ")}. ` +
+      "Some features may not work correctly."
+  );
 }
 
 import { PrismaClient } from "@prisma/client";

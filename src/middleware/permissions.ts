@@ -18,14 +18,7 @@ import { RoleProfileService } from "../services/role-profiles.js";
 import { PolicyService, legacyPermissionActionToPolicyAction } from "../services/policy-engine.js";
 import logger from "../lib/logger.js";
 import { decodeDataGovernancePolicy } from "../types/json-boundaries.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-interface AuthenticatedRequest extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 
 // ─── Role Hierarchy ──────────────────────────────────────────────────────────
 

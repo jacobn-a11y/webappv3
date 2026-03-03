@@ -1,14 +1,8 @@
 import type { NextFunction, Request, Response } from "express";
-import type { PrismaClient, UserRole } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import { hashSessionToken } from "../lib/session-token.js";
 import logger from "../lib/logger.js";
-
-interface SessionAuthRequest extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-  sessionId?: string;
-}
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 
 function readSessionToken(req: Request): string | null {
   const tokenHeader = req.headers["x-session-token"];
@@ -35,7 +29,7 @@ function readSessionToken(req: Request): string | null {
 export function createSessionAuth(prisma: PrismaClient) {
   return async (req: Request, _res: Response, next: NextFunction) => {
     try {
-      const authReq = req as SessionAuthRequest;
+      const authReq = req as AuthenticatedRequest;
 
       if (authReq.organizationId && authReq.userId) {
         next();
@@ -88,6 +82,19 @@ export function createSessionAuth(prisma: PrismaClient) {
         return;
       }
 
+      const scimIdentity = await prisma.scimIdentity.findFirst({
+        where: { userId: session.user.id },
+        select: { active: true },
+      });
+      if (scimIdentity && !scimIdentity.active) {
+        await prisma.userSession.updateMany({
+          where: { id: session.id, revokedAt: null },
+          data: { revokedAt: now },
+        });
+        next();
+        return;
+      }
+
       authReq.sessionId = session.id;
       authReq.userId = session.user.id;
       authReq.organizationId = session.user.organizationId;
@@ -105,7 +112,10 @@ export function createSessionAuth(prisma: PrismaClient) {
       next();
     } catch (error) {
       logger.error("Session auth middleware error", { error });
-      next();
+      res.status(503).json({
+        error: "service_unavailable",
+        message: "Authentication service temporarily unavailable. Please try again.",
+      });
     }
   };
 }

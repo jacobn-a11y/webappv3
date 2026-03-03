@@ -249,7 +249,7 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
 
   const handleShare = async (story: StoryLibraryItem) => {
     if (story.landing_page?.slug) {
-      const shareUrl = `${window.location.origin}/p/${story.landing_page.slug}`;
+      const shareUrl = `${window.location.origin}/s/${story.landing_page.slug}`;
       try {
         await navigator.clipboard.writeText(shareUrl);
       } catch {

@@ -1,38 +1,40 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import type { AuthUser } from "../lib/api";
 import { ProtectedRoute, AccessDenied } from "../components/ProtectedRoute";
-import { AccountDetailPage } from "../pages/AccountDetailPage";
-import { AccountsIndexPage } from "../pages/AccountsIndexPage";
-import { AccountJourneyPage } from "../pages/AccountJourneyPage";
-import { AccountSettingsPage } from "../pages/AccountSettingsPage";
-import { AdminAccountAccessPage } from "../pages/AdminAccountAccessPage";
-import { AdminAuditLogsPage } from "../pages/AdminAuditLogsPage";
-import { AdminBillingReadinessPage } from "../pages/AdminBillingReadinessPage";
-import { AdminDataGovernancePage } from "../pages/AdminDataGovernancePage";
-import { AdminDataQualityPage } from "../pages/AdminDataQualityPage";
-import { AdminOpsDiagnosticsPage } from "../pages/AdminOpsDiagnosticsPage";
-import { AdminPermissionsPage } from "../pages/AdminPermissionsPage";
-import { AdminPublishApprovalsPage } from "../pages/AdminPublishApprovalsPage";
-import { AdminRolesPage } from "../pages/AdminRolesPage";
-import { AdminSecurityPolicyPage } from "../pages/AdminSecurityPolicyPage";
-import { AdminSetupWizardPage } from "../pages/AdminSetupWizardPage";
-import { AdminStoryContextPage } from "../pages/AdminStoryContextPage";
-import { AnalyticsDashboardPage } from "../pages/AnalyticsDashboardPage";
-import { AuthCallbackPage } from "../pages/AuthCallbackPage";
-import { AuthPage } from "../pages/AuthPage";
-import { AutomationsPage } from "../pages/AutomationsPage";
-import { ChatbotConnectorPage } from "../pages/ChatbotConnectorPage";
-import { DashboardPagesPage } from "../pages/DashboardPagesPage";
-import { HomePage } from "../pages/HomePage";
-import { InviteAcceptPage } from "../pages/InviteAcceptPage";
-import { LandingPageEditorPage } from "../pages/LandingPageEditorPage";
-import { PlatformOwnerDashboardPage } from "../pages/PlatformOwnerDashboardPage";
-import { ProfileCenterPage } from "../pages/ProfileCenterPage";
-import { StatusPage } from "../pages/StatusPage";
-import { StoryLibraryPage } from "../pages/StoryLibraryPage";
-import { TranscriptViewerPage } from "../pages/TranscriptViewerPage";
-import { WorkspacesPage } from "../pages/WorkspacesPage";
-import { WritebacksPage } from "../pages/WritebacksPage";
+
+const AccountDetailPage = lazy(() => import("../pages/AccountDetailPage").then(m => ({ default: m.AccountDetailPage })));
+const AccountsIndexPage = lazy(() => import("../pages/AccountsIndexPage").then(m => ({ default: m.AccountsIndexPage })));
+const AccountJourneyPage = lazy(() => import("../pages/AccountJourneyPage").then(m => ({ default: m.AccountJourneyPage })));
+const AccountSettingsPage = lazy(() => import("../pages/AccountSettingsPage").then(m => ({ default: m.AccountSettingsPage })));
+const AdminAccountAccessPage = lazy(() => import("../pages/AdminAccountAccessPage").then(m => ({ default: m.AdminAccountAccessPage })));
+const AdminAuditLogsPage = lazy(() => import("../pages/AdminAuditLogsPage").then(m => ({ default: m.AdminAuditLogsPage })));
+const AdminBillingReadinessPage = lazy(() => import("../pages/AdminBillingReadinessPage").then(m => ({ default: m.AdminBillingReadinessPage })));
+const AdminDataGovernancePage = lazy(() => import("../pages/AdminDataGovernancePage").then(m => ({ default: m.AdminDataGovernancePage })));
+const AdminDataQualityPage = lazy(() => import("../pages/AdminDataQualityPage").then(m => ({ default: m.AdminDataQualityPage })));
+const AdminOpsDiagnosticsPage = lazy(() => import("../pages/AdminOpsDiagnosticsPage").then(m => ({ default: m.AdminOpsDiagnosticsPage })));
+const AdminPermissionsPage = lazy(() => import("../pages/AdminPermissionsPage").then(m => ({ default: m.AdminPermissionsPage })));
+const AdminPublishApprovalsPage = lazy(() => import("../pages/AdminPublishApprovalsPage").then(m => ({ default: m.AdminPublishApprovalsPage })));
+const AdminRolesPage = lazy(() => import("../pages/AdminRolesPage").then(m => ({ default: m.AdminRolesPage })));
+const AdminSecurityPolicyPage = lazy(() => import("../pages/AdminSecurityPolicyPage").then(m => ({ default: m.AdminSecurityPolicyPage })));
+const AdminSetupWizardPage = lazy(() => import("../pages/AdminSetupWizardPage").then(m => ({ default: m.AdminSetupWizardPage })));
+const AdminStoryContextPage = lazy(() => import("../pages/AdminStoryContextPage").then(m => ({ default: m.AdminStoryContextPage })));
+const AnalyticsDashboardPage = lazy(() => import("../pages/AnalyticsDashboardPage").then(m => ({ default: m.AnalyticsDashboardPage })));
+const AuthCallbackPage = lazy(() => import("../pages/AuthCallbackPage").then(m => ({ default: m.AuthCallbackPage })));
+const AuthPage = lazy(() => import("../pages/AuthPage").then(m => ({ default: m.AuthPage })));
+const AutomationsPage = lazy(() => import("../pages/AutomationsPage").then(m => ({ default: m.AutomationsPage })));
+const ChatbotConnectorPage = lazy(() => import("../pages/ChatbotConnectorPage").then(m => ({ default: m.ChatbotConnectorPage })));
+const DashboardPagesPage = lazy(() => import("../pages/DashboardPagesPage").then(m => ({ default: m.DashboardPagesPage })));
+const HomePage = lazy(() => import("../pages/HomePage").then(m => ({ default: m.HomePage })));
+const InviteAcceptPage = lazy(() => import("../pages/InviteAcceptPage").then(m => ({ default: m.InviteAcceptPage })));
+const LandingPageEditorPage = lazy(() => import("../pages/LandingPageEditorPage").then(m => ({ default: m.LandingPageEditorPage })));
+const PlatformOwnerDashboardPage = lazy(() => import("../pages/PlatformOwnerDashboardPage").then(m => ({ default: m.PlatformOwnerDashboardPage })));
+const ProfileCenterPage = lazy(() => import("../pages/ProfileCenterPage").then(m => ({ default: m.ProfileCenterPage })));
+const StatusPage = lazy(() => import("../pages/StatusPage").then(m => ({ default: m.StatusPage })));
+const StoryLibraryPage = lazy(() => import("../pages/StoryLibraryPage").then(m => ({ default: m.StoryLibraryPage })));
+const TranscriptViewerPage = lazy(() => import("../pages/TranscriptViewerPage").then(m => ({ default: m.TranscriptViewerPage })));
+const WorkspacesPage = lazy(() => import("../pages/WorkspacesPage").then(m => ({ default: m.WorkspacesPage })));
+const WritebacksPage = lazy(() => import("../pages/WritebacksPage").then(m => ({ default: m.WritebacksPage })));
 
 interface AuthenticatedRoutesProps {
   user: AuthUser;
@@ -40,6 +42,7 @@ interface AuthenticatedRoutesProps {
 
 export function AuthenticatedRoutes({ user }: AuthenticatedRoutesProps) {
   return (
+    <Suspense fallback={<div className="page-loading"><div className="spinner" /></div>}>
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/accounts" element={<AccountsIndexPage />} />
@@ -175,16 +178,19 @@ export function AuthenticatedRoutes({ user }: AuthenticatedRoutesProps) {
       <Route path="/invite/:token" element={<InviteAcceptPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
   );
 }
 
 export function PublicRoutes() {
   return (
+    <Suspense fallback={<div className="page-loading"><div className="spinner" /></div>}>
     <Routes>
       <Route path="/auth" element={<AuthPage />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
       <Route path="/invite/:token" element={<InviteAcceptPage />} />
       <Route path="*" element={<Navigate to="/auth?mode=login" replace />} />
     </Routes>
+    </Suspense>
   );
 }

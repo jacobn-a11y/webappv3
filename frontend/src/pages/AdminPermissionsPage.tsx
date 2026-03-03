@@ -302,6 +302,11 @@ function UserRow({
                       ? `${col.label} (always on for ${formatEnumLabel(user.role)})`
                       : `${hasPermission ? "Revoke" : "Grant"} ${col.label}`
                   }
+                  aria-label={
+                    isAdmin
+                      ? `${col.label} permission always on for ${formatEnumLabel(user.role)}`
+                      : `${hasPermission ? "Revoke" : "Grant"} ${col.label} permission for ${displayName}`
+                  }
                   onChange={() =>
                     onToggle(user.userId, col.key, hasPermission)
                   }

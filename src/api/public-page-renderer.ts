@@ -13,6 +13,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import { escapeHtml } from "../lib/html-utils.js";
 import { LandingPageEditor, type CalloutBox } from "../services/landing-page-editor.js";
 import type { PrismaClient } from "@prisma/client";
 import { verifyPagePassword } from "../lib/page-password.js";
@@ -977,12 +978,8 @@ export function sanitizeCustomCss(css: string | null): string | null {
 
   let sanitized = css;
 
-  // Remove </style> and <style> tag injection attempts
-  sanitized = sanitized.replace(/<\/?\s*style\s*>/gi, "");
-
-  // Remove <script> tags and their content
-  sanitized = sanitized.replace(/<script[\s\S]*?<\/script>/gi, "");
-  sanitized = sanitized.replace(/<\/?script[^>]*>/gi, "");
+  // Strip all HTML tags to prevent injection of <style>, <script>, or any other element
+  sanitized = sanitized.replace(/<[^>]*>/g, "");
 
   // Remove @import rules (data exfiltration vector)
   sanitized = sanitized.replace(/@import\s+[^;]*;?/gi, "");
@@ -1069,13 +1066,3 @@ function sanitizeHexColor(value: string | null | undefined): string | null {
   return /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(trimmed) ? trimmed : null;
 }
 
-// ─── Utility ─────────────────────────────────────────────────────────────────
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
