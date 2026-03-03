@@ -13,6 +13,7 @@ import { Router, type Request, type Response } from "express";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import { LandingPageEditor, type LandingPageSummary } from "../services/landing-page-editor.js";
 import { escapeHtml, escapeAttr } from "../lib/html-utils.js";
+import logger from "../lib/logger.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -110,7 +111,7 @@ export function createDashboardPageRoutes(prisma: PrismaClient): Router {
       res.setHeader("Cache-Control", "private, no-cache");
       res.send(html);
     } catch (err) {
-      console.error("Dashboard page render error:", err);
+      logger.error("Dashboard page render error", { error: err });
       res.status(500).json({ error: "Failed to render dashboard" });
     }
   });

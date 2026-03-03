@@ -19,6 +19,7 @@ import type { PrismaClient, AIOperation } from "@prisma/client";
 import type { AIClient, ChatCompletionOptions, ChatCompletionResult, AIProviderName } from "./ai-client.js";
 import type { AIConfigService } from "./ai-config.js";
 import logger from "../lib/logger.js";
+import logger from "../lib/logger.js";
 import { decodeDataGovernancePolicy } from "../types/json-boundaries.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -155,12 +156,12 @@ export class TrackedAIClient implements AIClient {
     this.tracker
       .checkAndNotify(this.context.organizationId, this.context.userId)
       .catch((err) =>
-        console.error("Usage notification check failed:", err)
+        logger.error("Usage notification check failed", { error: err })
       );
     this.tracker
       .checkSpendAnomalies(this.context.organizationId, this.context.userId)
       .catch((err) =>
-        console.error("Spend anomaly check failed:", err)
+        logger.error("Spend anomaly check failed", { error: err })
       );
 
     return result;

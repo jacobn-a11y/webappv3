@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { decodeDataGovernancePolicy } from "../types/json-boundaries.js";
+import logger from "../lib/logger.js";
 
 export interface AuditLogInput {
   organizationId: string;
@@ -60,7 +61,7 @@ export class AuditLogService {
       });
     } catch (err) {
       // Never block primary actions due to logging errors.
-      console.error("Audit log write failed:", err);
+      logger.error("Audit log write failed", { error: err });
     }
   }
 

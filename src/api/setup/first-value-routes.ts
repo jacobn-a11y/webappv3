@@ -1,5 +1,6 @@
 import type { Response } from "express";
-import { respondAuthRequired, respondServerError } from "../_shared/errors.js";
+import { sendUnauthorized, sendError } from "../_shared/responses.js";
+import logger from "../../lib/logger.js";
 import type { AuthReq, SetupRouteContext } from "./types.js";
 
 interface ContextualPrompt {
@@ -59,7 +60,7 @@ export function registerSetupFirstValueRoutes({
 }: Pick<SetupRouteContext, "prisma" | "router">): void {
   router.get("/first-value/recommendations", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
@@ -119,12 +120,8 @@ export function registerSetupFirstValueRoutes({
         next_tasks: tasks,
       });
     } catch (err) {
-      respondServerError(
-        res,
-        "First-value recommendation error:",
-        "Failed to load first-value recommendations",
-        err
-      );
+      logger.error("First-value recommendation error", { error: err });
+      sendError(res, 500, "internal_error", "Failed to load first-value recommendations");
     }
   });
 }

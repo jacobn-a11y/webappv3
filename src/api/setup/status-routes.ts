@@ -1,5 +1,6 @@
 import type { Response } from "express";
-import { respondAuthRequired, respondServerError } from "../_shared/errors.js";
+import { sendUnauthorized, sendError } from "../_shared/responses.js";
+import logger from "../../lib/logger.js";
 import type { AuthReq, SetupRouteContext } from "./types.js";
 
 export function registerSetupStatusRoutes({
@@ -8,7 +9,7 @@ export function registerSetupStatusRoutes({
 }: Pick<SetupRouteContext, "router" | "wizardService">): void {
   router.get("/status", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
@@ -16,7 +17,8 @@ export function registerSetupStatusRoutes({
       const status = await wizardService.getStatus(req.organizationId);
       res.json(status);
     } catch (err) {
-      respondServerError(res, "Setup status error:", "Failed to load setup status", err);
+      logger.error("Setup status error", { error: err });
+      sendError(res, 500, "internal_error", "Failed to load setup status");
     }
   });
 }

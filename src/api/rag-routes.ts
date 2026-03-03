@@ -10,6 +10,7 @@ import { z } from "zod";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import type { RAGEngine } from "../services/rag-engine.js";
 import { AccountAccessService } from "../services/account-access.js";
+import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -150,7 +151,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
         tokens_used: result.tokensUsed,
       });
     } catch (err) {
-      console.error("RAG query error:", err);
+      logger.error("RAG query error", { error: err });
       res.status(500).json({ error: "Failed to process query" });
     }
   });
@@ -221,7 +222,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
         tokens_used: result.tokensUsed,
       });
     } catch (err) {
-      console.error("RAG chat error:", err);
+      logger.error("RAG chat error", { error: err });
       res.status(500).json({ error: "Failed to process chat query" });
     }
   });
@@ -280,7 +281,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
         })),
       });
     } catch (err) {
-      console.error("List accounts error:", err);
+      logger.error("List accounts error", { error: err });
       res.status(500).json({ error: "Failed to load accounts" });
     }
   });

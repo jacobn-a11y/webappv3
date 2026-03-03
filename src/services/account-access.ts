@@ -14,6 +14,7 @@
 
 import type { PrismaClient, AccountScopeType, CRMProvider, UserRole } from "@prisma/client";
 import logger from "../lib/logger.js";
+import logger from "../lib/logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -360,7 +361,7 @@ export class AccountAccessService {
 
       return [];
     } catch (err) {
-      console.error(`Failed to fetch CRM reports for ${provider}:`, err);
+      logger.error(`Failed to fetch CRM reports for ${provider}`, { error: err });
       return [];
     }
   }

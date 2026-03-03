@@ -1,7 +1,7 @@
 import type { UserRole } from "@prisma/client";
 import type { Response } from "express";
 import { requirePermission } from "../../middleware/permissions.js";
-import { respondAuthRequired } from "../_shared/errors.js";
+import { sendUnauthorized } from "../_shared/responses.js";
 import logger from "../../lib/logger.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import { PROVIDER_MODELS, type AIProviderName } from "../../services/ai-client.js";
@@ -27,7 +27,7 @@ export function registerAISettingsAdminRoutes({
     requirePermission(prisma, "manage_ai_settings"),
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -54,7 +54,7 @@ export function registerAISettingsAdminRoutes({
       }
 
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -91,7 +91,7 @@ export function registerAISettingsAdminRoutes({
     requirePermission(prisma, "manage_ai_settings"),
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -130,7 +130,7 @@ export function registerAISettingsAdminRoutes({
       }
 
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -180,7 +180,7 @@ export function registerAISettingsAdminRoutes({
     requirePermission(prisma, "manage_ai_settings"),
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -205,7 +205,7 @@ export function registerAISettingsAdminRoutes({
     requirePermission(prisma, "manage_ai_settings"),
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -233,7 +233,7 @@ export function registerAISettingsAdminRoutes({
       }
 
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -278,7 +278,7 @@ export function registerAISettingsAdminRoutes({
     requirePermission(prisma, "manage_ai_settings"),
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -303,7 +303,7 @@ export function registerAISettingsAdminRoutes({
     requirePermission(prisma, "manage_ai_settings"),
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -333,7 +333,7 @@ export function registerAISettingsAdminRoutes({
       }
 
       if (!req.organizationId || !req.userId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -376,7 +376,7 @@ export function registerAISettingsAdminRoutes({
     requirePermission(prisma, "manage_ai_settings"),
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -401,7 +401,7 @@ export function registerAISettingsAdminRoutes({
     requirePermission(prisma, "manage_ai_settings"),
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -441,7 +441,7 @@ export function registerAISettingsAdminRoutes({
       }
 
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -470,7 +470,7 @@ export function registerAISettingsAdminRoutes({
     requirePermission(prisma, "manage_ai_settings"),
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -494,7 +494,7 @@ export function registerAISettingsAdminRoutes({
     requirePermission(prisma, "manage_ai_settings"),
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -530,7 +530,7 @@ export function registerAISettingsAdminRoutes({
     requirePermission(prisma, "manage_ai_settings"),
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 

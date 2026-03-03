@@ -1,9 +1,10 @@
 import type { Response } from "express";
 import { requirePermission } from "../../middleware/permissions.js";
-import { respondAuthRequired } from "../_shared/errors.js";
+import { sendUnauthorized } from "../_shared/responses.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import { AddBalanceSchema } from "./schemas.js";
 import type { AISettingsRouteContext, AuthReq } from "./types.js";
+import logger from "../../lib/logger.js";
 
 export function registerAISettingsBillingRoutes({
   prisma,
@@ -15,7 +16,7 @@ export function registerAISettingsBillingRoutes({
     requirePermission(prisma, "manage_ai_settings"),
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -39,7 +40,7 @@ export function registerAISettingsBillingRoutes({
           })),
         });
       } catch (err) {
-        console.error("List balances error:", err);
+        logger.error("List balances error", { error: err });
         res.status(500).json({ error: "Failed to list balances" });
       }
     }
@@ -55,7 +56,7 @@ export function registerAISettingsBillingRoutes({
       }
 
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -69,7 +70,7 @@ export function registerAISettingsBillingRoutes({
 
         res.json({ topped_up: true, amount_cents: payload.amount_cents });
       } catch (err) {
-        console.error("Top-up balance error:", err);
+        logger.error("Top-up balance error", { error: err });
         res.status(500).json({ error: "Failed to top up balance" });
       }
     }
@@ -80,7 +81,7 @@ export function registerAISettingsBillingRoutes({
     requirePermission(prisma, "manage_ai_settings"),
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
 
@@ -109,7 +110,7 @@ export function registerAISettingsBillingRoutes({
           },
         });
       } catch (err) {
-        console.error("Get user balance error:", err);
+        logger.error("Get user balance error", { error: err });
         res.status(500).json({ error: "Failed to get user balance" });
       }
     }

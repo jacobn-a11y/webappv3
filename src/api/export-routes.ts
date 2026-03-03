@@ -16,6 +16,7 @@ import { LandingPageExporter } from "../services/landing-page-exports.js";
 import { requirePageOwnerOrPermission } from "../middleware/permissions.js";
 import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.js";
 import { decodeDataGovernancePolicy } from "../types/json-boundaries.js";
+import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -105,7 +106,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
       res.setHeader("Content-Length", buffer.length.toString());
       res.send(buffer);
     } catch (err) {
-      console.error("PDF export error:", err);
+      logger.error("PDF export error", { error: err });
       const message =
         err instanceof Error ? err.message : "Failed to export PDF";
       res.status(500).json({ error: "pdf_export_failed", message });
@@ -151,7 +152,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
           document_url: result.documentUrl,
         });
       } catch (err) {
-        console.error("Google Doc export error:", err);
+        logger.error("Google Doc export error", { error: err });
         const message =
           err instanceof Error ? err.message : "Failed to create Google Doc";
         res
@@ -195,7 +196,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
 
         res.json({ sent: result.ok });
       } catch (err) {
-        console.error("Slack export error:", err);
+        logger.error("Slack export error", { error: err });
         const message =
           err instanceof Error ? err.message : "Failed to send to Slack";
         res.status(500).json({ error: "slack_export_failed", message });

@@ -98,6 +98,11 @@ function extractDomainFromUrl(url: string): string | null {
 export class SalesforceProvider implements CRMDataProvider {
   readonly name: IntegrationProvider = "SALESFORCE";
   private rateLimiter = new OutboundRateLimiter(5, 5);
+  private onTokenRefresh?: (newAccessToken: string) => Promise<void>;
+
+  setTokenRefreshCallback(cb: (newAccessToken: string) => Promise<void>): void {
+    this.onTokenRefresh = cb;
+  }
 
   private baseUrl(creds: SalesforceCredentials): string {
     return `${creds.instanceUrl.replace(/\/$/, "")}/services/data/${API_VERSION}`;
@@ -123,6 +128,10 @@ export class SalesforceProvider implements CRMDataProvider {
       if (res.status === 401) {
         const refreshed = await this.refreshAccessToken(creds);
         if (!refreshed) return false;
+        creds.accessToken = refreshed;
+        if (this.onTokenRefresh) {
+          await this.onTokenRefresh(refreshed);
+        }
         await this.rateLimiter.acquire();
         const retryRes = await fetch(`${this.baseUrl(creds)}/limits`, {
           method: "GET",
@@ -246,6 +255,9 @@ export class SalesforceProvider implements CRMDataProvider {
         throw new Error("Salesforce token refresh failed");
       }
       creds.accessToken = newToken;
+      if (this.onTokenRefresh) {
+        await this.onTokenRefresh(newToken);
+      }
       await this.rateLimiter.acquire();
       res = await fetch(url, {
         method: "GET",

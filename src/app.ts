@@ -108,6 +108,23 @@ export function createApp(deps: AppDeps): express.Application {
 
   const app = express();
 
+  // Named security-policy presets (see src/middleware/security-policy.ts)
+  const standardPolicy = requireOrgSecurityPolicy(prisma, {
+    requireMfaIfConfigured: true,
+    enforceIpAllowlistIfConfigured: true,
+    requireSessionIfConfigured: true,
+  });
+  const strictPolicy = requireOrgSecurityPolicy(prisma, {
+    requireMfaIfConfigured: true,
+    enforceIpAllowlistIfConfigured: true,
+    requireSessionIfConfigured: true,
+    requireRecentAuthIfConfigured: true,
+  });
+  const basicPolicy = requireOrgSecurityPolicy(prisma, {
+    requireMfaIfConfigured: true,
+    enforceIpAllowlistIfConfigured: true,
+  });
+
   // Global middleware
   app.use(helmet({
     contentSecurityPolicy: {
@@ -237,10 +254,10 @@ export function createApp(deps: AppDeps): express.Application {
   app.use(createCsrfProtection());
 
   // Platform owner operations (session context from createSessionAuth).
-  app.use("/api/platform", createPlatformRoutes(prisma));
+  app.use("/api/platform", apiRateLimiter, createPlatformRoutes(prisma));
 
   // Platform admin (API-key protected, no user auth).
-  app.use("/api/platform", createPlatformAdminRoutes(aiConfigService));
+  app.use("/api/platform", apiRateLimiter, createPlatformAdminRoutes(aiConfigService));
 
   // ─── Setup Wizard (before auth — needed for first-run onboarding) ──────
   app.use(
@@ -303,11 +320,7 @@ export function createApp(deps: AppDeps): express.Application {
   app.use(
     "/api/dashboard",
     trialGate,
-    requireOrgSecurityPolicy(prisma, {
-      requireMfaIfConfigured: true,
-      enforceIpAllowlistIfConfigured: true,
-      requireSessionIfConfigured: true,
-    }),
+    standardPolicy,
     apiRateLimiter,
     createDashboardRoutes(prisma)
   );
@@ -334,12 +347,7 @@ export function createApp(deps: AppDeps): express.Application {
   app.use(
     "/api/integrations",
     trialGate,
-    requireOrgSecurityPolicy(prisma, {
-      requireMfaIfConfigured: true,
-      enforceIpAllowlistIfConfigured: true,
-      requireSessionIfConfigured: true,
-      requireRecentAuthIfConfigured: true,
-    }),
+    strictPolicy,
     requirePermission(prisma, "manage_permissions"),
     createIntegrationRoutes(prisma, providerRegistry, syncEngine)
   );
@@ -365,24 +373,14 @@ export function createApp(deps: AppDeps): express.Application {
   app.use(
     "/api/admin/metrics",
     trialGate,
-    requireOrgSecurityPolicy(prisma, {
-      requireMfaIfConfigured: true,
-      enforceIpAllowlistIfConfigured: true,
-      requireSessionIfConfigured: true,
-      requireRecentAuthIfConfigured: true,
-    }),
+    strictPolicy,
     requirePermission(prisma, "manage_permissions"),
     createAdminMetricsRoutes(prisma)
   );
   app.use(
     "/api/admin/queues",
     trialGate,
-    requireOrgSecurityPolicy(prisma, {
-      requireMfaIfConfigured: true,
-      enforceIpAllowlistIfConfigured: true,
-      requireSessionIfConfigured: true,
-      requireRecentAuthIfConfigured: true,
-    }),
+    strictPolicy,
     requirePermission(prisma, "manage_permissions"),
     createQueueHealthRoutes({ queues, prisma })
   );
@@ -391,34 +389,21 @@ export function createApp(deps: AppDeps): express.Application {
   app.use(
     "/api/settings/org",
     trialGate,
-    requireOrgSecurityPolicy(prisma, {
-      requireMfaIfConfigured: true,
-      enforceIpAllowlistIfConfigured: true,
-      requireSessionIfConfigured: true,
-      requireRecentAuthIfConfigured: true,
-    }),
+    strictPolicy,
     requirePermission(prisma, "manage_permissions"),
     createOrgSettingsRoutes(prisma)
   );
   app.use(
     "/api/settings/integrations",
     trialGate,
-    requireOrgSecurityPolicy(prisma, {
-      requireMfaIfConfigured: true,
-      enforceIpAllowlistIfConfigured: true,
-      requireSessionIfConfigured: true,
-      requireRecentAuthIfConfigured: true,
-    }),
+    strictPolicy,
     requirePermission(prisma, "manage_permissions"),
     createIntegrationsRoutes(prisma)
   );
   app.use(
     "/api/settings/api-keys",
     trialGate,
-    requireOrgSecurityPolicy(prisma, {
-      requireMfaIfConfigured: true,
-      enforceIpAllowlistIfConfigured: true,
-    }),
+    basicPolicy,
     requirePermission(prisma, "manage_permissions"),
     createApiKeysRoutes(prisma)
   );

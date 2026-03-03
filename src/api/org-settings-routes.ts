@@ -15,7 +15,7 @@ import type { PrismaClient, UserRole } from "@prisma/client";
 import { Resend } from "resend";
 import { requirePermission } from "../middleware/permissions.js";
 import { buildPublicAppUrl } from "../lib/public-app-url.js";
-import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import type { OrgRequest } from "../types/authenticated-request.js";
 import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -33,7 +33,7 @@ const UpdateMemberRoleSchema = z.object({
   role: z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"]),
 });
 
-type AuthReq = AuthenticatedRequest;
+type AuthReq = OrgRequest;
 
 function renderInviteEmailHtml(options: {
   orgName: string;
@@ -212,7 +212,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
 
       try {
         await prisma.organization.update({
-          where: { id: req.organizationId! },
+          where: { id: req.organizationId },
           data: { name: parse.data.name },
         });
 
@@ -237,7 +237,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     async (req: AuthReq, res: Response) => {
       try {
         const members = await prisma.user.findMany({
-          where: { organizationId: req.organizationId! },
+          where: { organizationId: req.organizationId },
           select: {
             id: true,
             email: true,
@@ -279,7 +279,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
       try {
         // Verify target user belongs to this org
         const targetUser = await prisma.user.findFirst({
-          where: { id: memberId, organizationId: req.organizationId! },
+          where: { id: memberId, organizationId: req.organizationId },
         });
 
         if (!targetUser) {
@@ -302,7 +302,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         // Prevent demoting the last OWNER
         if (targetUser.role === "OWNER" && newRole !== "OWNER") {
           const ownerCount = await prisma.user.count({
-            where: { organizationId: req.organizationId!, role: "OWNER" },
+            where: { organizationId: req.organizationId, role: "OWNER" },
           });
           if (ownerCount <= 1) {
             res.status(400).json({
@@ -341,7 +341,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
 
       try {
         const targetUser = await prisma.user.findFirst({
-          where: { id: memberId, organizationId: req.organizationId! },
+          where: { id: memberId, organizationId: req.organizationId },
         });
 
         if (!targetUser) {
@@ -361,7 +361,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         // Cannot remove the last OWNER
         if (targetUser.role === "OWNER") {
           const ownerCount = await prisma.user.count({
-            where: { organizationId: req.organizationId!, role: "OWNER" },
+            where: { organizationId: req.organizationId, role: "OWNER" },
           });
           if (ownerCount <= 1) {
             res.status(400).json({
@@ -405,7 +405,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         const existingUser = await prisma.user.findFirst({
           where: {
             email: parse.data.email,
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
           },
         });
 
@@ -423,21 +423,21 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         const invite = await prisma.orgInvite.upsert({
           where: {
             organizationId_email: {
-              organizationId: req.organizationId!,
+              organizationId: req.organizationId,
               email: parse.data.email,
             },
           },
           create: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             email: parse.data.email,
             role: parse.data.role as UserRole,
-            invitedById: req.userId!,
+            invitedById: req.userId,
             token,
             expiresAt,
           },
           update: {
             role: parse.data.role as UserRole,
-            invitedById: req.userId!,
+            invitedById: req.userId,
             token,
             expiresAt,
             acceptedAt: null,
@@ -452,11 +452,11 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
           try {
             const [org, inviter] = await Promise.all([
               prisma.organization.findUnique({
-                where: { id: req.organizationId! },
+                where: { id: req.organizationId },
                 select: { name: true },
               }),
               prisma.user.findUnique({
-                where: { id: req.userId! },
+                where: { id: req.userId },
                 select: { name: true, email: true },
               }),
             ]);
@@ -512,7 +512,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
       try {
         const invites = await prisma.orgInvite.findMany({
           where: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             acceptedAt: null,
           },
           select: {
@@ -553,7 +553,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         const invite = await prisma.orgInvite.findFirst({
           where: {
             id: req.params.inviteId as string,
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
           },
         });
 

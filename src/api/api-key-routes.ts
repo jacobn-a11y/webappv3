@@ -14,13 +14,8 @@ import type { PrismaClient } from "@prisma/client";
 import { generateApiKey, hashApiKey as _hashApiKey } from "../middleware/api-key-auth.js";
 import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.js";
 import { AuditLogService } from "../services/audit-log.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-interface AuthenticatedRequest extends Request {
-  organizationId?: string;
-  userId?: string;
-}
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -123,7 +118,7 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
         created_at: apiKey.createdAt,
       });
     } catch (err) {
-      console.error("Failed to create API key:", err);
+      logger.error("Failed to create API key", { error: err });
       res.status(500).json({ error: "Failed to create API key" });
     }
   });
@@ -177,7 +172,7 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
         })),
       });
     } catch (err) {
-      console.error("Failed to list API keys:", err);
+      logger.error("Failed to list API keys", { error: err });
       res.status(500).json({ error: "Failed to list API keys" });
     }
   });
@@ -291,7 +286,7 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
           message: `Old key will continue to work until ${gracePeriodEndsAt.toISOString()}. Update your integration to use the new key before then.`,
         });
       } catch (err) {
-        console.error("Failed to rotate API key:", err);
+        logger.error("Failed to rotate API key", { error: err });
         res.status(500).json({ error: "Failed to rotate API key" });
       }
     }
@@ -348,7 +343,7 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
           message: "API key has been revoked immediately.",
         });
       } catch (err) {
-        console.error("Failed to revoke API key:", err);
+        logger.error("Failed to revoke API key", { error: err });
         res.status(500).json({ error: "Failed to revoke API key" });
       }
     }
@@ -434,7 +429,7 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
           })),
         });
       } catch (err) {
-        console.error("Failed to fetch API key usage:", err);
+        logger.error("Failed to fetch API key usage", { error: err });
         res.status(500).json({ error: "Failed to fetch usage data" });
       }
     }

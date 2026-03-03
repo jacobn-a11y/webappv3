@@ -1,11 +1,12 @@
 import type { Response } from "express";
-import { respondAuthRequired } from "../_shared/errors.js";
+import { sendUnauthorized } from "../_shared/responses.js";
 import {
   DEFAULT_MODELS,
   PROVIDER_MODELS,
   type AIProviderName,
 } from "../../services/ai-client.js";
 import type { AISettingsRouteContext, AuthReq } from "./types.js";
+import logger from "../../lib/logger.js";
 
 export function registerAISettingsUserRoutes({
   configService,
@@ -14,7 +15,7 @@ export function registerAISettingsUserRoutes({
 }: Pick<AISettingsRouteContext, "configService" | "router" | "usageTracker">): void {
   router.get("/providers", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId || !req.userRole) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
@@ -51,14 +52,14 @@ export function registerAISettingsUserRoutes({
         user_access: access,
       });
     } catch (err) {
-      console.error("List providers error:", err);
+      logger.error("List providers error", { error: err });
       res.status(500).json({ error: "Failed to list AI providers" });
     }
   });
 
   router.get("/usage/me", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
@@ -90,14 +91,14 @@ export function registerAISettingsUserRoutes({
           : null,
       });
     } catch (err) {
-      console.error("Usage status error:", err);
+      logger.error("Usage status error", { error: err });
       res.status(500).json({ error: "Failed to get usage status" });
     }
   });
 
   router.get("/balance/me", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
@@ -122,14 +123,14 @@ export function registerAISettingsUserRoutes({
         },
       });
     } catch (err) {
-      console.error("Balance error:", err);
+      logger.error("Balance error", { error: err });
       res.status(500).json({ error: "Failed to get balance" });
     }
   });
 
   router.get("/notifications", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
@@ -151,14 +152,14 @@ export function registerAISettingsUserRoutes({
         })),
       });
     } catch (err) {
-      console.error("Notifications error:", err);
+      logger.error("Notifications error", { error: err });
       res.status(500).json({ error: "Failed to get notifications" });
     }
   });
 
   router.post("/notifications/:id/acknowledge", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
@@ -175,14 +176,14 @@ export function registerAISettingsUserRoutes({
 
       res.json({ acknowledged: true });
     } catch (err) {
-      console.error("Acknowledge notification error:", err);
+      logger.error("Acknowledge notification error", { error: err });
       res.status(500).json({ error: "Failed to acknowledge notification" });
     }
   });
 
   router.post("/notifications/acknowledge-all", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
@@ -193,7 +194,7 @@ export function registerAISettingsUserRoutes({
       );
       res.json({ acknowledged: true, count: acknowledgedCount });
     } catch (err) {
-      console.error("Acknowledge all notifications error:", err);
+      logger.error("Acknowledge all notifications error", { error: err });
       res.status(500).json({ error: "Failed to acknowledge notifications" });
     }
   });

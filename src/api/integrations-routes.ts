@@ -13,6 +13,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient, UserRole, LinkedAccount } from "@prisma/client";
 import { requirePermission } from "../middleware/permissions.js";
+import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -71,7 +72,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
           })),
         });
       } catch (err) {
-        console.error("List integrations error:", err);
+        logger.error("List integrations error", { error: err });
         res.status(500).json({ error: "Failed to load integrations" });
       }
     }
@@ -113,7 +114,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
 
         if (!response.ok) {
           const errorBody = await response.text();
-          console.error("Merge link token error:", errorBody);
+          logger.error("Merge link token error", { error: errorBody });
           res.status(502).json({ error: "Failed to create link token" });
           return;
         }
@@ -121,7 +122,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
         const data = await response.json() as { link_token: string };
         res.json({ link_token: data.link_token });
       } catch (err) {
-        console.error("Create link token error:", err);
+        logger.error("Create link token error", { error: err });
         res.status(500).json({ error: "Failed to create link token" });
       }
     }
@@ -167,7 +168,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
 
         if (!response.ok) {
           const errorBody = await response.text();
-          console.error("Merge token exchange error:", errorBody);
+          logger.error("Merge token exchange error", { error: errorBody });
           res.status(502).json({ error: "Failed to exchange token" });
           return;
         }
@@ -184,7 +185,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
         // Store the linked account
         const linkedAccount = await prisma.linkedAccount.create({
           data: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             mergeLinkedAccountId: data.account_token,
             accountToken: data.account_token,
             integrationSlug: data.integration.slug,
@@ -202,7 +203,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
           },
         });
       } catch (err) {
-        console.error("Complete link error:", err);
+        logger.error("Complete link error", { error: err });
         res.status(500).json({ error: "Failed to complete integration link" });
       }
     }
@@ -229,7 +230,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
         const linked = await prisma.linkedAccount.findFirst({
           where: {
             id: req.params.integrationId as string,
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
           },
         });
 
@@ -247,7 +248,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
 
         res.json({ updated: true, polling_enabled: parse.data.enabled });
       } catch (err) {
-        console.error("Toggle polling error:", err);
+        logger.error("Toggle polling error", { error: err });
         res.status(500).json({ error: "Failed to toggle CRM polling" });
       }
     }
@@ -275,7 +276,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
         const linked = await prisma.linkedAccount.findFirst({
           where: {
             id: req.params.integrationId as string,
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
           },
         });
 
@@ -307,7 +308,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
 
         res.json({ syncing: true, integration_id: linked.id });
       } catch (err) {
-        console.error("Trigger sync error:", err);
+        logger.error("Trigger sync error", { error: err });
         res.status(500).json({ error: "Failed to trigger sync" });
       }
     }
@@ -328,7 +329,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
         const linked = await prisma.linkedAccount.findFirst({
           where: {
             id: req.params.integrationId as string,
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
           },
         });
 
@@ -356,7 +357,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
         await prisma.linkedAccount.delete({ where: { id: linked.id } });
         res.json({ disconnected: true });
       } catch (err) {
-        console.error("Disconnect integration error:", err);
+        logger.error("Disconnect integration error", { error: err });
         res.status(500).json({ error: "Failed to disconnect integration" });
       }
     }

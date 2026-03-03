@@ -6,13 +6,13 @@
 
 import { Router, type Request, type Response } from "express";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import logger from "../lib/logger.js";
 import { z } from "zod";
 import { markdownToPdfBuffer, markdownToDocxBuffer, sanitizeFileName } from "../services/story-exports.js";
 import type { StoryBuilder, StoryBuilderOptions } from "../services/story-builder.js";
 import type {
   PrismaClient,
   TranscriptTruncationMode,
-  HighValueQuote,
   UserRole,
 } from "@prisma/client";
 import { TranscriptMerger } from "../services/transcript-merger.js";
@@ -31,6 +31,7 @@ import {
   type StoryTypeInput,
 } from "../types/story-generation.js";
 import { dispatchOutboundWebhookEvent } from "../services/outbound-webhooks.js";
+import { mapStorySummary, mapGeneratedQuote } from "../services/story-mappers.js";
 
 const BuildStorySchema = z.object({
   account_id: z.string().min(1),
@@ -148,7 +149,7 @@ export function createStoryRoutes(
     }
   ): Promise<void> => {
     await dispatchOutboundWebhookEvent(prisma, input).catch((err) => {
-      console.warn("Story outbound webhook dispatch failed:", err);
+      logger.warn("Story outbound webhook dispatch failed", { error: err });
     });
   };
 
@@ -247,7 +248,7 @@ export function createStoryRoutes(
         quotes: result.quotes.map((q) => mapGeneratedQuote(q)),
       });
     } catch (err) {
-      console.error("Story build error:", err);
+      logger.error("Story build error", { error: err });
       const errorMessage = err instanceof Error ? err.message : "Failed to build story";
       await dispatchStoryEvent({
         organizationId,
@@ -546,7 +547,7 @@ export function createStoryRoutes(
         },
       });
     } catch (err) {
-      console.error("Story library error:", err);
+      logger.error("Story library error", { error: err });
       res.status(500).json({ error: "Failed to load story library" });
     }
   });
@@ -632,7 +633,7 @@ export function createStoryRoutes(
       res.setHeader("Content-Disposition", `attachment; filename="${filename}.docx"`);
       res.send(Buffer.from(docxBuffer));
     } catch (err) {
-      console.error("Story export error:", err);
+      logger.error("Story export error", { error: err });
       res.status(500).json({ error: "Failed to export story" });
     }
   });
@@ -700,7 +701,7 @@ export function createStoryRoutes(
       await prisma.story.delete({ where: { id: story.id } });
       res.json({ deleted: true });
     } catch (err) {
-      console.error("Story delete error:", err);
+      logger.error("Story delete error", { error: err });
       res.status(500).json({ error: "Failed to delete story" });
     }
   });
@@ -768,7 +769,7 @@ export function createStoryRoutes(
         stories: stories.map((s) => mapStorySummary(s)),
       });
     } catch (err) {
-      console.error("Story retrieval error:", err);
+      logger.error("Story retrieval error", { error: err });
       res.status(500).json({ error: "Failed to retrieve stories" });
     }
   });
@@ -843,164 +844,10 @@ export function createStoryRoutes(
         truncation_mode: result.truncationMode,
       });
     } catch (err) {
-      console.error("Transcript merge error:", err);
+      logger.error("Transcript merge error", { error: err });
       res.status(500).json({ error: "Failed to merge transcripts" });
     }
   });
 
   return router;
 }
-
-function mapStorySummary(s: {
-  id: string;
-  title: string;
-  storyType: string;
-  funnelStages: string[];
-  filterTags: string[];
-  generatedAt: Date;
-  markdownBody: string;
-  quotes: HighValueQuote[];
-  landingPages: Array<{
-    id: string;
-    slug: string;
-    status: string;
-    publishedAt: Date | null;
-  }>;
-}) {
-  return {
-    story_status:
-      s.landingPages.length === 0
-        ? "DRAFT"
-        : s.landingPages[0]?.status === "PUBLISHED"
-          ? "PUBLISHED"
-          : s.landingPages[0]?.status === "ARCHIVED"
-            ? "ARCHIVED"
-            : "PAGE_CREATED",
-    id: s.id,
-    title: s.title,
-    story_type: s.storyType,
-    funnel_stages: s.funnelStages,
-    filter_tags: s.filterTags,
-    generated_at: s.generatedAt.toISOString(),
-    markdown: s.markdownBody,
-    landing_page:
-      s.landingPages[0] == null
-        ? null
-        : {
-            id: s.landingPages[0].id,
-            slug: s.landingPages[0].slug,
-            status: s.landingPages[0].status,
-            published_at: s.landingPages[0].publishedAt?.toISOString() ?? null,
-          },
-    quotes: s.quotes.map((q) => mapStoredQuote(q)),
-  };
-}
-
-function mapGeneratedQuote(q: {
-  speaker: string | null;
-  quoteText: string;
-  context: string | null;
-  metricType: string | null;
-  metricValue: string | null;
-  callId: string;
-  sourceChunkId: string | null;
-  sourceTimestampMs: number | null;
-  sourceCallTitle: string | null;
-  sourceRecordingUrl: string | null;
-  confidenceScore?: number;
-}) {
-  return {
-    speaker: q.speaker,
-    quote_text: q.quoteText,
-    context: q.context,
-    metric_type: q.metricType,
-    metric_value: q.metricValue,
-    confidence_score: q.confidenceScore ?? undefined,
-    call_id: q.callId,
-    source_chunk_id: q.sourceChunkId ?? undefined,
-    source_timestamp_ms: q.sourceTimestampMs ?? undefined,
-    source_call_title: q.sourceCallTitle ?? undefined,
-    source_recording_url: q.sourceRecordingUrl ?? undefined,
-    transcript_deep_link: buildTranscriptDeepLink(
-      q.callId,
-      q.sourceTimestampMs ?? undefined,
-      q.sourceChunkId ?? undefined
-    ),
-  };
-}
-
-function mapStoredQuote(q: HighValueQuote) {
-  const metadata = parseLineageMetadata(q.lineageMetadata);
-  const sourceCallId = q.callId ?? metadata.source_call_id;
-
-  return {
-    speaker: q.speaker,
-    quote_text: q.quoteText,
-    context: q.context,
-    metric_type: q.metricType,
-    metric_value: q.metricValue,
-    confidence_score: q.confidenceScore,
-    call_id: sourceCallId ?? undefined,
-    source_chunk_id: metadata.source_chunk_id,
-    source_timestamp_ms: metadata.source_start_ms,
-    source_call_title: metadata.source_call_title,
-    source_recording_url: metadata.source_recording_url,
-    transcript_deep_link: sourceCallId
-      ? buildTranscriptDeepLink(sourceCallId, metadata.source_start_ms, metadata.source_chunk_id)
-      : undefined,
-  };
-}
-
-function parseLineageMetadata(lineageMetadata: unknown): {
-  source_call_id?: string;
-  source_chunk_id?: string;
-  source_start_ms?: number;
-  source_call_title?: string;
-  source_recording_url?: string;
-} {
-  if (!lineageMetadata || typeof lineageMetadata !== "object" || Array.isArray(lineageMetadata)) {
-    return {};
-  }
-
-  const metadata = lineageMetadata as Record<string, unknown>;
-  const sourceStartMs = metadata.source_start_ms;
-  return {
-    source_call_id:
-      typeof metadata.source_call_id === "string" ? metadata.source_call_id : undefined,
-    source_chunk_id:
-      typeof metadata.source_chunk_id === "string" ? metadata.source_chunk_id : undefined,
-    source_start_ms:
-      typeof sourceStartMs === "number"
-        ? sourceStartMs
-        : typeof sourceStartMs === "string"
-          ? Number.isFinite(Number(sourceStartMs))
-            ? Number(sourceStartMs)
-            : undefined
-          : undefined,
-    source_call_title:
-      typeof metadata.source_call_title === "string" ? metadata.source_call_title : undefined,
-    source_recording_url:
-      typeof metadata.source_recording_url === "string"
-        ? metadata.source_recording_url
-        : undefined,
-  };
-}
-
-function buildTranscriptDeepLink(
-  callId: string,
-  sourceTimestampMs?: number,
-  sourceChunkId?: string
-): string {
-  const params = new URLSearchParams();
-  if (typeof sourceTimestampMs === "number" && Number.isFinite(sourceTimestampMs) && sourceTimestampMs >= 0) {
-    params.set("tms", String(Math.floor(sourceTimestampMs)));
-  }
-  if (typeof sourceChunkId === "string" && sourceChunkId.length > 0) {
-    params.set("chunk", sourceChunkId);
-  }
-  const query = params.toString();
-  return query.length > 0
-    ? `/calls/${encodeURIComponent(callId)}/transcript?${query}`
-    : `/calls/${encodeURIComponent(callId)}/transcript`;
-}
-

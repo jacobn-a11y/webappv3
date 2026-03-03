@@ -14,6 +14,7 @@ import { z } from "zod";
 import { AIConfigService } from "../services/ai-config.js";
 import { PROVIDER_MODELS, type AIProviderName } from "../services/ai-client.js";
 import { parseAIProviderName } from "../services/provider-policy.js";
+import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ export function createPlatformAdminRoutes(
       const providers = await configService.listPlatformProviders();
       res.json({ providers });
     } catch (err) {
-      console.error("Platform list providers error:", err);
+      logger.error("Platform list providers error", { error: err });
       res.status(500).json({ error: "Failed to list platform providers" });
     }
   });
@@ -103,7 +104,7 @@ export function createPlatformAdminRoutes(
 
       res.json({ id, saved: true });
     } catch (err) {
-      console.error("Platform upsert provider error:", err);
+      logger.error("Platform upsert provider error", { error: err });
       res.status(500).json({ error: "Failed to save platform provider" });
     }
   });
@@ -127,7 +128,7 @@ export function createPlatformAdminRoutes(
       );
       res.json(result);
     } catch (err) {
-      console.error("Platform validate key error:", err);
+      logger.error("Platform validate key error", { error: err });
       res.status(500).json({ error: "Failed to validate API key" });
     }
   });
@@ -150,7 +151,7 @@ export function createPlatformAdminRoutes(
         ),
       });
     } catch (err) {
-      console.error("Platform list models error:", err);
+      logger.error("Platform list models error", { error: err });
       res.status(500).json({ error: "Failed to list platform models" });
     }
   });
@@ -180,7 +181,7 @@ export function createPlatformAdminRoutes(
 
       res.json({ id, saved: true });
     } catch (err) {
-      console.error("Platform upsert model pricing error:", err);
+      logger.error("Platform upsert model pricing error", { error: err });
       res.status(500).json({ error: "Failed to save model pricing" });
     }
   });
@@ -203,7 +204,7 @@ export function createPlatformAdminRoutes(
         await configService.deleteModelPricing(provider, req.params.modelId as string);
         res.json({ deleted: true });
       } catch (err) {
-        console.error("Platform delete model pricing error:", err);
+        logger.error("Platform delete model pricing error", { error: err });
         res.status(500).json({ error: "Failed to delete model pricing" });
       }
     }

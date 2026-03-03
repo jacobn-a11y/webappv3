@@ -17,6 +17,7 @@ import { escapeHtml } from "../lib/html-utils.js";
 import { requirePageOwnerOrPermission } from "../middleware/permissions.js";
 import { RoleProfileService } from "../services/role-profiles.js";
 import type { PrismaClient, UserRole } from "@prisma/client";
+import logger from "../lib/logger.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ export function createEditorPageRoutes(prisma: PrismaClient): Router {
           })
         );
       } catch (err) {
-        console.error("Editor page error:", err);
+        logger.error("Editor page error", { error: err });
         res.status(404).send(render404());
       }
     }

@@ -11,15 +11,9 @@
  */
 
 import type { Request, Response, NextFunction } from "express";
-import type { UserRole } from "@prisma/client";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
-export interface AuthenticatedRequest extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
+export type { AuthenticatedRequest };
 
 // ─── Middleware ──────────────────────────────────────────────────────────────
 

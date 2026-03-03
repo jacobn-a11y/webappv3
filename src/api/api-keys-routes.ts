@@ -13,6 +13,7 @@ import crypto from "crypto";
 import { z } from "zod";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import { requirePermission } from "../middleware/permissions.js";
+import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -86,7 +87,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
           created_at: k.createdAt,
         })) });
       } catch (err) {
-        console.error("List API keys error:", err);
+        logger.error("List API keys error", { error: err });
         res.status(500).json({ error: "Failed to load API keys" });
       }
     }
@@ -117,7 +118,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
 
         const apiKey = await prisma.apiKey.create({
           data: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             label: parse.data.label,
             keyHash,
             keyPrefix,
@@ -136,7 +137,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
           warning: "Store this key securely. It will not be shown again.",
         });
       } catch (err) {
-        console.error("Generate API key error:", err);
+        logger.error("Generate API key error", { error: err });
         res.status(500).json({ error: "Failed to generate API key" });
       }
     }
@@ -158,7 +159,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
         const apiKey = await prisma.apiKey.findFirst({
           where: {
             id: req.params.keyId as string,
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             revokedAt: null,
           },
         });
@@ -175,7 +176,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
 
         res.json({ revoked: true });
       } catch (err) {
-        console.error("Revoke API key error:", err);
+        logger.error("Revoke API key error", { error: err });
         res.status(500).json({ error: "Failed to revoke API key" });
       }
     }

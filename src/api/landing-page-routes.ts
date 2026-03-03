@@ -8,7 +8,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient, UserRole } from "@prisma/client";
-import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import type { OrgRequest } from "../types/authenticated-request.js";
 import type { Queue } from "bullmq";
 import {
   ConcurrencyConflictError,
@@ -29,6 +29,13 @@ import {
   requirePermission,
   requirePageOwnerOrPermission,
 } from "../middleware/permissions.js";
+import {
+  canAccessNamedStories,
+  canGenerateNamedStories,
+  canUserApproveStep,
+  getArtifactPublishGovernance,
+  type PublishApprovalPayload,
+} from "../services/landing-page-approval.js";
 import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -49,7 +56,6 @@ const CreatePageSchema = z.object({
       })
     )
     .optional(),
-  /** Admin-only: include real company name (no scrubbing). Set at creation, not changeable. */
   include_company_name: z.boolean().optional(),
 });
 
@@ -90,37 +96,7 @@ const ReviewPublishApprovalSchema = z.object({
   notes: z.string().max(1000).optional(),
 });
 
-interface PublishApprovalStep {
-  step_order: number;
-  min_approvals: number;
-  required_role_profile_key: string | null;
-  required_user_role: string | null;
-  approver_scope_type: "ROLE_PROFILE" | "TEAM" | "USER" | "GROUP" | "SELF";
-  approver_scope_value: string | null;
-  allow_self_approval: boolean;
-}
-
-interface PublishApprovalPayload {
-  page_id: string;
-  options: {
-    visibility: "PRIVATE" | "SHARED_WITH_LINK";
-    password?: string;
-    expires_at?: string;
-    release_notes?: string;
-  };
-  steps: PublishApprovalStep[];
-  approvals?: Array<{
-    step_order: number;
-    reviewer_user_id: string;
-    reviewer_name: string | null;
-    reviewer_email: string | null;
-    decided_at: string;
-    notes: string | null;
-  }>;
-  current_step_order?: number;
-}
-
-type AuthReq = AuthenticatedRequest;
+type AuthReq = OrgRequest;
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
@@ -174,192 +150,12 @@ export function createLandingPageRoutes(
     }
   }
 
-  const isAdminRole = (userRole?: string): boolean =>
-    !!userRole && ["OWNER", "ADMIN"].includes(userRole);
+  const reqParams = (req: AuthReq) => ({
+    organizationId: req.organizationId,
+    userId: req.userId,
+    userRole: req.userRole,
+  });
 
-  async function canAccessNamedStories(req: AuthReq): Promise<boolean> {
-    if (isAdminRole(req.userRole)) {
-      return true;
-    }
-    if (!req.organizationId || !req.userId) {
-      return false;
-    }
-    const policy = await roleProfiles.getEffectivePolicy(
-      req.organizationId,
-      req.userId,
-      req.userRole as UserRole | undefined
-    );
-    if (
-      policy.canAccessNamedStories ||
-      policy.permissions.includes("PUBLISH_NAMED_LANDING_PAGE")
-    ) {
-      return true;
-    }
-    const userPerm = await prisma.userPermission.findUnique({
-      where: {
-        userId_permission: {
-          userId: req.userId,
-          permission: "PUBLISH_NAMED_LANDING_PAGE",
-        },
-      },
-    });
-    return !!userPerm;
-  }
-
-  async function canGenerateNamedStories(req: AuthReq): Promise<boolean> {
-    if (isAdminRole(req.userRole)) {
-      return true;
-    }
-    if (!req.organizationId || !req.userId) {
-      return false;
-    }
-    const policy = await roleProfiles.getEffectivePolicy(
-      req.organizationId,
-      req.userId,
-      req.userRole as UserRole | undefined
-    );
-    if (
-      policy.canGenerateNamedStories ||
-      policy.permissions.includes("PUBLISH_NAMED_LANDING_PAGE")
-    ) {
-      return true;
-    }
-    const userPerm = await prisma.userPermission.findUnique({
-      where: {
-        userId_permission: {
-          userId: req.userId,
-          permission: "PUBLISH_NAMED_LANDING_PAGE",
-        },
-      },
-    });
-    return !!userPerm;
-  }
-
-  async function getArtifactPublishGovernance(organizationId: string): Promise<{
-    approvalChainEnabled: boolean;
-    maxExpirationDays: number | null;
-    requireProvenance: boolean;
-    steps: PublishApprovalStep[];
-  }> {
-    const policy = await prisma.artifactGovernancePolicy.findUnique({
-      where: { organizationId },
-      include: {
-        approvalSteps: {
-          where: { enabled: true },
-          orderBy: { stepOrder: "asc" },
-        },
-      },
-    });
-
-    if (!policy) {
-      return {
-        approvalChainEnabled: false,
-        maxExpirationDays: null,
-        requireProvenance: true,
-        steps: [],
-      };
-    }
-
-    return {
-      approvalChainEnabled: policy.approvalChainEnabled,
-      maxExpirationDays: policy.maxExpirationDays ?? null,
-      requireProvenance: policy.requireProvenance,
-      steps: policy.approvalSteps.map((s) => ({
-        step_order: s.stepOrder,
-        min_approvals: s.minApprovals,
-        required_role_profile_key: s.requiredRoleProfileKey ?? null,
-        required_user_role: s.requiredUserRole ?? null,
-        approver_scope_type:
-          (s.approverScopeType as "ROLE_PROFILE" | "TEAM" | "USER" | "GROUP" | "SELF") ??
-          "ROLE_PROFILE",
-        approver_scope_value: s.approverScopeValue ?? null,
-        allow_self_approval: s.allowSelfApproval,
-      })),
-    };
-  }
-
-  async function canUserApproveStep(
-    req: AuthReq,
-    step: PublishApprovalStep,
-    requestedByUserId?: string
-  ): Promise<boolean> {
-    if (!req.organizationId || !req.userId) {
-      return false;
-    }
-
-    if (step.required_user_role && req.userRole !== step.required_user_role) {
-      return false;
-    }
-
-    const assignment = await prisma.userRoleAssignment.findUnique({
-      where: { userId: req.userId },
-      include: { roleProfile: { select: { key: true, organizationId: true } } },
-    });
-    const roleProfileKey =
-      assignment && assignment.roleProfile.organizationId === req.organizationId
-        ? assignment.roleProfile.key
-        : null;
-
-    // Billing/approval admins can approve org-wide.
-    if (roleProfileKey === "BILLING_ADMIN" || roleProfileKey === "APPROVAL_ADMIN") {
-      return true;
-    }
-
-    if (step.required_role_profile_key && roleProfileKey !== step.required_role_profile_key) {
-      return false;
-    }
-
-    if (
-      !step.allow_self_approval &&
-      requestedByUserId &&
-      requestedByUserId === req.userId
-    ) {
-      return false;
-    }
-
-    const scopeType = step.approver_scope_type ?? "ROLE_PROFILE";
-    const scopeValue = step.approver_scope_value ?? null;
-
-    if (scopeType === "SELF") {
-      return requestedByUserId === req.userId;
-    }
-    if (scopeType === "USER") {
-      return !!scopeValue && req.userId === scopeValue;
-    }
-    if (scopeType === "GROUP") {
-      if (!scopeValue) return false;
-      const member = await prisma.approvalGroupMember.findFirst({
-        where: {
-          organizationId: req.organizationId,
-          groupId: scopeValue,
-          userId: req.userId,
-        },
-      });
-      return !!member;
-    }
-    if (scopeType === "TEAM") {
-      if (!scopeValue) return false;
-      if (roleProfileKey === "TEAM_APPROVAL_ADMIN") {
-        const scope = await prisma.teamApprovalAdminScope.findFirst({
-          where: {
-            organizationId: req.organizationId,
-            userId: req.userId,
-            teamKey: scopeValue,
-          },
-        });
-        return !!scope;
-      }
-      return roleProfileKey === scopeValue;
-    }
-
-    // ROLE_PROFILE (default)
-    if (!scopeValue) {
-      return !!roleProfileKey;
-    }
-    return roleProfileKey === scopeValue;
-  }
-
-  // All landing page routes require the feature to be enabled
   router.use(requireLandingPagesEnabled(prisma));
 
   // ── CREATE ──────────────────────────────────────────────────────────
@@ -389,13 +185,13 @@ export function createLandingPageRoutes(
         return;
       }
 
-      const canAccessAccount = await accessService.canAccessAccount(
+      const canAccess = await accessService.canAccessAccount(
         req.userId,
         req.organizationId,
         story.accountId,
         req.userRole as UserRole | undefined
       );
-      if (!canAccessAccount) {
+      if (!canAccess) {
         res.status(403).json({
           error: "permission_denied",
           message: "You do not have access to this account.",
@@ -405,14 +201,14 @@ export function createLandingPageRoutes(
 
       let namedPageAllowed = false;
       if (include_company_name === true) {
-        namedPageAllowed = await canGenerateNamedStories(req);
+        namedPageAllowed = await canGenerateNamedStories(prisma, roleProfiles, reqParams(req));
       }
 
       try {
         const pageId = await editor.create({
           storyId: story_id,
-          organizationId: req.organizationId!,
-          createdById: req.userId!,
+          organizationId: req.organizationId,
+          createdById: req.userId,
           title,
           subtitle,
           heroImageUrl: hero_image_url,
@@ -422,7 +218,7 @@ export function createLandingPageRoutes(
 
         const page = await editor.getForEditing(pageId);
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "PUBLISH",
           action: "PAGE_CREATED",
@@ -460,7 +256,7 @@ export function createLandingPageRoutes(
     async (req: AuthReq, res: Response) => {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+        if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
           res.status(403).json({
             error: "permission_denied",
             message: "Your role cannot access named stories.",
@@ -512,7 +308,7 @@ export function createLandingPageRoutes(
     async (req: AuthReq, res: Response) => {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+        if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
           res.status(403).json({
             error: "permission_denied",
             message: "Your role cannot access named stories.",
@@ -520,7 +316,7 @@ export function createLandingPageRoutes(
           return;
         }
 
-        const canPublishNamed = await canGenerateNamedStories(req);
+        const canPublishNamed = await canGenerateNamedStories(prisma, roleProfiles, reqParams(req));
 
         res.json({
           pageId: page.id,
@@ -548,7 +344,7 @@ export function createLandingPageRoutes(
     async (req: AuthReq, res: Response) => {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+        if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
           res.status(403).json({
             error: "permission_denied",
             message: "Your role cannot access named stories.",
@@ -577,7 +373,7 @@ export function createLandingPageRoutes(
     async (req: AuthReq, res: Response) => {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+        if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
           res.status(403).json({
             error: "permission_denied",
             message: "Your role cannot access named stories.",
@@ -611,7 +407,7 @@ export function createLandingPageRoutes(
 
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+        if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
           res.status(403).json({
             error: "permission_denied",
             message: "Your role cannot access named stories.",
@@ -619,7 +415,7 @@ export function createLandingPageRoutes(
           return;
         }
 
-        const updated = await editor.update(req.params.pageId as string, req.userId!, {
+        const updated = await editor.update(req.params.pageId as string, req.userId, {
           title: parse.data.title,
           subtitle: parse.data.subtitle,
           editableBody: parse.data.editable_body,
@@ -718,14 +514,14 @@ export function createLandingPageRoutes(
           return;
         }
         const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canGenerateNamedStories(req))) {
+        if (page.includeCompanyName && !(await canGenerateNamedStories(prisma, roleProfiles, reqParams(req)))) {
           res.status(403).json({
             error: "permission_denied",
             message: "Your role cannot generate named stories.",
           });
           return;
         }
-        const governance = await getArtifactPublishGovernance(req.organizationId);
+        const governance = await getArtifactPublishGovernance(prisma, req.organizationId);
         if (governance.approvalChainEnabled && governance.steps.length > 0) {
           res.status(409).json({
             error: "approval_chain_enabled",
@@ -830,7 +626,7 @@ export function createLandingPageRoutes(
           return;
         }
         const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canGenerateNamedStories(req))) {
+        if (page.includeCompanyName && !(await canGenerateNamedStories(prisma, roleProfiles, reqParams(req)))) {
           res.status(403).json({
             error: "permission_denied",
             message: "Your role cannot generate named stories.",
@@ -838,7 +634,7 @@ export function createLandingPageRoutes(
           return;
         }
 
-        const governance = await getArtifactPublishGovernance(req.organizationId);
+        const governance = await getArtifactPublishGovernance(prisma, req.organizationId);
         if (parse.data.expires_at && governance.maxExpirationDays) {
           const expiresAt = new Date(parse.data.expires_at);
           const maxDate = new Date();
@@ -938,7 +734,7 @@ export function createLandingPageRoutes(
         });
         await clearScheduledPublish(req.params.pageId as string);
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "PUBLISH",
           action: "PAGE_PUBLISHED",
@@ -1156,7 +952,7 @@ export function createLandingPageRoutes(
 
         if (
           currentStep &&
-          !(await canUserApproveStep(req, currentStep, request.requestedByUserId))
+          !(await canUserApproveStep(prisma, reqParams(req), currentStep, request.requestedByUserId))
         ) {
           res.status(403).json({
             error: "permission_denied",
@@ -1245,7 +1041,7 @@ export function createLandingPageRoutes(
         };
 
         const page = await editor.getForEditing(request.targetId);
-        const governance = await getArtifactPublishGovernance(req.organizationId);
+        const governance = await getArtifactPublishGovernance(prisma, req.organizationId);
         if (publishOptions.expires_at && governance.maxExpirationDays) {
           const expiresAt = new Date(publishOptions.expires_at);
           const maxDate = new Date();
@@ -1258,7 +1054,7 @@ export function createLandingPageRoutes(
             return;
           }
         }
-        if (page.includeCompanyName && !(await canGenerateNamedStories(req))) {
+        if (page.includeCompanyName && !(await canGenerateNamedStories(prisma, roleProfiles, reqParams(req)))) {
           res.status(403).json({
             error: "permission_denied",
             message: "Your role cannot generate named stories.",
@@ -1374,7 +1170,7 @@ export function createLandingPageRoutes(
     async (req: AuthReq, res: Response) => {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+        if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
           res.status(403).json({
             error: "permission_denied",
             message: "Your role cannot access named stories.",
@@ -1385,7 +1181,7 @@ export function createLandingPageRoutes(
         await editor.unpublish(req.params.pageId as string);
         await clearScheduledPublish(req.params.pageId as string);
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "PUBLISH",
           action: "PAGE_UNPUBLISHED",
@@ -1411,7 +1207,7 @@ export function createLandingPageRoutes(
     async (req: AuthReq, res: Response) => {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canAccessNamedStories(req))) {
+        if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
           res.status(403).json({
             error: "permission_denied",
             message: "Your role cannot access named stories.",
@@ -1422,7 +1218,7 @@ export function createLandingPageRoutes(
         await editor.archive(req.params.pageId as string);
         await clearScheduledPublish(req.params.pageId as string);
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "PUBLISH",
           action: "PAGE_ARCHIVED",
@@ -1447,16 +1243,14 @@ export function createLandingPageRoutes(
     requirePermission(prisma, "delete_any"),
     async (req: AuthReq, res: Response) => {
       try {
-        // SECURITY: Ensure the page belongs to the authenticated user's org
-        // to prevent cross-organization deletion
         const page = await prisma.landingPage.findFirst({
-          where: { id: req.params.pageId as string, organizationId: req.organizationId! },
+          where: { id: req.params.pageId as string, organizationId: req.organizationId },
         });
         if (!page) {
           res.status(404).json({ error: "Landing page not found" });
           return;
         }
-        if (await isLegalHoldEnabled(prisma, req.organizationId!)) {
+        if (await isLegalHoldEnabled(prisma, req.organizationId)) {
           res.status(423).json({
             error: "legal_hold_active",
             message:
@@ -1468,7 +1262,7 @@ export function createLandingPageRoutes(
         await clearScheduledPublish(page.id);
         await prisma.landingPage.delete({ where: { id: page.id } });
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "PUBLISH",
           action: "PAGE_DELETED",

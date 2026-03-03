@@ -67,7 +67,7 @@ export function registerArtifactGovernanceRoutes({
     async (req: AuthReq, res: Response) => {
       try {
         const policy = await prisma.artifactGovernancePolicy.findUnique({
-          where: { organizationId: req.organizationId! },
+          where: { organizationId: req.organizationId },
           include: {
             approvalSteps: {
               orderBy: { stepOrder: "asc" },
@@ -120,9 +120,9 @@ export function registerArtifactGovernanceRoutes({
       try {
         const d = payload;
         const policy = await prisma.artifactGovernancePolicy.upsert({
-          where: { organizationId: req.organizationId! },
+          where: { organizationId: req.organizationId },
           create: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             artifactType: "LANDING_PAGE",
             approvalChainEnabled: d.approval_chain_enabled ?? false,
             maxExpirationDays: d.max_expiration_days ?? null,
@@ -136,7 +136,7 @@ export function registerArtifactGovernanceRoutes({
         });
 
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "POLICY",
           action: "ARTIFACT_GOVERNANCE_POLICY_UPDATED",
@@ -169,7 +169,7 @@ export function registerArtifactGovernanceRoutes({
         return;
       }
 
-      const orgId = req.organizationId!;
+      const orgId = req.organizationId;
 
       try {
         const duplicateOrders = new Set<number>();
@@ -249,7 +249,7 @@ export function registerArtifactGovernanceRoutes({
     async (req: AuthReq, res: Response) => {
       try {
         const groups = await prisma.approvalGroup.findMany({
-          where: { organizationId: req.organizationId! },
+          where: { organizationId: req.organizationId },
           include: {
             members: {
               include: {
@@ -295,7 +295,7 @@ export function registerArtifactGovernanceRoutes({
       try {
         const group = await prisma.approvalGroup.create({
           data: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             name: payload.name.trim(),
             description: payload.description?.trim() || null,
             ownerUserId: req.userId ?? null,
@@ -323,14 +323,14 @@ export function registerArtifactGovernanceRoutes({
       }
       try {
         const group = await prisma.approvalGroup.findFirst({
-          where: { id: req.params.groupId as string, organizationId: req.organizationId! },
+          where: { id: req.params.groupId as string, organizationId: req.organizationId },
         });
         if (!group) {
           res.status(404).json({ error: "Approval group not found" });
           return;
         }
         const user = await prisma.user.findFirst({
-          where: { id: payload.user_id, organizationId: req.organizationId! },
+          where: { id: payload.user_id, organizationId: req.organizationId },
         });
         if (!user) {
           res.status(404).json({ error: "User not found" });
@@ -345,7 +345,7 @@ export function registerArtifactGovernanceRoutes({
             },
           },
           create: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             groupId: group.id,
             userId: user.id,
           },
@@ -367,7 +367,7 @@ export function registerArtifactGovernanceRoutes({
       try {
         const deleted = await prisma.approvalGroupMember.deleteMany({
           where: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             groupId: req.params.groupId as string,
             userId: req.params.userId as string,
           },
@@ -386,7 +386,7 @@ export function registerArtifactGovernanceRoutes({
     async (req: AuthReq, res: Response) => {
       try {
         const rows = await prisma.teamApprovalAdminScope.findMany({
-          where: { organizationId: req.organizationId! },
+          where: { organizationId: req.organizationId },
           include: { user: { select: { id: true, name: true, email: true } } },
           orderBy: [{ userId: "asc" }, { teamKey: "asc" }],
         });
@@ -424,7 +424,7 @@ export function registerArtifactGovernanceRoutes({
       try {
         const userId = req.params.userId as string;
         const user = await prisma.user.findFirst({
-          where: { id: userId, organizationId: req.organizationId! },
+          where: { id: userId, organizationId: req.organizationId },
         });
         if (!user) {
           res.status(404).json({ error: "User not found" });
@@ -432,12 +432,12 @@ export function registerArtifactGovernanceRoutes({
         }
         await prisma.$transaction(async (tx) => {
           await tx.teamApprovalAdminScope.deleteMany({
-            where: { organizationId: req.organizationId!, userId },
+            where: { organizationId: req.organizationId, userId },
           });
           if (payload.team_keys.length > 0) {
             await tx.teamApprovalAdminScope.createMany({
               data: payload.team_keys.map((teamKey) => ({
-                organizationId: req.organizationId!,
+                organizationId: req.organizationId,
                 userId,
                 teamKey,
               })),

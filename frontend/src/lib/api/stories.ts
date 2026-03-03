@@ -4,7 +4,7 @@ import type {
   StoryComment,
   StoryLibraryItem,
   StorySummary,
-} from "../api";
+} from "./types";
 import { BASE_URL, buildRequestHeaders, request } from "./http";
 
 export async function buildStory(

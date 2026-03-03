@@ -38,7 +38,7 @@ export function registerBillingReadinessRoutes({
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        const organizationId = req.organizationId!;
+        const organizationId = req.organizationId;
         const [org, users, subscription, usageLast30] = await Promise.all([
           prisma.organization.findUnique({
             where: { id: organizationId },
@@ -156,7 +156,7 @@ export function registerBillingReadinessRoutes({
         return;
       }
       try {
-        const organizationId = req.organizationId!;
+        const organizationId = req.organizationId;
         await prisma.organization.update({
           where: { id: organizationId },
           data: { seatLimit: payload.seat_limit },
@@ -190,7 +190,7 @@ export function registerBillingReadinessRoutes({
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        const organizationId = req.organizationId!;
+        const organizationId = req.organizationId;
         const [usageRecords, calls] = await Promise.all([
           prisma.usageRecord.findMany({
             where: {

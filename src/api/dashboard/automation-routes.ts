@@ -156,7 +156,7 @@ export function registerAutomationRoutes({
     async (req: AuthReq, res: Response) => {
       try {
         const rules = await prisma.automationRule.findMany({
-          where: { organizationId: req.organizationId! },
+          where: { organizationId: req.organizationId },
           orderBy: { updatedAt: "desc" },
         });
         res.json({
@@ -195,7 +195,7 @@ export function registerAutomationRoutes({
       try {
         const reports = await prisma.sharedAsset.findMany({
           where: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             assetType: "REPORT",
           },
           orderBy: { createdAt: "desc" },
@@ -238,7 +238,7 @@ export function registerAutomationRoutes({
         const asset = await prisma.sharedAsset.findFirst({
           where: {
             id: String(req.params.assetId),
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             assetType: "REPORT",
           },
         });
@@ -291,7 +291,7 @@ export function registerAutomationRoutes({
         const d = payload;
         const rule = await prisma.automationRule.create({
           data: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             name: d.name,
             description: d.description,
             enabled: d.enabled,
@@ -309,7 +309,7 @@ export function registerAutomationRoutes({
           },
         });
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "AUTOMATION",
           action: "AUTOMATION_RULE_CREATED",
@@ -338,7 +338,7 @@ export function registerAutomationRoutes({
       try {
         const ruleId = String(req.params.ruleId);
         const existing = await prisma.automationRule.findFirst({
-          where: { id: ruleId, organizationId: req.organizationId! },
+          where: { id: ruleId, organizationId: req.organizationId },
         });
         if (!existing) {
           res.status(404).json({ error: "automation_rule_not_found" });
@@ -379,7 +379,7 @@ export function registerAutomationRoutes({
       try {
         const ruleId = String(req.params.ruleId);
         const existing = await prisma.automationRule.findFirst({
-          where: { id: ruleId, organizationId: req.organizationId! },
+          where: { id: ruleId, organizationId: req.organizationId },
         });
         if (!existing) {
           res.status(404).json({ error: "automation_rule_not_found" });
@@ -401,7 +401,7 @@ export function registerAutomationRoutes({
       try {
         const ruleId = String(req.params.ruleId);
         const rule = await prisma.automationRule.findFirst({
-          where: { id: ruleId, organizationId: req.organizationId! },
+          where: { id: ruleId, organizationId: req.organizationId },
         });
         if (!rule) {
           res.status(404).json({ error: "automation_rule_not_found" });
@@ -421,16 +421,16 @@ export function registerAutomationRoutes({
             })
           ) {
             reportAsset = await createScheduledReportAsset(prisma, {
-              organizationId: req.organizationId!,
-              actorUserId: req.userId!,
+              organizationId: req.organizationId,
+              actorUserId: req.userId,
               ruleId: rule.id,
               ruleName: rule.name,
             });
           }
           await prisma.notification.create({
             data: {
-              organizationId: req.organizationId!,
-              userId: req.userId!,
+              organizationId: req.organizationId,
+              userId: req.userId,
               type: "SYSTEM_ALERT",
               title: `Automation fired: ${rule.name}`,
               body: reportAsset
@@ -446,7 +446,7 @@ export function registerAutomationRoutes({
           });
           if (reportAsset) {
             await dispatchOutboundWebhookEvent(prisma, {
-              organizationId: req.organizationId!,
+              organizationId: req.organizationId,
               eventType: "scheduled_report_generated",
               payload: {
                 report_asset_id: reportAsset.assetId,
@@ -475,7 +475,7 @@ export function registerAutomationRoutes({
           },
         });
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "AUTOMATION",
           action:

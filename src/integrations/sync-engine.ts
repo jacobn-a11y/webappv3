@@ -27,6 +27,7 @@ import {
 } from "../services/entity-resolution.js";
 import { decodeCredentials } from "../types/json-boundaries.js";
 import { resolveIntegrationProviderSelection } from "../services/provider-policy.js";
+import logger from "../lib/logger.js";
 import type {
   CallRecordingProvider,
   CRMDataProvider,
@@ -38,6 +39,7 @@ import type {
   ProviderRegistry,
 } from "./types.js";
 import { coerceProviderCredentials } from "./types.js";
+import type { SalesforceProvider } from "./salesforce-provider.js";
 
 // ─── Sync Engine ────────────────────────────────────────────────────────────
 
@@ -234,9 +236,9 @@ export class SyncEngine {
           idempotencyKey: `scheduled:${config.id}:${hourBucket}`,
         });
       } catch (err) {
-        console.error(
-          `Sync failed for ${config.provider} (org: ${config.organizationId}):`,
-          err
+        logger.error(
+          `Sync failed for ${config.provider} (org: ${config.organizationId})`,
+          { error: err }
         );
         await this.prisma.integrationConfig.update({
           where: { id: config.id },
@@ -499,7 +501,7 @@ export class SyncEngine {
     });
 
     if (totalSynced > 0) {
-      console.log(
+      logger.info(
         `Synced ${totalSynced} calls from ${provider.name} for org ${config.organizationId}`
       );
     }
@@ -722,6 +724,23 @@ export class SyncEngine {
     provider: CRMDataProvider,
     credentials: ProviderCredentials
   ): Promise<number> {
+    // Wire up token persistence for providers that support refresh
+    if ("setTokenRefreshCallback" in provider && typeof (provider as SalesforceProvider).setTokenRefreshCallback === "function") {
+      (provider as SalesforceProvider).setTokenRefreshCallback(async (newAccessToken) => {
+        const existing = await this.prisma.integrationConfig.findUnique({
+          where: { id: config.id },
+        });
+        if (existing) {
+          const creds = existing.credentials as Record<string, unknown>;
+          creds.accessToken = newAccessToken;
+          await this.prisma.integrationConfig.update({
+            where: { id: config.id },
+            data: { credentials: creds },
+          });
+        }
+      });
+    }
+
     // Sync accounts first (contacts reference them)
     const accountCount = await this.syncAccounts(config, provider, credentials);
     const contactCount = await this.syncContacts(config, provider, credentials);

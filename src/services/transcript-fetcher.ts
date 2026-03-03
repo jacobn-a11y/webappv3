@@ -17,6 +17,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { Queue } from "bullmq";
 import type { ProcessCallJob } from "./transcript-processor.js";
 import { enqueueProcessCallJob } from "../lib/queue-policy.js";
+import logger from "../lib/logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -142,7 +143,7 @@ export class TranscriptFetcher {
     });
 
     if (existing) {
-      console.log(
+      logger.info(
         `Transcript already exists for call ${callId}, re-queuing processing`
       );
       await this.enqueueProcessing(job);
@@ -150,7 +151,7 @@ export class TranscriptFetcher {
     }
 
     // ── Poll Merge.dev API ───────────────────────────────────────────
-    console.log(
+    logger.info(
       `Polling Merge.dev for transcript: recording=${mergeRecordingId} ` +
         `provider=${provider} call=${callId}`
     );
@@ -176,7 +177,7 @@ export class TranscriptFetcher {
       },
     });
 
-    console.log(
+    logger.info(
       `Transcript fetched for call ${callId} from ${provider} ` +
         `(${recording.transcript.split(/\s+/).length} words)`
     );
@@ -245,7 +246,7 @@ export class TranscriptFetcher {
       source: "transcript-fetcher",
     });
 
-    console.log(
+    logger.info(
       `Re-queued call ${job.callId} for processing after transcript fetch`
     );
   }

@@ -1,4 +1,4 @@
-import type { AuthUser } from "../api";
+import type { AuthUser } from "./types";
 
 export const BASE_URL = "/api";
 const SUPPORT_IMPERSONATION_TOKEN_KEY = "support_impersonation_token";

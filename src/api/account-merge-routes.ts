@@ -17,6 +17,7 @@ import { Prisma } from "@prisma/client";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import { AccountMergeService } from "../services/account-merge.js";
 import { requirePermission } from "../middleware/permissions.js";
+import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -80,7 +81,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
           total: candidates.length,
         });
       } catch (err) {
-        console.error("Find duplicates error:", err);
+        logger.error("Find duplicates error", { error: err });
         res.status(500).json({ error: "Failed to scan for duplicate accounts" });
       }
     }
@@ -143,7 +144,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
           res.status(404).json({ error: "account_not_found", message });
           return;
         }
-        console.error("Merge preview error:", err);
+        logger.error("Merge preview error", { error: err });
         res.status(500).json({ error: "Failed to load merge preview" });
       }
     }
@@ -216,7 +217,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
           res.status(404).json({ error: "account_not_found", message });
           return;
         }
-        console.error("Merge request error:", err);
+        logger.error("Merge request error", { error: err });
         res.status(500).json({ error: "Failed to create merge approval request" });
       }
     }
@@ -258,7 +259,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
           })),
         });
       } catch (err) {
-        console.error("List merge requests error:", err);
+        logger.error("List merge requests error", { error: err });
         res.status(500).json({ error: "Failed to list merge requests" });
       }
     }
@@ -354,7 +355,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
           res.status(404).json({ error: "account_not_found", message });
           return;
         }
-        console.error("Review merge request error:", err);
+        logger.error("Review merge request error", { error: err });
         res.status(500).json({ error: "Failed to review merge request" });
       }
     }
@@ -414,7 +415,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
           res.status(404).json({ error: "account_not_found", message });
           return;
         }
-        console.error("Merge execution error:", err);
+        logger.error("Merge execution error", { error: err });
         res.status(500).json({ error: "Failed to merge accounts" });
       }
     }
@@ -447,7 +448,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
           })),
         });
       } catch (err) {
-        console.error("List merge runs error:", err);
+        logger.error("List merge runs error", { error: err });
         res.status(500).json({ error: "Failed to list merge runs" });
       }
     }
@@ -483,7 +484,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
           res.status(404).json({ error: "merge_run_not_found", message });
           return;
         }
-        console.error("Undo merge run error:", err);
+        logger.error("Undo merge run error", { error: err });
         res.status(500).json({ error: "Failed to undo merge run" });
       }
     }

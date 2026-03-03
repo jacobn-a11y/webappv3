@@ -1,4 +1,4 @@
-import type { PlatformSettings, SupportAccountInfo, TenantOverview } from "../api";
+import type { PlatformSettings, SupportAccountInfo, TenantOverview } from "./types";
 import { request } from "./http";
 
 export async function getPlatformSettings(): Promise<PlatformSettings> {

@@ -102,7 +102,7 @@ export function registerAccessControlRoutes({
     async (req: AuthReq, res: Response) => {
       try {
         const matrix = await permManager.getOrgPermissionMatrix(
-          req.organizationId!
+          req.organizationId
         );
         res.json({ users: matrix });
       } catch (err) {
@@ -119,11 +119,11 @@ export function registerAccessControlRoutes({
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        await roleProfiles.ensurePresetRoles(req.organizationId!);
+        await roleProfiles.ensurePresetRoles(req.organizationId);
 
         const [roles, users] = await Promise.all([
           prisma.roleProfile.findMany({
-            where: { organizationId: req.organizationId! },
+            where: { organizationId: req.organizationId },
             orderBy: [{ isPreset: "desc" }, { name: "asc" }],
             include: {
               assignments: {
@@ -135,7 +135,7 @@ export function registerAccessControlRoutes({
             },
           }),
           prisma.user.findMany({
-            where: { organizationId: req.organizationId! },
+            where: { organizationId: req.organizationId },
             select: {
               id: true,
               name: true,
@@ -177,7 +177,7 @@ export function registerAccessControlRoutes({
         const d = payload;
         const role = await prisma.roleProfile.create({
           data: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             key: d.key,
             name: d.name,
             description: d.description,
@@ -215,7 +215,7 @@ export function registerAccessControlRoutes({
 
       try {
         const existing = await prisma.roleProfile.findFirst({
-          where: { id: req.params.roleId as string, organizationId: req.organizationId! },
+          where: { id: req.params.roleId as string, organizationId: req.organizationId },
         });
         if (!existing) {
           res.status(404).json({ error: "Role profile not found" });
@@ -262,7 +262,7 @@ export function registerAccessControlRoutes({
     async (req: AuthReq, res: Response) => {
       try {
         const role = await prisma.roleProfile.findFirst({
-          where: { id: req.params.roleId as string, organizationId: req.organizationId! },
+          where: { id: req.params.roleId as string, organizationId: req.organizationId },
         });
         if (!role) {
           res.status(404).json({ error: "Role profile not found" });
@@ -296,13 +296,13 @@ export function registerAccessControlRoutes({
 
       try {
         await roleProfiles.assignRoleToUser(
-          req.organizationId!,
+          req.organizationId,
           payload.user_id,
           payload.role_profile_id,
           req.userId
         );
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "PERMISSION",
           action: "ROLE_PROFILE_ASSIGNED",
@@ -341,10 +341,10 @@ export function registerAccessControlRoutes({
         await permManager.grantPermission(
           payload.user_id,
           payload.permission as PermissionType,
-          req.userId!
+          req.userId
         );
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "PERMISSION",
           action: "USER_PERMISSION_GRANTED",
@@ -383,7 +383,7 @@ export function registerAccessControlRoutes({
           payload.permission as PermissionType
         );
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "PERMISSION",
           action: "USER_PERMISSION_REVOKED",

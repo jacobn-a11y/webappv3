@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import type { AuditLogService } from "../../services/audit-log.js";
 import logger from "../../lib/logger.js";
-import { respondAuthRequired } from "../_shared/errors.js";
+import { sendUnauthorized } from "../_shared/responses.js";
 import { parseRequestBody } from "../_shared/validators.js";
 
 const WorkspaceTeamSchema = z.enum(["REVOPS", "MARKETING", "SALES", "CS"]);
@@ -53,7 +53,7 @@ export function registerCollaborationRoutes({
 
   router.get("/workspaces", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     try {
@@ -113,7 +113,7 @@ export function registerCollaborationRoutes({
 
   router.post("/workspaces", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     const payload = parseRequestBody(UpsertWorkspaceSchema, req.body, res);
@@ -156,7 +156,7 @@ export function registerCollaborationRoutes({
 
   router.patch("/workspaces/:workspaceId", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     const payload = parseRequestBody(UpsertWorkspaceSchema, req.body, res);
@@ -213,7 +213,7 @@ export function registerCollaborationRoutes({
 
   router.delete("/workspaces/:workspaceId", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     try {
@@ -254,7 +254,7 @@ export function registerCollaborationRoutes({
 
   router.get("/assets", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     try {
@@ -303,7 +303,7 @@ export function registerCollaborationRoutes({
 
   router.post("/assets", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     const payload = parseRequestBody(UpsertSharedAssetSchema, req.body, res);
@@ -357,7 +357,7 @@ export function registerCollaborationRoutes({
 
   router.patch("/assets/:assetId", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     const payload = parseRequestBody(UpsertSharedAssetSchema, req.body, res);
@@ -404,7 +404,7 @@ export function registerCollaborationRoutes({
 
   router.delete("/assets/:assetId", async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     try {

@@ -13,6 +13,7 @@ import type { PrismaClient, UserRole } from "@prisma/client";
 import { requirePermission } from "../middleware/permissions.js";
 import { isBillingEnabled } from "../middleware/billing.js";
 import { buildPublicAppUrl } from "../lib/public-app-url.js";
+import logger from "../lib/logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ export function createBillingRoutes(
 
         res.json({ billing });
       } catch (err) {
-        console.error("Get billing error:", err);
+        logger.error("Get billing error", { error: err });
         res.status(500).json({ error: "Failed to load billing info" });
       }
     }
@@ -112,7 +113,7 @@ export function createBillingRoutes(
     async (req: AuthReq, res: Response) => {
       try {
         const org = await prisma.organization.findUnique({
-          where: { id: req.organizationId! },
+          where: { id: req.organizationId },
         });
 
         if (!org) {
@@ -143,7 +144,7 @@ export function createBillingRoutes(
         // Sum call durations (seconds) from the current period
         const result = await prisma.call.aggregate({
           where: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             occurredAt: { gte: periodStart },
             duration: { not: null },
           },
@@ -162,7 +163,7 @@ export function createBillingRoutes(
           },
         });
       } catch (err) {
-        console.error("Get usage error:", err);
+        logger.error("Get usage error", { error: err });
         res.status(500).json({ error: "Failed to load usage data" });
       }
     }
@@ -183,7 +184,7 @@ export function createBillingRoutes(
     async (req: AuthReq, res: Response) => {
       try {
         const org = await prisma.organization.findUnique({
-          where: { id: req.organizationId! },
+          where: { id: req.organizationId },
         });
 
         if (!org) {
@@ -214,7 +215,7 @@ export function createBillingRoutes(
 
         res.json({ portalUrl: session.url });
       } catch (err) {
-        console.error("Create portal session error:", err);
+        logger.error("Create portal session error", { error: err });
         res.status(500).json({ error: "Failed to create billing portal session" });
       }
     }

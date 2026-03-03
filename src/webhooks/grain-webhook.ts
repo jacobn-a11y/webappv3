@@ -16,7 +16,7 @@
 
 import type { Request, Response } from "express";
 import crypto from "crypto";
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type { Queue } from "bullmq";
 import { GrainProvider } from "../integrations/grain-provider.js";
 import type { GrainCredentials } from "../integrations/types.js";
@@ -203,7 +203,8 @@ async function handleRecordingReady(
   // Fetch full recording details including transcript
   const transcript = await provider.fetchTranscript(credentials, recordingId);
 
-  // Check if this call already exists
+  // Upsert to avoid race conditions between concurrent webhook deliveries
+  let call: Awaited<ReturnType<typeof prisma.call.findFirst>>;
   const existing = await prisma.call.findFirst({
     where: {
       organizationId,
@@ -212,12 +213,11 @@ async function handleRecordingReady(
     },
   });
 
-  const call = existing
-    ? await prisma.call.update({
-        where: { id: existing.id },
-        data: {},
-      })
-    : await prisma.call.create({
+  if (existing) {
+    call = existing;
+  } else {
+    try {
+      call = await prisma.call.create({
         data: {
           organizationId,
           provider: "GRAIN",
@@ -225,6 +225,16 @@ async function handleRecordingReady(
           occurredAt: new Date(),
         },
       });
+    } catch (err: unknown) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        call = await prisma.call.findFirstOrThrow({
+          where: { organizationId, provider: "GRAIN", externalId: recordingId },
+        });
+      } else {
+        throw err;
+      }
+    }
+  }
 
   // Store transcript
   if (transcript) {

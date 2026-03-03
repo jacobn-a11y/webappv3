@@ -14,6 +14,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient, UserRole, FunnelStage } from "@prisma/client";
 import { AccountsListService } from "../services/accounts-list.js";
+import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -119,7 +120,7 @@ export function createAccountsRoutes(prisma: PrismaClient): Router {
 
       res.json(result);
     } catch (err) {
-      console.error("Accounts list error:", err);
+      logger.error("Accounts list error", { error: err });
       res.status(500).json({ error: "Failed to load accounts" });
     }
   });

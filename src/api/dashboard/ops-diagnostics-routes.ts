@@ -94,7 +94,7 @@ export function registerOpsDiagnosticsRoutes({
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        const organizationId = req.organizationId!;
+        const organizationId = req.organizationId;
         const configs = await prisma.integrationConfig.findMany({
           where: { organizationId },
           select: {
@@ -169,7 +169,7 @@ export function registerOpsDiagnosticsRoutes({
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        const organizationId = req.organizationId!;
+        const organizationId = req.organizationId;
 
         const [
           integrationConfigs,
@@ -296,7 +296,7 @@ export function registerOpsDiagnosticsRoutes({
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        const organizationId = req.organizationId!;
+        const organizationId = req.organizationId;
         const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
         const [runs24h, failedByProvider, configs] = await Promise.all([
@@ -453,7 +453,7 @@ export function registerOpsDiagnosticsRoutes({
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        const organizationId = req.organizationId!;
+        const organizationId = req.organizationId;
         const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
         const [runs, pendingApprovals, failedBackfills] = await Promise.all([
@@ -533,7 +533,7 @@ export function registerOpsDiagnosticsRoutes({
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        const organizationId = req.organizationId!;
+        const organizationId = req.organizationId;
         const windowHoursRaw = readQueryString(req.query.window_hours);
         const parsedWindowHours = windowHoursRaw ? Number.parseInt(windowHoursRaw, 10) : 24;
         const windowHours =
@@ -808,7 +808,7 @@ export function registerOpsDiagnosticsRoutes({
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        const organizationId = req.organizationId!;
+        const organizationId = req.organizationId;
         const settings = await prisma.orgSettings.findUnique({
           where: { organizationId },
           select: { dataGovernancePolicy: true },
@@ -889,7 +889,7 @@ export function registerOpsDiagnosticsRoutes({
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        const organizationId = req.organizationId!;
+        const organizationId = req.organizationId;
         const [accountCount, callCount, storyCount, pageCount] = await Promise.all([
           prisma.account.count({ where: { organizationId } }),
           prisma.call.count({ where: { organizationId } }),
@@ -929,7 +929,7 @@ export function registerOpsDiagnosticsRoutes({
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
       try {
-        const organizationId = req.organizationId!;
+        const organizationId = req.organizationId;
         const [accountCount, callCount, storyCount] = await Promise.all([
           prisma.account.count({ where: { organizationId } }),
           prisma.call.count({ where: { organizationId } }),

@@ -20,6 +20,7 @@ import type { PrismaClient, UserRole } from "@prisma/client";
 import { AnalyticsService, type AnalyticsDashboardData } from "../services/analytics.js";
 import { requirePermission } from "../middleware/permissions.js";
 import { ResponseCache } from "../lib/response-cache.js";
+import logger from "../lib/logger.js";
 
 interface AuthReq extends Request {
   organizationId?: string;
@@ -52,7 +53,7 @@ export function createAnalyticsRoutes(prisma: PrismaClient): Router {
       );
       res.json(data);
     } catch (err) {
-      console.error("Analytics data error:", err);
+      logger.error("Analytics data error", { error: err });
       res.status(500).json({ error: "Failed to load analytics data" });
     }
   });
@@ -216,7 +217,7 @@ export function createAnalyticsRoutes(prisma: PrismaClient): Router {
         );
         res.json(payload);
       } catch (err) {
-        console.error("RevOps KPI analytics error:", err);
+        logger.error("RevOps KPI analytics error", { error: err });
         res.status(500).json({ error: "Failed to load RevOps KPI analytics" });
       }
     }
@@ -240,7 +241,7 @@ export function createAnalyticsRoutes(prisma: PrismaClient): Router {
       res.setHeader("Content-Type", "text/html");
       res.send(renderAnalyticsDashboard(data));
     } catch (err) {
-      console.error("Analytics dashboard error:", err);
+      logger.error("Analytics dashboard error", { error: err });
       res.status(500).json({ error: "Failed to render analytics dashboard" });
     }
   });

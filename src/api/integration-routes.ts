@@ -30,6 +30,7 @@ import {
   type DirectIntegrationProvider,
 } from "../services/provider-policy.js";
 import { decodeCredentials } from "../types/json-boundaries.js";
+import logger from "../lib/logger.js";
 
 // ─── Validation Schemas ─────────────────────────────────────────────────────
 
@@ -558,7 +559,7 @@ export function createIntegrationRoutes(
         idempotencyKey,
       })
       .catch((err) => {
-      console.error(`On-demand sync failed for ${provider}:`, err);
+      logger.error(`On-demand sync failed for ${provider}`, { error: err });
     });
     await auditLogs.record({
       organizationId,
@@ -809,7 +810,7 @@ export function createIntegrationRoutes(
         cursorOverride: parsed.data.cursor ?? null,
       })
       .catch((err) => {
-        console.error(`Backfill failed for ${provider}:`, err);
+        logger.error(`Backfill failed for ${provider}`, { error: err });
       });
 
     await auditLogs.record({

@@ -125,7 +125,7 @@ export function registerAdminSettingsRoutes({
     async (req: AuthReq, res: Response) => {
       try {
         const settings = await prisma.orgSettings.findUnique({
-          where: { organizationId: req.organizationId! },
+          where: { organizationId: req.organizationId },
         });
 
         res.json({
@@ -160,7 +160,7 @@ export function registerAdminSettingsRoutes({
       }
 
       try {
-        await permManager.updateOrgSettings(req.organizationId!, {
+        await permManager.updateOrgSettings(req.organizationId, {
           landingPagesEnabled: payload.landing_pages_enabled,
           defaultPageVisibility: payload.default_page_visibility,
           requireApprovalToPublish: payload.require_approval_to_publish,
@@ -185,7 +185,7 @@ export function registerAdminSettingsRoutes({
     async (req: AuthReq, res: Response) => {
       try {
         const settings = await prisma.orgSettings.findUnique({
-          where: { organizationId: req.organizationId! },
+          where: { organizationId: req.organizationId },
           select: { storyContext: true, storyPromptDefaults: true },
         });
 
@@ -234,9 +234,9 @@ export function registerAdminSettingsRoutes({
       const d = payload;
       try {
         await prisma.orgSettings.upsert({
-          where: { organizationId: req.organizationId! },
+          where: { organizationId: req.organizationId },
           create: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             storyContext: {
               companyOverview: d.company_overview ?? "",
               products: d.products ?? [],
@@ -290,12 +290,12 @@ export function registerAdminSettingsRoutes({
           },
         });
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "POLICY",
           action: "STORY_CONTEXT_UPDATED",
           targetType: "org_settings",
-          targetId: req.organizationId!,
+          targetId: req.organizationId,
           severity: "WARN",
           metadata: { updated_fields: Object.keys(d) },
           ipAddress: req.ip,
@@ -317,7 +317,7 @@ export function registerAdminSettingsRoutes({
     async (req: AuthReq, res: Response) => {
       try {
         const settings = await prisma.orgSettings.findUnique({
-          where: { organizationId: req.organizationId! },
+          where: { organizationId: req.organizationId },
           select: { dataGovernancePolicy: true },
         });
         const policy = decodeDataGovernancePolicy(settings?.dataGovernancePolicy);
@@ -350,9 +350,9 @@ export function registerAdminSettingsRoutes({
       const d = payload;
       try {
         await prisma.orgSettings.upsert({
-          where: { organizationId: req.organizationId! },
+          where: { organizationId: req.organizationId },
           create: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             dataGovernancePolicy: {
               retention_days: d.retention_days ?? 365,
               audit_log_retention_days: d.audit_log_retention_days ?? 365,
@@ -380,12 +380,12 @@ export function registerAdminSettingsRoutes({
           },
         });
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "POLICY",
           action: "DATA_GOVERNANCE_POLICY_UPDATED",
           targetType: "org_settings",
-          targetId: req.organizationId!,
+          targetId: req.organizationId,
           severity: "WARN",
           metadata: { updated_fields: Object.keys(d) },
           ipAddress: req.ip,
@@ -414,12 +414,12 @@ export function registerAdminSettingsRoutes({
         const requests = await prisma.approvalRequest.findMany({
           where: isKnownStatus
             ? {
-                organizationId: req.organizationId!,
+                organizationId: req.organizationId,
                 requestType: "DATA_DELETION",
                 status,
               }
             : {
-                organizationId: req.organizationId!,
+                organizationId: req.organizationId,
                 requestType: "DATA_DELETION",
               },
           orderBy: { createdAt: "desc" },
@@ -470,7 +470,7 @@ export function registerAdminSettingsRoutes({
       }
 
       try {
-        const orgId = req.organizationId!;
+        const orgId = req.organizationId;
         const settings = await prisma.orgSettings.findUnique({
           where: { organizationId: orgId },
           select: { dataGovernancePolicy: true },
@@ -495,7 +495,7 @@ export function registerAdminSettingsRoutes({
               requestType: "DATA_DELETION",
               targetType: payload.target_type,
               targetId: payload.target_id,
-              requestedByUserId: req.userId!,
+              requestedByUserId: req.userId,
               status: "PENDING",
               requestPayload,
             },
@@ -564,7 +564,7 @@ export function registerAdminSettingsRoutes({
         const request = await prisma.approvalRequest.findFirst({
           where: {
             id: requestId,
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             requestType: "DATA_DELETION",
           },
         });
@@ -582,13 +582,13 @@ export function registerAdminSettingsRoutes({
             where: { id: request.id },
             data: {
               status: "REJECTED",
-              reviewerUserId: req.userId!,
+              reviewerUserId: req.userId,
               reviewNotes: payload.review_notes ?? null,
               reviewedAt: new Date(),
             },
           });
           await auditLogs.record({
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             actorUserId: req.userId,
             category: "GOVERNANCE",
             action: "DATA_DELETION_REJECTED",
@@ -605,7 +605,7 @@ export function registerAdminSettingsRoutes({
 
         const targetType = request.targetType as "CALL" | "STORY" | "LANDING_PAGE";
         const deleted = await deleteGovernedTarget(
-          req.organizationId!,
+          req.organizationId,
           targetType,
           request.targetId
         );
@@ -613,13 +613,13 @@ export function registerAdminSettingsRoutes({
           where: { id: request.id },
           data: {
             status: "COMPLETED",
-            reviewerUserId: req.userId!,
+            reviewerUserId: req.userId,
             reviewNotes: payload.review_notes ?? null,
             reviewedAt: new Date(),
           },
         });
         await auditLogs.record({
-          organizationId: req.organizationId!,
+          organizationId: req.organizationId,
           actorUserId: req.userId,
           category: "GOVERNANCE",
           action: "DATA_DELETION_APPROVED_AND_EXECUTED",

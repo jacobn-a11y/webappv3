@@ -1,4 +1,4 @@
-import type { AuthResponse, AuthUser, InviteSummary } from "../api";
+import type { AuthResponse, AuthUser, InviteSummary } from "./types";
 import {
   clearAuthState,
   getSessionToken,

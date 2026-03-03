@@ -21,6 +21,7 @@ import type { PrismaClient, UserRole } from "@prisma/client";
 import { EntityResolutionQueueService } from "../services/entity-resolution-queue.js";
 import { parseBoundedLimit, PAGINATION_LIMITS } from "../lib/pagination.js";
 import { requirePermission } from "../middleware/permissions.js";
+import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -98,7 +99,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
 
         res.json(result);
       } catch (err) {
-        console.error("Entity resolution queue error:", err);
+        logger.error("Entity resolution queue error", { error: err });
         res.status(500).json({ error: "Failed to load resolution queue" });
       }
     }
@@ -124,7 +125,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
         const stats = await queueService.getQueueStats(req.organizationId);
         res.json(stats);
       } catch (err) {
-        console.error("Entity resolution stats error:", err);
+        logger.error("Entity resolution stats error", { error: err });
         res.status(500).json({ error: "Failed to load queue stats" });
       }
     }
@@ -162,7 +163,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
 
         res.json({ accounts });
       } catch (err) {
-        console.error("Account search error:", err);
+        logger.error("Account search error", { error: err });
         res.status(500).json({ error: "Failed to search accounts" });
       }
     }
@@ -202,7 +203,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
         res.json({ resolved: true, call_id: parse.data.call_id, account_id: parse.data.account_id });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to resolve call";
-        console.error("Resolve call error:", err);
+        logger.error("Resolve call error", { error: err });
         res.status(400).json({ error: message });
       }
     }
@@ -239,7 +240,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
 
         res.json(result);
       } catch (err) {
-        console.error("Bulk resolve error:", err);
+        logger.error("Bulk resolve error", { error: err });
         res.status(500).json({ error: "Failed to bulk resolve calls" });
       }
     }
@@ -276,7 +277,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
 
         res.json(result);
       } catch (err) {
-        console.error("Dismiss calls error:", err);
+        logger.error("Dismiss calls error", { error: err });
         res.status(500).json({ error: "Failed to dismiss calls" });
       }
     }
@@ -318,7 +319,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
         res.json({ created: true, ...result });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to create account";
-        console.error("Create account from call error:", err);
+        logger.error("Create account from call error", { error: err });
         res.status(400).json({ error: message });
       }
     }
@@ -362,7 +363,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to merge accounts";
-        console.error("Merge accounts error:", err);
+        logger.error("Merge accounts error", { error: err });
         res.status(400).json({ error: message });
       }
     }

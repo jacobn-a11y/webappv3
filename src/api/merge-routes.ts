@@ -11,6 +11,7 @@ import { Router, type Request, type Response } from "express";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import type { MergeApiClient } from "../services/merge-api-client.js";
 import type { PrismaClient } from "@prisma/client";
+import logger from "../lib/logger.js";
 
 export function createMergeRoutes(
   mergeClient: MergeApiClient,
@@ -57,7 +58,7 @@ export function createMergeRoutes(
         createdAt: linkedAccount.createdAt,
       });
     } catch (err) {
-      console.error("Merge Link token exchange failed:", err);
+      logger.error("Merge Link token exchange failed", { error: err });
       res.status(502).json({ error: "Failed to link integration" });
     }
   });
@@ -130,7 +131,7 @@ export function createMergeRoutes(
 
       res.json({ success: true, message: "Sync triggered" });
     } catch (err) {
-      console.error(`Manual sync failed for ${linkedAccountId}:`, err);
+      logger.error(`Manual sync failed for ${linkedAccountId}`, { error: err });
       res.status(502).json({ error: "Sync failed" });
     }
   });

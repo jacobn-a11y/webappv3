@@ -35,6 +35,7 @@ const StoryLibraryPage = lazy(() => import("../pages/StoryLibraryPage").then(m =
 const TranscriptViewerPage = lazy(() => import("../pages/TranscriptViewerPage").then(m => ({ default: m.TranscriptViewerPage })));
 const WorkspacesPage = lazy(() => import("../pages/WorkspacesPage").then(m => ({ default: m.WorkspacesPage })));
 const WritebacksPage = lazy(() => import("../pages/WritebacksPage").then(m => ({ default: m.WritebacksPage })));
+const NotFoundPage = lazy(() => import("../pages/NotFoundPage").then(m => ({ default: m.NotFoundPage })));
 
 interface AuthenticatedRoutesProps {
   user: AuthUser;
@@ -176,7 +177,7 @@ export function AuthenticatedRoutes({ user }: AuthenticatedRoutesProps) {
       <Route path="/auth" element={<Navigate to="/" replace />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
       <Route path="/invite/:token" element={<InviteAcceptPage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
     </Suspense>
   );

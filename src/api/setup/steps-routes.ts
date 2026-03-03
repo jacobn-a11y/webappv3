@@ -5,7 +5,7 @@ import {
   type UserRole,
 } from "@prisma/client";
 import type { Response } from "express";
-import { respondAuthRequired } from "../_shared/errors.js";
+import { sendUnauthorized } from "../_shared/responses.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import { isBillingEnabled } from "../../middleware/billing.js";
 import { getStripePriceId } from "../../config/stripe-plans.js";
@@ -36,7 +36,7 @@ export function registerSetupStepRoutes({
 >): void {
   router.post("/step/recording-provider", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -54,7 +54,7 @@ export function registerSetupStepRoutes({
     "/step/recording-provider/complete",
     async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
       if (!requireSetupAdmin(req, res)) return;
@@ -82,7 +82,7 @@ export function registerSetupStepRoutes({
 
   router.post("/step/crm", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -98,7 +98,7 @@ export function registerSetupStepRoutes({
 
   router.post("/step/crm/complete", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -125,7 +125,7 @@ export function registerSetupStepRoutes({
 
   router.get("/step/account-sync", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -141,7 +141,7 @@ export function registerSetupStepRoutes({
 
   router.post("/step/account-sync/resolve", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -168,7 +168,7 @@ export function registerSetupStepRoutes({
 
   router.post("/step/account-sync/complete", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -193,7 +193,7 @@ export function registerSetupStepRoutes({
 
   router.post("/step/plan", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -293,7 +293,7 @@ export function registerSetupStepRoutes({
 
   router.post("/step/permissions", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -320,7 +320,7 @@ export function registerSetupStepRoutes({
 
   router.post("/step/org-profile", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -362,7 +362,7 @@ export function registerSetupStepRoutes({
 
   router.post("/step/governance-defaults", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -412,7 +412,7 @@ export function registerSetupStepRoutes({
 
   router.post("/step/role-presets", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -429,7 +429,7 @@ export function registerSetupStepRoutes({
 
   router.post("/skip", async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;

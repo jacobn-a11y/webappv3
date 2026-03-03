@@ -15,7 +15,7 @@
 
 import type { Request, Response } from "express";
 import crypto from "crypto";
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type { Queue } from "bullmq";
 import { GongProvider } from "../integrations/gong-provider.js";
 import type { GongCredentials } from "../integrations/types.js";
@@ -194,7 +194,8 @@ async function handleCallReady(
   // Fetch the transcript from Gong
   const transcript = await provider.fetchTranscript(credentials, gongCallId);
 
-  // Check if call already exists
+  // Upsert to avoid race conditions between concurrent webhook deliveries
+  let call: Awaited<ReturnType<typeof prisma.call.findFirst>>;
   const existing = await prisma.call.findFirst({
     where: {
       organizationId,
@@ -203,13 +204,11 @@ async function handleCallReady(
     },
   });
 
-  // Create or update the call
-  const call = existing
-    ? await prisma.call.update({
-        where: { id: existing.id },
-        data: {},
-      })
-    : await prisma.call.create({
+  if (existing) {
+    call = existing;
+  } else {
+    try {
+      call = await prisma.call.create({
         data: {
           organizationId,
           provider: "GONG",
@@ -217,6 +216,16 @@ async function handleCallReady(
           occurredAt: new Date(),
         },
       });
+    } catch (err: unknown) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        call = await prisma.call.findFirstOrThrow({
+          where: { organizationId, provider: "GONG", externalId: gongCallId },
+        });
+      } else {
+        throw err;
+      }
+    }
+  }
 
   // Store transcript if we got one and it's new
   if (transcript) {

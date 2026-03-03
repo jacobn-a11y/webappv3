@@ -52,14 +52,18 @@ export function createCsrfProtection() {
     }
 
     const sessionToken = readHeader(req.headers["x-session-token"]);
-    // Only enforce for session-token authenticated browser requests.
-    if (!sessionToken) {
+    const authHeader = req.headers.authorization;
+    const bearerToken = typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length).trim()
+      : null;
+    const tokenForCsrf = sessionToken || bearerToken;
+    if (!tokenForCsrf) {
       next();
       return;
     }
 
     const csrfToken = readHeader(req.headers["x-csrf-token"]);
-    const expectedCsrf = computeCsrfToken(sessionToken);
+    const expectedCsrf = computeCsrfToken(tokenForCsrf);
     if (!csrfToken || !crypto.timingSafeEqual(Buffer.from(csrfToken), Buffer.from(expectedCsrf))) {
       res.status(403).json({
         error: "csrf_validation_failed",

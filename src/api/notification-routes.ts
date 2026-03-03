@@ -7,13 +7,8 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { NotificationService } from "../services/notification-service.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-interface AuthenticatedRequest extends Request {
-  organizationId?: string;
-  userId?: string;
-}
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -78,7 +73,7 @@ export function createNotificationRoutes(
         total: result.total,
       });
     } catch (err) {
-      console.error("Notification list error:", err);
+      logger.error("Notification list error", { error: err });
       res.status(500).json({ error: "Failed to retrieve notifications" });
     }
   });
@@ -104,7 +99,7 @@ export function createNotificationRoutes(
         );
         res.json({ unread_count: count });
       } catch (err) {
-        console.error("Unread count error:", err);
+        logger.error("Unread count error", { error: err });
         res.status(500).json({ error: "Failed to get unread count" });
       }
     }
@@ -129,7 +124,7 @@ export function createNotificationRoutes(
         await notificationService.markAsRead(notificationId, userId);
         res.json({ success: true });
       } catch (err) {
-        console.error("Mark read error:", err);
+        logger.error("Mark read error", { error: err });
         res.status(500).json({ error: "Failed to mark notification as read" });
       }
     }
@@ -156,7 +151,7 @@ export function createNotificationRoutes(
         );
         res.json({ success: true, marked_read: result.count });
       } catch (err) {
-        console.error("Mark all read error:", err);
+        logger.error("Mark all read error", { error: err });
         res
           .status(500)
           .json({ error: "Failed to mark notifications as read" });

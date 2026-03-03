@@ -14,6 +14,7 @@
 
 import { Router, type Request, type Response } from "express";
 import type { PrismaClient, UserRole } from "@prisma/client";
+import logger from "../lib/logger.js";
 import {
   AccountJourneyService,
   type TimelineNode,
@@ -117,7 +118,7 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
         stage_counts: data.stageCounts,
       });
     } catch (err) {
-      console.error("Account journey error:", err);
+      logger.error("Account journey error", { error: err });
       res.status(500).json({ error: "Failed to load account journey" });
     }
   });
@@ -146,7 +147,7 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
           renderJourneyPage(data.account, data.timeline, data.stageCounts)
         );
       } catch (err) {
-        console.error("Account journey view error:", err);
+        logger.error("Account journey view error", { error: err });
         res.status(500).send(renderErrorPage());
       }
     }

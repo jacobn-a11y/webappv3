@@ -24,6 +24,7 @@ import {
   extractEmailDomain,
 } from "./entity-resolution.js";
 import { enqueueProcessCallJob } from "../lib/queue-policy.js";
+import logger from "../lib/logger.js";
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -199,9 +200,9 @@ export class MergeApiClient {
 
     // Fire-and-forget: kick off historical data fetch for this new connection
     this.runInitialSync(linkedAccount).catch((err) => {
-      console.error(
-        `Initial sync failed for linked account ${linkedAccount.id}:`,
-        err
+      logger.error(
+        `Initial sync failed for linked account ${linkedAccount.id}`,
+        { error: err }
       );
     });
 
@@ -395,13 +396,13 @@ export class MergeApiClient {
   startPolling(): void {
     if (this.pollTimer) return;
 
-    console.log(
+    logger.info(
       `Merge CRM polling started (interval: ${SYNC_POLL_INTERVAL_MS / 1000}s)`
     );
 
     this.pollTimer = setInterval(() => {
       this.pollAllLinkedAccounts().catch((err) => {
-        console.error("CRM polling cycle failed:", err);
+        logger.error("CRM polling cycle failed", { error: err });
       });
     }, SYNC_POLL_INTERVAL_MS);
   }
@@ -435,9 +436,9 @@ export class MergeApiClient {
           data: { lastSyncedAt: new Date() },
         });
       } catch (err) {
-        console.error(
-          `CRM sync failed for linked account ${linked.id} (${linked.integrationSlug}):`,
-          err
+        logger.error(
+          `CRM sync failed for linked account ${linked.id} (${linked.integrationSlug})`,
+          { error: err }
         );
         // Don't mark as ERROR for transient failures — only initial sync does that
       }
@@ -723,6 +724,21 @@ export class MergeApiClient {
 
   // ─── HTTP Helpers ──────────────────────────────────────────────────
 
+  private async withRetry<T>(operation: () => Promise<T>, retries = 3): Promise<T> {
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        return await operation();
+      } catch (err) {
+        const isRetryable = err instanceof MergeApiError &&
+          (err.statusCode >= 500 || err.statusCode === 429);
+        if (!isRetryable || attempt === retries - 1) throw err;
+        const delay = Math.min(1000 * Math.pow(2, attempt), 10_000);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+    throw new Error("Retry exhausted");
+  }
+
   /**
    * Generic paginated fetch for any Merge list endpoint. Supports
    * modified_after for incremental sync and cursor-based pagination.
@@ -764,32 +780,50 @@ export class MergeApiClient {
     params: Record<string, string> = {},
     accountToken?: string
   ): Promise<T> {
-    const url = new URL(`${MERGE_BASE_URL}${path}`);
-    for (const [key, value] of Object.entries(params)) {
-      url.searchParams.set(key, value);
-    }
+    return this.withRetry(async () => {
+      const url = new URL(`${MERGE_BASE_URL}${path}`);
+      for (const [key, value] of Object.entries(params)) {
+        url.searchParams.set(key, value);
+      }
 
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.apiKey}`,
-      "Content-Type": "application/json",
-    };
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+      };
 
-    if (accountToken) {
-      headers["X-Account-Token"] = accountToken;
-    }
+      if (accountToken) {
+        headers["X-Account-Token"] = accountToken;
+      }
 
-    const response = await fetch(url.toString(), { method: "GET", headers });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new MergeApiError(
-        `Merge API GET ${path} failed: ${response.status} ${response.statusText}`,
-        response.status,
-        body
-      );
-    }
+      try {
+        const response = await fetch(url.toString(), {
+          method: "GET",
+          headers,
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
 
-    return response.json() as Promise<T>;
+        if (!response.ok) {
+          const body = await response.text();
+          throw new MergeApiError(
+            `Merge API GET ${path} failed: ${response.status} ${response.statusText}`,
+            response.status,
+            body
+          );
+        }
+
+        return response.json() as Promise<T>;
+      } catch (err) {
+        clearTimeout(timeout);
+        if (err instanceof Error && err.name === "AbortError") {
+          throw new MergeApiError(`Merge API GET ${path} timed out after 30s`, 408, "");
+        }
+        throw err;
+      }
+    });
   }
 
   /**
@@ -800,31 +834,46 @@ export class MergeApiClient {
     body: Record<string, unknown>,
     accountToken?: string
   ): Promise<T> {
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.apiKey}`,
-      "Content-Type": "application/json",
-    };
+    return this.withRetry(async () => {
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+      };
 
-    if (accountToken) {
-      headers["X-Account-Token"] = accountToken;
-    }
+      if (accountToken) {
+        headers["X-Account-Token"] = accountToken;
+      }
 
-    const response = await fetch(`${MERGE_BASE_URL}${path}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+
+      try {
+        const response = await fetch(`${MERGE_BASE_URL}${path}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          const respBody = await response.text();
+          throw new MergeApiError(
+            `Merge API POST ${path} failed: ${response.status} ${response.statusText}`,
+            response.status,
+            respBody
+          );
+        }
+
+        return response.json() as Promise<T>;
+      } catch (err) {
+        clearTimeout(timeout);
+        if (err instanceof Error && err.name === "AbortError") {
+          throw new MergeApiError(`Merge API POST ${path} timed out after 30s`, 408, "");
+        }
+        throw err;
+      }
     });
-
-    if (!response.ok) {
-      const respBody = await response.text();
-      throw new MergeApiError(
-        `Merge API POST ${path} failed: ${response.status} ${response.statusText}`,
-        response.status,
-        respBody
-      );
-    }
-
-    return response.json() as Promise<T>;
   }
 
   /**

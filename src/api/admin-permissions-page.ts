@@ -12,6 +12,7 @@ import type { PrismaClient, UserRole } from "@prisma/client";
 import { PermissionManager, requirePermission } from "../middleware/permissions.js";
 import { AccountAccessService } from "../services/account-access.js";
 import { escapeHtml } from "../lib/html-utils.js";
+import logger from "../lib/logger.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,7 +77,7 @@ export function createAdminPermissionsPage(prisma: PrismaClient): Router {
         res.setHeader("Cache-Control", "private, no-cache");
         res.send(renderPermissionsPage(matrix, accessByUser));
       } catch (err) {
-        console.error("Admin permissions page error:", err);
+        logger.error("Admin permissions page error", { error: err });
         res.status(500).json({ error: "Failed to load permissions page" });
       }
     }
