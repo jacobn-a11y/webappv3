@@ -34,6 +34,7 @@ function createMockPrisma() {
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       delete: vi.fn(),
       count: vi.fn().mockResolvedValue(0),
       aggregate: vi.fn().mockResolvedValue({ _sum: { viewCount: 0 } }),
@@ -746,6 +747,39 @@ describe("Permissions Integration Tests", () => {
         close();
       }
     });
+
+    it("blocks publish when content contains unsafe links", async () => {
+      const prisma = createMockPrisma();
+      prisma.userPermission.findUnique.mockResolvedValue(null);
+      prisma.orgSettings.findUnique.mockResolvedValue({
+        organizationId: "org-1",
+        landingPagesEnabled: true,
+        allowedPublishers: ["OWNER", "ADMIN", "MEMBER"],
+      });
+      prisma.landingPage.findUniqueOrThrow.mockResolvedValue({
+        id: "page-1",
+        slug: "test-slug",
+        editableBody: "Use [this](javascript:alert(1))",
+        title: "Unsafe Link Page",
+        subtitle: null,
+        calloutBoxes: [],
+        includeCompanyName: false,
+        story: { accountId: "account-1" },
+      });
+
+      const { request, close } = await createAppWithServer(prisma, { userRole: "MEMBER" });
+      try {
+        const res = await request
+          .post("/api/pages/page-1/publish")
+          .send({ visibility: "SHARED_WITH_LINK" });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe("publish_validation_failed");
+        expect(Array.isArray(res.body.issues)).toBe(true);
+      } finally {
+        close();
+      }
+    });
   });
 
   // ── Page owner vs permission checks ───────────────────────────────────
@@ -862,6 +896,73 @@ describe("Permissions Integration Tests", () => {
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("id", "page-1");
+      } finally {
+        close();
+      }
+    });
+  });
+
+  describe("Optimistic concurrency for page edits", () => {
+    it("returns updated_at when expected_updated_at matches latest revision", async () => {
+      const prisma = createMockPrisma();
+      const expectedUpdatedAt = "2026-03-03T12:00:00.000Z";
+      const newUpdatedAt = "2026-03-03T12:00:05.000Z";
+
+      prisma.landingPage.findUniqueOrThrow
+        .mockResolvedValueOnce({
+          id: "page-1",
+          includeCompanyName: false,
+        })
+        .mockResolvedValueOnce({
+          id: "page-1",
+          editableBody: "# Current Body",
+          updatedAt: new Date(expectedUpdatedAt),
+        })
+        .mockResolvedValueOnce({
+          updatedAt: new Date(newUpdatedAt),
+        });
+      prisma.landingPage.updateMany.mockResolvedValue({ count: 1 });
+
+      const { request, close } = await createAppWithServer(prisma, { userRole: "OWNER" });
+      try {
+        const res = await request.patch("/api/pages/page-1").send({
+          editable_body: "# Updated Body",
+          expected_updated_at: expectedUpdatedAt,
+        });
+
+        expect(res.status).toBe(200);
+        expect(res.body.updated).toBe(true);
+        expect(res.body.updated_at).toBe(new Date(newUpdatedAt).toISOString());
+      } finally {
+        close();
+      }
+    });
+
+    it("returns 409 when expected_updated_at is stale", async () => {
+      const prisma = createMockPrisma();
+
+      prisma.landingPage.findUniqueOrThrow
+        .mockResolvedValueOnce({
+          id: "page-1",
+          includeCompanyName: false,
+        })
+        .mockResolvedValueOnce({
+          id: "page-1",
+          editableBody: "# Latest Body",
+          updatedAt: new Date("2026-03-03T12:10:00.000Z"),
+        });
+
+      const { request, close } = await createAppWithServer(prisma, { userRole: "OWNER" });
+      try {
+        const res = await request.patch("/api/pages/page-1").send({
+          editable_body: "# My Stale Body",
+          expected_updated_at: "2026-03-03T12:00:00.000Z",
+        });
+
+        expect(res.status).toBe(409);
+        expect(res.body.error).toBe("concurrency_conflict");
+        expect(res.body.current_updated_at).toBe("2026-03-03T12:10:00.000Z");
+        expect(res.body.latest_editable_body).toBe("# Latest Body");
       } finally {
         close();
       }

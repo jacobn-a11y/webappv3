@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   applySetupRolePresets,
   getFirstValueRecommendations,
@@ -19,6 +20,7 @@ import {
 } from "../lib/api";
 import { useToast } from "../components/Toast";
 import { formatEnumLabel } from "../lib/format";
+import { AdminErrorState } from "../components/admin/AdminErrorState";
 
 export function AdminSetupWizardPage() {
   const [status, setStatus] = useState<SetupStatus | null>(null);
@@ -39,6 +41,7 @@ export function AdminSetupWizardPage() {
   const [savingMvpKeys, setSavingMvpKeys] = useState(false);
   const [indexingAccounts, setIndexingAccounts] = useState(false);
   const [savingSelection, setSavingSelection] = useState(false);
+  const [showAdvancedSetup, setShowAdvancedSetup] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { showToast } = useToast();
@@ -212,6 +215,9 @@ export function AdminSetupWizardPage() {
   };
 
   const completionScore = status?.completionScore ?? 0;
+  const mvpReadyForIngest = Boolean(
+    (mvpStatus?.gong_configured ?? false) && (mvpStatus?.openai_configured ?? false)
+  );
   const normalizedFilter = accountFilter.trim().toLowerCase();
   const visibleAccounts = accountRows.filter((row) =>
     normalizedFilter
@@ -232,29 +238,102 @@ export function AdminSetupWizardPage() {
         </div>
       </div>
 
-      {error && <div className="alert alert--error">{error}</div>}
+      {error && (
+        <AdminErrorState
+          title="Setup Action Failed"
+          message={error}
+          onRetry={() => void load()}
+        />
+      )}
+
+      {firstValue?.contextual_prompts && firstValue.contextual_prompts.length > 0 && (
+        <div className="card card--elevated">
+          <div className="card__header">
+            <div>
+              <div className="card__title">First Value Fast Path</div>
+              <div className="card__subtitle">
+                Follow these guided actions to reach first story + first share quickly.
+              </div>
+            </div>
+          </div>
+          <div className="action-list">
+            {firstValue.contextual_prompts.map((prompt) => (
+              <div className="action-item" key={prompt.id}>
+                <div className="action-item__icon">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 8v4" />
+                    <path d="M12 16h.01" />
+                  </svg>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600 }}>{prompt.title}</div>
+                  <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+                    {prompt.detail}
+                  </div>
+                </div>
+                <span
+                  className={`badge ${
+                    prompt.status === "DONE"
+                      ? "badge--success"
+                      : prompt.status === "READY"
+                        ? "badge--accent"
+                        : "badge--draft"
+                  }`}
+                >
+                  {prompt.status === "DONE"
+                    ? "Done"
+                    : prompt.status === "READY"
+                      ? "Ready"
+                      : "Blocked"}
+                </span>
+                <Link to={prompt.cta_path} className="btn btn--ghost btn--sm">
+                  {prompt.cta_label}
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="card card--elevated">
         <div className="card__header">
           <div>
             <div className="card__title">MVP Quick Setup (Gong + OpenAI)</div>
             <div className="card__subtitle">
-              Save two keys, index Gong accounts, select scope, then ingest.
+              1) Save keys, 2) index Gong accounts, 3) select accounts, 4) ingest calls.
             </div>
           </div>
-          {mvpStatus && (
-            <span
-              className={`badge ${
-                mvpStatus.gong_configured && mvpStatus.openai_configured
-                  ? "badge--success"
-                  : "badge--draft"
-              }`}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              className="btn btn--ghost btn--sm"
+              type="button"
+              onClick={() => setShowAdvancedSetup((prev) => !prev)}
+              aria-expanded={showAdvancedSetup}
             >
-              {mvpStatus.gong_configured && mvpStatus.openai_configured
-                ? "Configured"
-                : "Needs Keys"}
-            </span>
-          )}
+              {showAdvancedSetup ? "Hide Advanced" : "Show Advanced"}
+            </button>
+            {mvpStatus && (
+              <span
+                className={`badge ${
+                  mvpStatus.gong_configured && mvpStatus.openai_configured
+                    ? "badge--success"
+                    : "badge--draft"
+                }`}
+              >
+                {mvpStatus.gong_configured && mvpStatus.openai_configured
+                  ? "Configured"
+                  : "Needs Keys"}
+              </span>
+            )}
+          </div>
         </div>
 
         <div style={{ display: "grid", gap: 12 }}>
@@ -289,17 +368,22 @@ export function AdminSetupWizardPage() {
             />
           </div>
 
-          <div className="form-group">
-            <label className="form-group__label" htmlFor="setup-gong-base-url">Gong Base URL (optional)</label>
-            <input
-              id="setup-gong-base-url"
-              className="form-input"
-              value={gongBaseUrl}
-              onChange={(e) => setGongBaseUrl(e.target.value)}
-              placeholder="https://api.gong.io"
-              aria-label="Gong base URL"
-            />
-          </div>
+          {showAdvancedSetup && (
+            <div className="form-group">
+              <label className="form-group__label" htmlFor="setup-gong-base-url">Gong Base URL (optional)</label>
+              <input
+                id="setup-gong-base-url"
+                className="form-input"
+                value={gongBaseUrl}
+                onChange={(e) => setGongBaseUrl(e.target.value)}
+                placeholder="https://api.gong.io"
+                aria-label="Gong base URL"
+              />
+              <span className="form-group__hint">
+                Keep default unless your Gong workspace uses a custom endpoint.
+              </span>
+            </div>
+          )}
 
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button
@@ -332,7 +416,13 @@ export function AdminSetupWizardPage() {
           </div>
         )}
 
-        {(mvpStatus?.gong_configured ?? false) && (
+        {!mvpReadyForIngest && (mvpStatus?.gong_configured ?? false) && (
+          <div style={{ marginTop: 12, fontSize: 13, color: "var(--color-text-secondary)" }}>
+            Save a valid OpenAI key to continue with Gong account indexing and ingest.
+          </div>
+        )}
+
+        {mvpReadyForIngest && (
           <div style={{ marginTop: 20 }}>
             <div
               style={{
@@ -452,6 +542,8 @@ export function AdminSetupWizardPage() {
         )}
       </div>
 
+      {showAdvancedSetup && (
+        <>
       {/* Progress */}
       {status && (
         <div className="card card--elevated">
@@ -634,6 +726,8 @@ export function AdminSetupWizardPage() {
             </div>
           )}
         </div>
+      )}
+        </>
       )}
     </div>
   );

@@ -23,13 +23,18 @@ import type { SyncEngine } from "../integrations/sync-engine.js";
 import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.js";
 import { parseBoundedLimit, PAGINATION_LIMITS } from "../lib/pagination.js";
 import { AuditLogService } from "../services/audit-log.js";
+import {
+  DIRECT_INTEGRATION_PROVIDERS,
+  parseDirectIntegrationProvider,
+  resolveIntegrationProviderSelection,
+  type DirectIntegrationProvider,
+} from "../services/provider-policy.js";
+import { decodeCredentials } from "../types/json-boundaries.js";
 
 // ─── Validation Schemas ─────────────────────────────────────────────────────
 
-const VALID_PROVIDERS = ["GRAIN", "GONG", "SALESFORCE", "MERGE_DEV"] as const;
-
 const createIntegrationSchema = z.object({
-  provider: z.enum(VALID_PROVIDERS),
+  provider: z.enum(DIRECT_INTEGRATION_PROVIDERS),
   credentials: z.record(z.unknown()),
   settings: z.record(z.unknown()).optional(),
   webhookSecret: z.string().optional(),
@@ -43,7 +48,7 @@ const updateIntegrationSchema = z.object({
 });
 
 const backfillSchema = z.object({
-  provider: z.enum(VALID_PROVIDERS),
+  provider: z.enum(DIRECT_INTEGRATION_PROVIDERS),
   start_date: z.string().datetime().optional(),
   end_date: z.string().datetime().optional(),
   cursor: z.string().optional(),
@@ -70,6 +75,31 @@ export function createIntegrationRoutes(
       throw error;
     }
   };
+  const resolveProviderParam = (
+    rawProvider: unknown,
+    res: Response
+  ): DirectIntegrationProvider | null => {
+    const provider = parseDirectIntegrationProvider(rawProvider);
+    if (!provider) {
+      res.status(400).json({ error: `Invalid provider: ${String(rawProvider ?? "")}` });
+      return null;
+    }
+    return provider;
+  };
+  const resolveProviderFilter = (
+    rawProvider: unknown,
+    res: Response
+  ): DirectIntegrationProvider | null | undefined => {
+    if (typeof rawProvider !== "string" || rawProvider.trim().length === 0) {
+      return undefined;
+    }
+    const provider = parseDirectIntegrationProvider(rawProvider);
+    if (!provider) {
+      res.status(400).json({ error: `Invalid provider: ${rawProvider}` });
+      return null;
+    }
+    return provider;
+  };
 
   // ── List all integrations for the org ───────────────────────────────
   router.get("/", async (req: Request, res: Response) => {
@@ -93,7 +123,7 @@ export function createIntegrationRoutes(
     });
 
     // Return available providers with their status
-    const available = VALID_PROVIDERS.map((provider) => {
+    const available = DIRECT_INTEGRATION_PROVIDERS.map((provider) => {
       const config = configs.find((c: { provider: string }) => c.provider === provider);
       return {
         provider,
@@ -112,16 +142,15 @@ export function createIntegrationRoutes(
   router.get("/:provider", async (req: Request, res: Response) => {
     const organizationId = resolveOrgId(req, res);
     if (!organizationId) return;
-    const provider = (req.params.provider as string).toUpperCase() as IntegrationProvider;
-
-    if (!VALID_PROVIDERS.includes(provider as any)) {
-      res.status(400).json({ error: `Invalid provider: ${req.params.provider}` });
-      return;
-    }
+    const provider = resolveProviderParam(req.params.provider, res);
+    if (!provider) return;
 
     const config = await prisma.integrationConfig.findUnique({
       where: {
-        organizationId_provider: { organizationId, provider },
+        organizationId_provider: {
+          organizationId,
+          provider: provider as IntegrationProvider,
+        },
       },
     });
 
@@ -132,7 +161,7 @@ export function createIntegrationRoutes(
 
     // Redact sensitive fields from credentials
     const redactedCredentials = redactCredentials(
-      config.credentials as Record<string, unknown>
+      decodeCredentials(config.credentials)
     );
 
     res.json({
@@ -214,12 +243,8 @@ export function createIntegrationRoutes(
   router.patch("/:provider", async (req: Request, res: Response) => {
     const organizationId = resolveOrgId(req, res);
     if (!organizationId) return;
-    const provider = (req.params.provider as string).toUpperCase() as IntegrationProvider;
-
-    if (!VALID_PROVIDERS.includes(provider as any)) {
-      res.status(400).json({ error: `Invalid provider: ${req.params.provider}` });
-      return;
-    }
+    const provider = resolveProviderParam(req.params.provider, res);
+    if (!provider) return;
 
     const parsed = updateIntegrationSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -228,7 +253,12 @@ export function createIntegrationRoutes(
     }
 
     const config = await prisma.integrationConfig.findUnique({
-      where: { organizationId_provider: { organizationId, provider } },
+      where: {
+        organizationId_provider: {
+          organizationId,
+          provider: provider as IntegrationProvider,
+        },
+      },
     });
 
     if (!config) {
@@ -239,7 +269,7 @@ export function createIntegrationRoutes(
     const updateData: Record<string, unknown> = {};
     if (parsed.data.credentials) {
       // Merge new credentials with existing (allows partial updates)
-      const existingCreds = config.credentials as Record<string, unknown>;
+      const existingCreds = decodeCredentials(config.credentials);
       updateData.credentials = { ...existingCreds, ...parsed.data.credentials };
     }
     if (parsed.data.settings !== undefined) {
@@ -257,7 +287,10 @@ export function createIntegrationRoutes(
 
     const updated = await prisma.integrationConfig.update({
       where: {
-        organizationId_provider: { organizationId, provider },
+        organizationId_provider: {
+          organizationId,
+          provider: provider as IntegrationProvider,
+        },
       },
       data: updateData,
     });
@@ -286,15 +319,16 @@ export function createIntegrationRoutes(
   router.delete("/:provider", async (req: Request, res: Response) => {
     const organizationId = resolveOrgId(req, res);
     if (!organizationId) return;
-    const provider = (req.params.provider as string).toUpperCase() as IntegrationProvider;
-
-    if (!VALID_PROVIDERS.includes(provider as any)) {
-      res.status(400).json({ error: `Invalid provider: ${req.params.provider}` });
-      return;
-    }
+    const provider = resolveProviderParam(req.params.provider, res);
+    if (!provider) return;
 
     const config = await prisma.integrationConfig.findUnique({
-      where: { organizationId_provider: { organizationId, provider } },
+      where: {
+        organizationId_provider: {
+          organizationId,
+          provider: provider as IntegrationProvider,
+        },
+      },
     });
 
     if (!config) {
@@ -303,7 +337,12 @@ export function createIntegrationRoutes(
     }
 
     await prisma.integrationConfig.delete({
-      where: { organizationId_provider: { organizationId, provider } },
+      where: {
+        organizationId_provider: {
+          organizationId,
+          provider: provider as IntegrationProvider,
+        },
+      },
     });
     await auditLogs.record({
       organizationId,
@@ -325,15 +364,16 @@ export function createIntegrationRoutes(
   router.post("/:provider/test", async (req: Request, res: Response) => {
     const organizationId = resolveOrgId(req, res);
     if (!organizationId) return;
-    const provider = (req.params.provider as string).toUpperCase() as IntegrationProvider;
-
-    if (!VALID_PROVIDERS.includes(provider as any)) {
-      res.status(400).json({ error: `Invalid provider: ${req.params.provider}` });
-      return;
-    }
+    const provider = resolveProviderParam(req.params.provider, res);
+    if (!provider) return;
 
     const config = await prisma.integrationConfig.findUnique({
-      where: { organizationId_provider: { organizationId, provider } },
+      where: {
+        organizationId_provider: {
+          organizationId,
+          provider: provider as IntegrationProvider,
+        },
+      },
     });
 
     if (!config) {
@@ -341,16 +381,12 @@ export function createIntegrationRoutes(
       return;
     }
 
-    const credentials = config.credentials as Record<string, unknown>;
+    const credentials = decodeCredentials(config.credentials);
 
     // Find the provider implementation
-    const callProvider = registry.callRecording.get(provider);
-    const crmProvider = registry.crm.get(provider);
-    const providerImpl = callProvider ?? crmProvider;
-
-    if (!providerImpl) {
-      // Merge.dev doesn't have a validation endpoint — just mark as active
-      if (provider === "MERGE_DEV") {
+    const selection = resolveIntegrationProviderSelection(provider, registry);
+    if (!selection.supportsCredentialValidation) {
+      if (selection.kind === "webhook_only") {
         await prisma.integrationConfig.update({
           where: { id: config.id },
           data: { status: "ACTIVE", lastError: null },
@@ -375,7 +411,9 @@ export function createIntegrationRoutes(
     }
 
     try {
-      const valid = await providerImpl.validateCredentials(credentials as any);
+      const valid = await (selection.callProvider ?? selection.crmProvider)!.validateCredentials(
+        credentials as any
+      );
 
       if (valid) {
         await prisma.integrationConfig.update({
@@ -444,22 +482,27 @@ export function createIntegrationRoutes(
   router.post("/:provider/sync", async (req: Request, res: Response) => {
     const organizationId = resolveOrgId(req, res);
     if (!organizationId) return;
-    const provider = (req.params.provider as string).toUpperCase() as IntegrationProvider;
-
-    if (!VALID_PROVIDERS.includes(provider as any)) {
-      res.status(400).json({ error: `Invalid provider: ${req.params.provider}` });
-      return;
-    }
-
-    if (provider === "MERGE_DEV") {
+    const provider = resolveProviderParam(req.params.provider, res);
+    if (!provider) return;
+    const selection = resolveIntegrationProviderSelection(provider, registry);
+    if (!selection.supportsManualSync && selection.kind === "webhook_only") {
       res.status(400).json({
         error: "Merge.dev uses webhook-based sync. No on-demand sync available.",
       });
       return;
     }
+    if (!selection.supportsManualSync) {
+      res.status(400).json({ error: "No provider implementation available" });
+      return;
+    }
 
     const config = await prisma.integrationConfig.findUnique({
-      where: { organizationId_provider: { organizationId, provider } },
+      where: {
+        organizationId_provider: {
+          organizationId,
+          provider: provider as IntegrationProvider,
+        },
+      },
     });
 
     if (!config) {
@@ -513,7 +556,8 @@ export function createIntegrationRoutes(
     const organizationId = resolveOrgId(req, res);
     if (!organizationId) return;
     const status = (req.query.status as string | undefined)?.trim();
-    const provider = (req.query.provider as string | undefined)?.trim();
+    const provider = resolveProviderFilter(req.query.provider, res);
+    if (provider === null) return;
     const limit = parseBoundedLimit(req.query.limit, {
       fallback: PAGINATION_LIMITS.INTEGRATION_DEFAULT,
       max: PAGINATION_LIMITS.INTEGRATION_MAX,
@@ -523,9 +567,7 @@ export function createIntegrationRoutes(
       where: {
         organizationId,
         ...(status ? { status } : {}),
-        ...(provider
-          ? { provider: provider.toUpperCase() as IntegrationProvider }
-          : {}),
+        ...(provider ? { provider: provider as IntegrationProvider } : {}),
       },
       orderBy: { startedAt: "desc" },
       take: limit,
@@ -555,7 +597,7 @@ export function createIntegrationRoutes(
       ? (req.params.runId[0] ?? "")
       : (req.params.runId ?? "");
     try {
-      await syncEngine.replayFailedRun(runId, organizationId);
+      const replay = await syncEngine.replayFailedRun(runId, organizationId);
       await auditLogs.record({
         organizationId,
         actorUserId: (req as { userId?: string }).userId,
@@ -564,10 +606,24 @@ export function createIntegrationRoutes(
         targetType: "integration_run",
         targetId: runId,
         severity: "CRITICAL",
+        metadata: {
+          replay_run_id: replay.replayRunId,
+          replay_attempt: replay.replayAttempt,
+          replay_attempt_cap: replay.replayAttemptCap,
+          replay_window_hours: replay.replayWindowHours,
+          source_run_age_hours: replay.sourceRunAgeHours,
+        },
         ipAddress: req.ip,
         userAgent: req.get("user-agent"),
       });
-      res.json({ replaying: true, run_id: runId });
+      res.json({
+        replaying: true,
+        run_id: runId,
+        replay_run_id: replay.replayRunId,
+        replay_attempt: replay.replayAttempt,
+        replay_attempt_cap: replay.replayAttemptCap,
+        replay_window_hours: replay.replayWindowHours,
+      });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to replay integration run";
@@ -578,7 +634,8 @@ export function createIntegrationRoutes(
   router.get("/ops/dead-letter", async (req: Request, res: Response) => {
     const organizationId = resolveOrgId(req, res);
     if (!organizationId) return;
-    const provider = (req.query.provider as string | undefined)?.trim();
+    const provider = resolveProviderFilter(req.query.provider, res);
+    if (provider === null) return;
     const limit = parseBoundedLimit(req.query.limit, {
       fallback: PAGINATION_LIMITS.INTEGRATION_DEFAULT,
       max: PAGINATION_LIMITS.INTEGRATION_MAX,
@@ -588,9 +645,7 @@ export function createIntegrationRoutes(
       where: {
         organizationId,
         status: "FAILED",
-        ...(provider
-          ? { provider: provider.toUpperCase() as IntegrationProvider }
-          : {}),
+        ...(provider ? { provider: provider as IntegrationProvider } : {}),
       },
       orderBy: { startedAt: "desc" },
       take: limit,
@@ -620,7 +675,7 @@ export function createIntegrationRoutes(
       ? (req.params.runId[0] ?? "")
       : (req.params.runId ?? "");
     try {
-      await syncEngine.replayFailedRun(runId, organizationId);
+      const replay = await syncEngine.replayFailedRun(runId, organizationId);
       await auditLogs.record({
         organizationId,
         actorUserId: (req as { userId?: string }).userId,
@@ -629,10 +684,24 @@ export function createIntegrationRoutes(
         targetType: "integration_run",
         targetId: runId,
         severity: "CRITICAL",
+        metadata: {
+          replay_run_id: replay.replayRunId,
+          replay_attempt: replay.replayAttempt,
+          replay_attempt_cap: replay.replayAttemptCap,
+          replay_window_hours: replay.replayWindowHours,
+          source_run_age_hours: replay.sourceRunAgeHours,
+        },
         ipAddress: req.ip,
         userAgent: req.get("user-agent"),
       });
-      res.json({ replaying: true, run_id: runId });
+      res.json({
+        replaying: true,
+        run_id: runId,
+        replay_run_id: replay.replayRunId,
+        replay_attempt: replay.replayAttempt,
+        replay_attempt_cap: replay.replayAttemptCap,
+        replay_window_hours: replay.replayWindowHours,
+      });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to replay dead-letter run";
@@ -645,7 +714,8 @@ export function createIntegrationRoutes(
   router.get("/ops/backfills", async (req: Request, res: Response) => {
     const organizationId = resolveOrgId(req, res);
     if (!organizationId) return;
-    const provider = (req.query.provider as string | undefined)?.trim();
+    const provider = resolveProviderFilter(req.query.provider, res);
+    if (provider === null) return;
     const limit = parseBoundedLimit(req.query.limit, {
       fallback: PAGINATION_LIMITS.INTEGRATION_DEFAULT,
       max: PAGINATION_LIMITS.INTEGRATION_MAX,
@@ -655,9 +725,7 @@ export function createIntegrationRoutes(
       where: {
         organizationId,
         runType: "BACKFILL",
-        ...(provider
-          ? { provider: provider.toUpperCase() as IntegrationProvider }
-          : {}),
+        ...(provider ? { provider: provider as IntegrationProvider } : {}),
       },
       orderBy: { startedAt: "desc" },
       take: limit,

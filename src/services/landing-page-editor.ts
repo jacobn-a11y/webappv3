@@ -16,6 +16,16 @@ import type { PrismaClient, PageVisibility, PageStatus } from "@prisma/client";
 import { CompanyScrubber } from "./company-scrubber.js";
 import { normalizeCompanyName } from "./entity-resolution.js";
 import { hashPagePassword, verifyPagePassword } from "../lib/page-password.js";
+import {
+  decodeCalloutBoxes,
+  decodeProvenance,
+  encodeJsonValue,
+} from "../types/json-boundaries.js";
+import { collectLinkCandidates, validateLinkSyntax } from "./publish-link-utils.js";
+import type {
+  PublishedBrandingSettings,
+  StoryContextSettings,
+} from "../types/story-generation.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -45,6 +55,7 @@ export interface UpdateLandingPageInput {
   calloutBoxes?: CalloutBox[];
   customCss?: string;
   editSummary?: string;
+  expectedUpdatedAt?: Date;
 }
 
 export interface PublishOptions {
@@ -116,6 +127,24 @@ export class PublishValidationError extends Error {
   }
 }
 
+export class ConcurrencyConflictError extends Error {
+  expectedUpdatedAt: Date;
+  currentUpdatedAt: Date;
+  currentEditableBody: string;
+
+  constructor(input: {
+    expectedUpdatedAt: Date;
+    currentUpdatedAt: Date;
+    currentEditableBody: string;
+  }) {
+    super("Landing page was modified by another user.");
+    this.name = "ConcurrencyConflictError";
+    this.expectedUpdatedAt = input.expectedUpdatedAt;
+    this.currentUpdatedAt = input.currentUpdatedAt;
+    this.currentEditableBody = input.currentEditableBody;
+  }
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 export class LandingPageEditor {
@@ -175,7 +204,7 @@ export class LandingPageEditor {
         editableBody: story.markdownBody,
         scrubbedBody: "", // will be populated on publish
         heroImageUrl: input.heroImageUrl ?? null,
-        calloutBoxes: defaultCallouts as unknown as object[],
+        calloutBoxes: encodeJsonValue(defaultCallouts),
         totalCallHours: totalHours,
         includeCompanyName: input.includeCompanyName ?? false,
         status: "DRAFT",
@@ -193,37 +222,100 @@ export class LandingPageEditor {
     pageId: string,
     userId: string,
     input: UpdateLandingPageInput
-  ): Promise<void> {
+  ): Promise<{ updatedAt: Date }> {
     const existing = await this.prisma.landingPage.findUniqueOrThrow({
       where: { id: pageId },
+      select: {
+        id: true,
+        editableBody: true,
+        updatedAt: true,
+      },
     });
 
-    // If body changed, record the edit
-    if (input.editableBody && input.editableBody !== existing.editableBody) {
+    if (
+      input.expectedUpdatedAt &&
+      existing.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()
+    ) {
+      throw new ConcurrencyConflictError({
+        expectedUpdatedAt: input.expectedUpdatedAt,
+        currentUpdatedAt: existing.updatedAt,
+        currentEditableBody: existing.editableBody,
+      });
+    }
+
+    const bodyChanged =
+      input.editableBody !== undefined && input.editableBody !== existing.editableBody;
+    const pageUpdateData = {
+      title: input.title,
+      subtitle: input.subtitle,
+      editableBody: input.editableBody,
+      heroImageUrl: input.heroImageUrl,
+      calloutBoxes: input.calloutBoxes
+        ? encodeJsonValue(input.calloutBoxes)
+        : undefined,
+      customCss: input.customCss,
+    };
+
+    if (input.expectedUpdatedAt) {
+      const updateResult = await this.prisma.landingPage.updateMany({
+        where: {
+          id: pageId,
+          updatedAt: input.expectedUpdatedAt,
+        },
+        data: pageUpdateData,
+      });
+
+      if (updateResult.count === 0) {
+        const latest = await this.prisma.landingPage.findUniqueOrThrow({
+          where: { id: pageId },
+          select: { updatedAt: true, editableBody: true },
+        });
+        throw new ConcurrencyConflictError({
+          expectedUpdatedAt: input.expectedUpdatedAt,
+          currentUpdatedAt: latest.updatedAt,
+          currentEditableBody: latest.editableBody,
+        });
+      }
+
+      const updated = await this.prisma.landingPage.findUniqueOrThrow({
+        where: { id: pageId },
+        select: { updatedAt: true },
+      });
+
+      if (bodyChanged) {
+        await this.prisma.landingPageEdit.create({
+          data: {
+            landingPageId: pageId,
+            editedById: userId,
+            previousBody: existing.editableBody,
+            newBody: input.editableBody!,
+            editSummary: input.editSummary ?? null,
+          },
+        });
+      }
+
+      return { updatedAt: updated.updatedAt };
+    }
+
+    const updated = await this.prisma.landingPage.update({
+      where: { id: pageId },
+      data: pageUpdateData,
+      select: { updatedAt: true },
+    });
+
+    if (bodyChanged) {
       await this.prisma.landingPageEdit.create({
         data: {
           landingPageId: pageId,
           editedById: userId,
           previousBody: existing.editableBody,
-          newBody: input.editableBody,
+          newBody: input.editableBody!,
           editSummary: input.editSummary ?? null,
         },
       });
     }
 
-    await this.prisma.landingPage.update({
-      where: { id: pageId },
-      data: {
-        title: input.title,
-        subtitle: input.subtitle,
-        editableBody: input.editableBody,
-        heroImageUrl: input.heroImageUrl,
-        calloutBoxes: input.calloutBoxes
-          ? (input.calloutBoxes as unknown as object[])
-          : undefined,
-        customCss: input.customCss,
-      },
-    });
+    return { updatedAt: updated.updatedAt };
   }
 
   /**
@@ -248,9 +340,10 @@ export class LandingPageEditor {
 
     const prePublishIssues = this.validatePublishSnapshot({
       title: page.title,
+      subtitle: page.subtitle,
       body: page.editableBody,
       calloutBoxes:
-        ((page.calloutBoxes as unknown as CalloutBox[] | null) ?? []).map((box) => ({
+        decodeCalloutBoxes(page.calloutBoxes).map((box) => ({
           title: box.title,
           body: box.body,
         })),
@@ -286,7 +379,7 @@ export class LandingPageEditor {
       scrubbedSubtitle = subtitleScrub?.scrubbedText ?? null;
 
       if (page.calloutBoxes && Array.isArray(page.calloutBoxes)) {
-        const callouts = page.calloutBoxes as unknown as CalloutBox[];
+        const callouts = decodeCalloutBoxes(page.calloutBoxes);
         scrubbedCallouts = [];
         for (const box of callouts) {
           const bodyScrub = await this.scrubber.scrubForAccount(
@@ -323,6 +416,7 @@ export class LandingPageEditor {
 
     const postScrubIssues = this.validatePublishSnapshot({
       title: scrubbedTitle,
+      subtitle: scrubbedSubtitle,
       body: scrubbedBody,
       calloutBoxes: (scrubbedCallouts ?? []).map((box) => ({
         title: box.title,
@@ -343,7 +437,7 @@ export class LandingPageEditor {
         scrubbedTitle,
         scrubbedSubtitle,
         scrubbedCalloutBoxes: scrubbedCallouts
-          ? (scrubbedCallouts as unknown as object[])
+          ? encodeJsonValue(scrubbedCallouts)
           : undefined,
         status: "PUBLISHED",
         visibility: options.visibility,
@@ -431,6 +525,7 @@ export class LandingPageEditor {
     totalCallHours: number;
     heroImageUrl: string | null;
     customCss: string | null;
+    branding: PublishedBrandingSettings | null;
     publishedAt: Date | null;
   } | null> {
     const page = await this.prisma.landingPage.findUnique({
@@ -456,8 +551,11 @@ export class LandingPageEditor {
       data: { viewCount: { increment: 1 } },
     });
 
-    // Check org-level anonymization setting
-    const shouldAnonymize = await this.isAnonymizationEnabled(page.organizationId);
+    // Check org-level anonymization + branding settings
+    const pagePresentation = await this.getPagePresentationSettings(
+      page.organizationId
+    );
+    const shouldAnonymize = pagePresentation.anonymizationEnabled;
 
     // When anonymization is off, or the page was explicitly set to include
     // company names, serve the original identifiable content.
@@ -474,13 +572,14 @@ export class LandingPageEditor {
         ? page.editableBody
         : (page.scrubbedBody || page.editableBody),
       calloutBoxes: useOriginal
-        ? ((page.calloutBoxes as unknown as CalloutBox[]) ?? [])
-        : ((page.scrubbedCalloutBoxes as unknown as CalloutBox[])
-            ?? (page.calloutBoxes as unknown as CalloutBox[])
-            ?? []),
+        ? decodeCalloutBoxes(page.calloutBoxes)
+        : (decodeCalloutBoxes(page.scrubbedCalloutBoxes).length > 0
+            ? decodeCalloutBoxes(page.scrubbedCalloutBoxes)
+            : decodeCalloutBoxes(page.calloutBoxes)),
       totalCallHours: page.totalCallHours,
       heroImageUrl: page.heroImageUrl,
       customCss: page.customCss,
+      branding: pagePresentation.publishedBranding,
       publishedAt: page.publishedAt,
     };
   }
@@ -498,13 +597,17 @@ export class LandingPageEditor {
     totalCallHours: number;
     heroImageUrl: string | null;
     customCss: string | null;
+    branding: PublishedBrandingSettings | null;
   }> {
     const page = await this.prisma.landingPage.findUniqueOrThrow({
       where: { id: pageId },
       include: { story: { select: { accountId: true } } },
     });
 
-    const shouldAnonymize = await this.isAnonymizationEnabled(page.organizationId);
+    const pagePresentation = await this.getPagePresentationSettings(
+      page.organizationId
+    );
+    const shouldAnonymize = pagePresentation.anonymizationEnabled;
     const skipScrub = !shouldAnonymize || page.includeCompanyName;
     const scrubOpts = { skipScrub };
 
@@ -534,7 +637,7 @@ export class LandingPageEditor {
     // Scrub callout boxes
     const previewCallouts: CalloutBox[] = [];
     if (page.calloutBoxes && Array.isArray(page.calloutBoxes)) {
-      const callouts = page.calloutBoxes as unknown as CalloutBox[];
+      const callouts = decodeCalloutBoxes(page.calloutBoxes);
       for (const box of callouts) {
         const boxBody = await this.scrubber.scrubForAccount(
           page.story.accountId,
@@ -562,6 +665,7 @@ export class LandingPageEditor {
       totalCallHours: page.totalCallHours,
       heroImageUrl: page.heroImageUrl,
       customCss: page.customCss,
+      branding: pagePresentation.publishedBranding,
     };
   }
 
@@ -692,10 +796,7 @@ export class LandingPageEditor {
             email: v.publishedBy.email,
           }
         : null,
-      provenance:
-        v.provenance && typeof v.provenance === "object" && !Array.isArray(v.provenance)
-          ? (v.provenance as Record<string, unknown>)
-          : null,
+      provenance: v.provenance ? decodeProvenance(v.provenance) : null,
     }));
   }
 
@@ -783,17 +884,19 @@ export class LandingPageEditor {
 
   // ─── Private ──────────────────────────────────────────────────────
 
-  /**
-   * Checks the org's anonymizationEnabled setting. Defaults to true
-   * (anonymized) when no OrgSettings record exists.
-   */
-  private async isAnonymizationEnabled(organizationId: string): Promise<boolean> {
+  private async getPagePresentationSettings(organizationId: string): Promise<{
+    anonymizationEnabled: boolean;
+    publishedBranding: PublishedBrandingSettings | null;
+  }> {
     const settings = await this.prisma.orgSettings.findUnique({
       where: { organizationId },
-      select: { anonymizationEnabled: true },
+      select: { anonymizationEnabled: true, storyContext: true },
     });
-    // Default to true (anonymize) if no settings record exists
-    return settings?.anonymizationEnabled ?? true;
+    const storyContext = (settings?.storyContext ?? {}) as StoryContextSettings;
+    return {
+      anonymizationEnabled: settings?.anonymizationEnabled ?? true,
+      publishedBranding: storyContext.publishedBranding ?? null,
+    };
   }
 
   private async generateUniqueSlug(title: string): Promise<string> {
@@ -930,6 +1033,7 @@ export class LandingPageEditor {
   private validatePublishSnapshot(input: {
     title: string | null;
     body: string | null;
+    subtitle?: string | null;
     calloutBoxes: Array<{ title?: string | null; body?: string | null }>;
     fieldPrefix: "editable" | "scrubbed";
   }): PublishValidationIssue[] {
@@ -987,6 +1091,29 @@ export class LandingPageEditor {
         });
       }
     });
+
+    const bodyField =
+      input.fieldPrefix === "editable" ? "editable_body" : "scrubbed_body";
+    const titleField =
+      input.fieldPrefix === "editable" ? "title" : "scrubbed_title";
+    const subtitleField =
+      input.fieldPrefix === "editable" ? "subtitle" : "scrubbed_subtitle";
+    const linkCandidates = collectLinkCandidates([
+      { field: titleField, text: input.title },
+      { field: subtitleField, text: input.subtitle },
+      { field: bodyField, text: input.body },
+      ...input.calloutBoxes.flatMap((box, index) => [
+        { field: `callout_boxes.${index}.title`, text: box.title },
+        { field: `callout_boxes.${index}.body`, text: box.body },
+      ]),
+    ]);
+    for (const issue of validateLinkSyntax(linkCandidates)) {
+      issues.push({
+        field: issue.field || bodyField,
+        code: issue.code,
+        message: issue.message,
+      });
+    }
 
     return issues;
   }

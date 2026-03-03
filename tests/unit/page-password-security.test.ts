@@ -23,7 +23,8 @@ describe("page password security", () => {
           slug: "story-page",
           organizationId: "org-1",
           includeCompanyName: true,
-          editableBody: "Body content",
+          editableBody:
+            "This is a complete body with enough narrative detail to satisfy publish validation checks.",
           title: "Story title",
           subtitle: null,
           calloutBoxes: [],

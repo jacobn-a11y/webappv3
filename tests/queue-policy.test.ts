@@ -110,4 +110,53 @@ describe("queue-policy", () => {
         ?.callId
     ).toBe("call_metrics_1");
   });
+
+  it("allows deterministic job id reuse after a simulated worker restart", async () => {
+    const firstAdd = vi.fn().mockRejectedValue(new Error("redis down"));
+
+    await expect(
+      enqueueProcessCallJob({
+        queue: { add: firstAdd },
+        source: "worker-1",
+        enqueueAttempts: 1,
+        enqueueBaseDelayMs: 1,
+        options: { jobId: "process-call:restart-1" },
+        payload: {
+          callId: "call_restart_1",
+          organizationId: "org_1",
+          accountId: null,
+          hasTranscript: true,
+        },
+      })
+    ).rejects.toThrow("redis down");
+
+    const secondAdd = vi.fn().mockResolvedValue({});
+    await enqueueProcessCallJob({
+      queue: { add: secondAdd },
+      source: "worker-2",
+      enqueueAttempts: 1,
+      enqueueBaseDelayMs: 1,
+      options: { jobId: "process-call:restart-1" },
+      payload: {
+        callId: "call_restart_1",
+        organizationId: "org_1",
+        accountId: null,
+        hasTranscript: true,
+      },
+    });
+
+    expect(secondAdd).toHaveBeenCalledWith(
+      "process-call",
+      {
+        callId: "call_restart_1",
+        organizationId: "org_1",
+        accountId: null,
+        hasTranscript: true,
+      },
+      expect.objectContaining({
+        ...PROCESS_CALL_JOB_DEFAULT_OPTIONS,
+        jobId: "process-call:restart-1",
+      })
+    );
+  });
 });

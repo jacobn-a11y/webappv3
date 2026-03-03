@@ -4,6 +4,65 @@
 
 import type { FunnelStage, TaxonomyTopic, StoryFormat } from "../types/taxonomy";
 import type { StoryLength, StoryOutline, StoryTypeInput } from "../types/taxonomy";
+import { BASE_URL, buildRequestHeaders, request } from "./api/http";
+
+export {
+  acceptInvite,
+  clearAuthState,
+  completeSsoCallback,
+  createSelfServeCheckout,
+  createSelfServePortal,
+  getAuthMe,
+  getInviteDetails,
+  getSsoAuthorizationUrl,
+  getStoredAuthUser,
+  loginWithPassword,
+  logoutSelfService,
+  readSupportImpersonationToken,
+  setSupportImpersonationToken,
+  signupWithPassword,
+  subscribeAuthChanges,
+  updateAuthMe,
+} from "./api/auth";
+
+export {
+  createStoryComment,
+  buildStory,
+  buildStoryStream,
+  deleteStory,
+  downloadStoryExport,
+  getAccountStories,
+  getStoryComments,
+  getStoryLibrary,
+} from "./api/stories";
+
+export {
+  applySetupRolePresets,
+  getFirstValueRecommendations,
+  getSetupMvpQuickstartStatus,
+  getSetupPlans,
+  getSetupStatus,
+  indexSetupMvpGongAccounts,
+  saveSetupGovernanceDefaults,
+  saveSetupMvpGongAccountSelection,
+  saveSetupMvpQuickstartKeys,
+  saveSetupOrgProfile,
+  selectSetupPlan,
+} from "./api/setup";
+
+export {
+  approveTenantDeletion,
+  cancelAccountDeletion,
+  getAccountDeletionStatus,
+  getPlatformSettings,
+  getPlatformTenants,
+  getSupportAccountInfo,
+  optInSupportAccount,
+  optOutSupportAccount,
+  rejectTenantDeletion,
+  requestAccountDeletion,
+  updatePlatformSettings,
+} from "./api/platform";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -24,7 +83,13 @@ export interface StoryQuote {
   context: string | null;
   metric_type: string | null;
   metric_value: string | null;
+  confidence_score?: number;
   call_id?: string;
+  source_chunk_id?: string;
+  source_timestamp_ms?: number;
+  source_call_title?: string;
+  source_recording_url?: string;
+  transcript_deep_link?: string;
 }
 
 export interface BuildStoryResponse {
@@ -36,6 +101,7 @@ export interface BuildStoryResponse {
 
 export interface StoryLandingPageSummary {
   id: string;
+  slug?: string;
   status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
   published_at: string | null;
 }
@@ -85,6 +151,20 @@ export interface StoryLibraryItem extends StorySummary {
   };
 }
 
+export interface StoryComment {
+  id: string;
+  message: string;
+  parent_id: string | null;
+  target_type: "STORY" | "PAGE";
+  target_id: string;
+  created_at: string;
+  author: {
+    id: string;
+    name: string | null;
+    email: string;
+  } | null;
+}
+
 export interface AccountsListItem {
   id: string;
   name: string;
@@ -115,6 +195,7 @@ export interface CreateLandingPageRequest {
   story_id: string;
   title: string;
   subtitle?: string;
+  include_company_name?: boolean;
   callout_boxes?: Array<{
     title: string;
     body: string;
@@ -249,6 +330,13 @@ export interface StoryContextSettings {
   banned_claims: string[];
   writing_style_guide: string;
   approved_terminology: string[];
+  published_branding?: {
+    brand_name: string;
+    logo_url: string;
+    primary_color: string;
+    accent_color: string;
+    surface_color: string;
+  };
   default_story_length: StoryLength;
   default_story_outline: StoryOutline;
   default_story_format: StoryFormat | null;
@@ -452,6 +540,110 @@ export interface PipelineStatus {
     processed_count: number;
     success_count: number;
     failure_count: number;
+  }>;
+}
+
+export interface ReplayObservabilityEvent {
+  audit_log_id: string;
+  triggered_at: string;
+  action: string;
+  actor_user_id: string | null;
+  source_run_id: string | null;
+  source_run_type: string | null;
+  replay_run_id: string | null;
+  provider: string;
+  outcome: "COMPLETED" | "FAILED" | "RUNNING" | "PENDING";
+  replay_attempt: number | null;
+  replay_attempt_cap: number | null;
+  replay_window_hours: number | null;
+  source_run_age_hours: number | null;
+}
+
+export interface ReplayObservability {
+  window_hours: number;
+  filters: {
+    provider: string | null;
+    operator_user_id: string | null;
+    outcome: "COMPLETED" | "FAILED" | "RUNNING" | "PENDING" | null;
+    run_type: "SYNC" | "BACKFILL" | "MANUAL" | "REPLAY" | null;
+    limit: number;
+  };
+  totals: {
+    replay_triggers: number;
+    unique_operators: number;
+  };
+  outcomes: Array<{
+    outcome: "COMPLETED" | "FAILED" | "RUNNING" | "PENDING";
+    count: number;
+  }>;
+  providers: Array<{
+    provider: string;
+    replay_triggers: number;
+    completed: number;
+    failed: number;
+    running: number;
+    pending: number;
+  }>;
+  operators: Array<{
+    actor_user_id: string | null;
+    actor_user_email: string | null;
+    actor_user_name: string | null;
+    actor_user_role: string | null;
+    replay_triggers: number;
+    last_triggered_at: string;
+    providers: string[];
+  }>;
+  recent_events: ReplayObservabilityEvent[];
+}
+
+export type SellerAdoptionEventType =
+  | "modal_open"
+  | "preset_selected"
+  | "visibility_mode_selected"
+  | "generation_started"
+  | "story_generated"
+  | "generation_failed"
+  | "share_action"
+  | "library_action";
+
+export interface SellerAdoptionMetrics {
+  window_days: number;
+  totals: {
+    event_count: number;
+    flow_count: number;
+    user_count: number;
+  };
+  kpis: {
+    median_time_to_first_story_ms: number | null;
+    median_time_to_share_ms: number | null;
+  };
+  usage: {
+    stage_presets: Array<{ preset: string; count: number }>;
+    visibility_modes: Array<{ mode: string; count: number }>;
+  };
+  funnel: {
+    steps: Array<{
+      step: string;
+      flows: number;
+      conversion_from_start: number;
+    }>;
+    drop_off: Array<{
+      from_step: string;
+      to_step: string;
+      previous_flows: number;
+      current_flows: number;
+      drop_off_rate: number;
+    }>;
+  };
+  recent_events: Array<{
+    flow_id: string;
+    actor_user_id: string | null;
+    event_type: string;
+    stage_preset: string | null;
+    visibility_mode: string | null;
+    action_name: string | null;
+    duration_ms: number | null;
+    created_at: string;
   }>;
 }
 
@@ -762,11 +954,28 @@ export interface AutomationRule {
   updated_at: string;
 }
 
+export interface AutomationScheduledReport {
+  id: string;
+  title: string;
+  description: string | null;
+  created_at: string;
+  metrics: Record<string, number> | null;
+  window_days: number | null;
+}
+
 export interface FirstValueRecommendations {
   starter_story_templates: Array<{
     id: string;
     label: string;
     funnel_stage: string;
+  }>;
+  contextual_prompts?: Array<{
+    id: string;
+    title: string;
+    detail: string;
+    cta_label: string;
+    cta_path: string;
+    status: "DONE" | "READY" | "BLOCKED";
   }>;
   suggested_account: { id: string; name: string } | null;
   completion: {
@@ -844,6 +1053,24 @@ export interface ScimProvisioningSettings {
   identities_count: number;
 }
 
+export type OutboundWebhookEventType =
+  | "landing_page_published"
+  | "story_generated"
+  | "story_generation_failed"
+  | "scheduled_report_generated"
+  | "webhook.test"
+  | "ALL_EVENTS";
+
+export interface OutboundWebhookSubscription {
+  id: string;
+  url: string;
+  secret: string;
+  event_types: OutboundWebhookEventType[];
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // ─── Transcript Viewer ──────────────────────────────────────────────────────
 
 export interface TranscriptSegmentTag {
@@ -907,7 +1134,23 @@ export interface EditorPageData {
   visibility: string;
   includeCompanyName: boolean;
   canPublishNamed: boolean;
+  updatedAt: string;
 }
+
+export interface SavePageDraftConflict {
+  conflict: true;
+  expected_updated_at: string;
+  current_updated_at: string;
+  latest_editable_body: string;
+  message: string;
+}
+
+export interface SavePageDraftSuccess {
+  conflict: false;
+  updated_at: string;
+}
+
+export type SavePageDraftResult = SavePageDraftSuccess | SavePageDraftConflict;
 
 export interface ArtifactVersion {
   id: string;
@@ -1193,391 +1436,6 @@ export interface JourneyTimelineNode {
 
 // ─── Client ──────────────────────────────────────────────────────────────────
 
-const BASE_URL = "/api";
-const SUPPORT_IMPERSONATION_TOKEN_KEY = "support_impersonation_token";
-const APP_SESSION_TOKEN_KEY = "app_session_token";
-const APP_AUTH_USER_KEY = "app_auth_user";
-const AUTH_CHANGED_EVENT = "storyengine-auth-changed";
-
-function emitAuthChanged(): void {
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
-  }
-}
-
-function getSupportImpersonationToken(): string | null {
-  try {
-    return localStorage.getItem(SUPPORT_IMPERSONATION_TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function getSessionToken(): string | null {
-  try {
-    return localStorage.getItem(APP_SESSION_TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function readStoredAuthUser(): AuthUser | null {
-  try {
-    const raw = localStorage.getItem(APP_AUTH_USER_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as AuthUser;
-  } catch {
-    return null;
-  }
-}
-
-async function request<T>(
-  path: string,
-  options?: RequestInit
-): Promise<T> {
-  const headers = buildRequestHeaders(options?.headers);
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error ?? `Request failed: ${res.status}`);
-  }
-  return res.json();
-}
-
-function buildRequestHeaders(existing?: HeadersInit): Headers {
-  const headers = new Headers(existing ?? {});
-  headers.set("Content-Type", "application/json");
-  headers.set("Accept", "application/json");
-  const sessionToken = getSessionToken();
-  if (sessionToken) {
-    headers.set("x-session-token", sessionToken);
-    headers.set("x-csrf-token", sessionToken);
-  }
-  const supportToken = getSupportImpersonationToken();
-  if (supportToken) {
-    headers.set("x-support-impersonation-token", supportToken);
-  }
-  return headers;
-}
-
-export function setSupportImpersonationToken(token: string | null): void {
-  try {
-    if (!token) {
-      localStorage.removeItem(SUPPORT_IMPERSONATION_TOKEN_KEY);
-      return;
-    }
-    localStorage.setItem(SUPPORT_IMPERSONATION_TOKEN_KEY, token);
-  } catch {
-    // Ignore storage errors in restricted environments.
-  }
-}
-
-export function readSupportImpersonationToken(): string | null {
-  return getSupportImpersonationToken();
-}
-
-function persistAuthState(payload: { sessionToken: string; user: AuthUser }): void {
-  try {
-    localStorage.setItem(APP_SESSION_TOKEN_KEY, payload.sessionToken);
-    localStorage.setItem(APP_AUTH_USER_KEY, JSON.stringify(payload.user));
-    emitAuthChanged();
-  } catch {
-    // Ignore storage failures in restricted environments.
-  }
-}
-
-export function clearAuthState(): void {
-  try {
-    localStorage.removeItem(APP_SESSION_TOKEN_KEY);
-    localStorage.removeItem(APP_AUTH_USER_KEY);
-    localStorage.removeItem(SUPPORT_IMPERSONATION_TOKEN_KEY);
-    emitAuthChanged();
-  } catch {
-    // Ignore storage failures in restricted environments.
-  }
-}
-
-export function getStoredAuthUser(): AuthUser | null {
-  return readStoredAuthUser();
-}
-
-export function subscribeAuthChanges(listener: () => void): () => void {
-  if (typeof window === "undefined") {
-    return () => {};
-  }
-  window.addEventListener(AUTH_CHANGED_EVENT, listener);
-  return () => window.removeEventListener(AUTH_CHANGED_EVENT, listener);
-}
-
-export async function signupWithPassword(body: {
-  email: string;
-  password: string;
-  name?: string;
-  organizationName?: string;
-}): Promise<AuthResponse> {
-  const response = await request<AuthResponse>("/auth/signup", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-  persistAuthState({ sessionToken: response.sessionToken, user: response.user });
-  return response;
-}
-
-export async function getSsoAuthorizationUrl(screen?: "sign-up" | "sign-in"): Promise<string> {
-  const query =
-    screen === "sign-up" ? "?provider=google&screen=sign-up" : "?provider=google";
-  const response = await request<{ authorizationUrl: string }>(`/auth/login${query}`);
-  return response.authorizationUrl;
-}
-
-export async function completeSsoCallback(code: string): Promise<AuthResponse> {
-  const response = await request<AuthResponse>(
-    `/auth/callback?code=${encodeURIComponent(code)}`
-  );
-  persistAuthState({ sessionToken: response.sessionToken, user: response.user });
-  return response;
-}
-
-export async function loginWithPassword(body: {
-  email: string;
-  password: string;
-}): Promise<AuthResponse> {
-  const response = await request<AuthResponse>("/auth/login/password", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-  persistAuthState({ sessionToken: response.sessionToken, user: response.user });
-  return response;
-}
-
-export async function getAuthMe(): Promise<{ user: AuthUser; sessionExpiresAt: string }> {
-  const response = await request<{ user: AuthUser; sessionExpiresAt: string }>(
-    "/auth/me"
-  );
-  const existingToken = getSessionToken();
-  if (existingToken) {
-    persistAuthState({ sessionToken: existingToken, user: response.user });
-  }
-  return response;
-}
-
-export async function logoutSelfService(): Promise<void> {
-  try {
-    await request<{ success: boolean }>("/auth/logout", {
-      method: "POST",
-    });
-  } finally {
-    clearAuthState();
-  }
-}
-
-export async function getInviteDetails(token: string): Promise<{ invite: InviteSummary }> {
-  return request<{ invite: InviteSummary }>(`/auth/invites/${encodeURIComponent(token)}`);
-}
-
-export async function acceptInvite(token: string, body: {
-  password: string;
-  name?: string;
-}): Promise<AuthResponse> {
-  const response = await request<AuthResponse>(
-    `/auth/invites/${encodeURIComponent(token)}/accept`,
-    {
-      method: "POST",
-      body: JSON.stringify(body),
-    }
-  );
-  persistAuthState({ sessionToken: response.sessionToken, user: response.user });
-  return response;
-}
-
-export async function createSelfServeCheckout(plan: "STARTER" | "PROFESSIONAL" | "ENTERPRISE"): Promise<{
-  checkoutUrl: string;
-}> {
-  return request<{ checkoutUrl: string }>("/billing/checkout", {
-    method: "POST",
-    body: JSON.stringify({ plan }),
-  });
-}
-
-export async function createSelfServePortal(): Promise<{ portalUrl: string }> {
-  return request<{ portalUrl: string }>("/billing/portal", {
-    method: "POST",
-  });
-}
-
-export async function buildStory(
-  req: BuildStoryRequest,
-  options?: {
-    signal?: AbortSignal;
-  }
-): Promise<BuildStoryResponse> {
-  return request<BuildStoryResponse>("/stories/build", {
-    method: "POST",
-    body: JSON.stringify(req),
-    signal: options?.signal,
-  });
-}
-
-export async function buildStoryStream(
-  req: BuildStoryRequest,
-  handlers: {
-    onProgress?: (step: string) => void;
-    onToken?: (token: string) => void;
-    onComplete?: (payload: BuildStoryResponse) => void;
-  },
-  options?: {
-    signal?: AbortSignal;
-  }
-): Promise<BuildStoryResponse> {
-  const headers = buildRequestHeaders();
-  const response = await fetch(`${BASE_URL}/stories/build/stream`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(req),
-    signal: options?.signal,
-  });
-
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(body.error ?? `Request failed: ${response.status}`);
-  }
-
-  if (!response.body) {
-    throw new Error("Streaming not supported by this browser.");
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let currentEvent = "message";
-  let finalPayload: BuildStoryResponse | null = null;
-
-  const flushBlock = (block: string) => {
-    const lines = block.split("\n");
-    let event = currentEvent;
-    let data = "";
-    for (const line of lines) {
-      if (line.startsWith("event:")) {
-        event = line.slice(6).trim();
-      } else if (line.startsWith("data:")) {
-        data += line.slice(5).trim();
-      }
-    }
-
-    if (!data) return;
-    const parsed = JSON.parse(data) as Record<string, unknown>;
-
-    if (event === "progress" && typeof parsed.step === "string") {
-      handlers.onProgress?.(parsed.step);
-      return;
-    }
-
-    if (event === "token" && typeof parsed.token === "string") {
-      handlers.onToken?.(parsed.token);
-      return;
-    }
-
-    if (event === "complete") {
-      const payload = parsed as unknown as BuildStoryResponse;
-      finalPayload = payload;
-      handlers.onComplete?.(payload);
-      return;
-    }
-
-    if (event === "error") {
-      throw new Error(
-        typeof parsed.error === "string" ? parsed.error : "Streaming request failed"
-      );
-    }
-  };
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const blocks = buffer.split("\n\n");
-    buffer = blocks.pop() ?? "";
-    for (const block of blocks) {
-      if (block.trim().length === 0) continue;
-      flushBlock(block);
-    }
-  }
-
-  if (buffer.trim().length > 0) {
-    flushBlock(buffer);
-  }
-
-  if (!finalPayload) {
-    throw new Error("Story stream ended without a final payload.");
-  }
-
-  return finalPayload;
-}
-
-export async function getAccountStories(
-  accountId: string
-): Promise<{ stories: StorySummary[] }> {
-  return request<{ stories: StorySummary[] }>(`/stories/${accountId}`);
-}
-
-export async function getStoryLibrary(params?: {
-  search?: string;
-  story_type?: string;
-  status?: "DRAFT" | "PAGE_CREATED" | "PUBLISHED" | "ARCHIVED";
-  page?: number;
-  limit?: number;
-}): Promise<{
-  stories: StoryLibraryItem[];
-  pagination: {
-    page: number;
-    limit: number;
-    totalCount: number;
-    totalPages: number;
-  };
-}> {
-  const qs = new URLSearchParams();
-  if (params?.search) qs.set("search", params.search);
-  if (params?.story_type) qs.set("story_type", params.story_type);
-  if (params?.status) qs.set("status", params.status);
-  if (params?.page != null) qs.set("page", String(params.page));
-  if (params?.limit != null) qs.set("limit", String(params.limit));
-  const query = qs.toString();
-  return request<{
-    stories: StoryLibraryItem[];
-    pagination: {
-      page: number;
-      limit: number;
-      totalCount: number;
-      totalPages: number;
-    };
-  }>(`/stories/library${query ? `?${query}` : ""}`);
-}
-
-export async function deleteStory(storyId: string): Promise<{ deleted: boolean }> {
-  return request<{ deleted: boolean }>(`/stories/${storyId}`, {
-    method: "DELETE",
-  });
-}
-
-export async function downloadStoryExport(
-  storyId: string,
-  format: "pdf" | "docx"
-): Promise<Blob> {
-  const headers = buildRequestHeaders();
-  const response = await fetch(`${BASE_URL}/stories/${encodeURIComponent(storyId)}/export?format=${format}`, {
-    method: "GET",
-    headers,
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(body.error ?? `Request failed: ${response.status}`);
-  }
-  return response.blob();
-}
-
 export async function createLandingPage(
   req: CreateLandingPageRequest
 ): Promise<CreateLandingPageResponse> {
@@ -1743,6 +1601,32 @@ export async function getOpsDiagnostics(): Promise<OpsDiagnostics> {
   return request<OpsDiagnostics>("/dashboard/ops/diagnostics");
 }
 
+export async function trackSellerAdoptionEvent(body: {
+  event_type: SellerAdoptionEventType;
+  flow_id: string;
+  step?: string;
+  account_id?: string;
+  story_id?: string;
+  stage_preset?: string;
+  visibility_mode?: "ANONYMOUS" | "NAMED";
+  action_name?: string;
+  duration_ms?: number;
+  metadata?: Record<string, unknown>;
+}): Promise<{ accepted: boolean }> {
+  return request<{ accepted: boolean }>("/dashboard/seller-adoption/events", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getSellerAdoptionMetrics(
+  windowDays = 30
+): Promise<SellerAdoptionMetrics> {
+  return request<SellerAdoptionMetrics>(
+    `/dashboard/seller-adoption/metrics?window_days=${windowDays}`
+  );
+}
+
 export async function getQueueSloMetrics(): Promise<QueueSloMetrics> {
   return request<QueueSloMetrics>("/dashboard/ops/queue-slo");
 }
@@ -1753,6 +1637,25 @@ export async function getSyntheticHealth(): Promise<SyntheticHealth> {
 
 export async function getPipelineStatus(): Promise<PipelineStatus> {
   return request<PipelineStatus>("/dashboard/ops/pipeline-status");
+}
+
+export async function getReplayObservability(params?: {
+  window_hours?: number;
+  provider?: string;
+  outcome?: "COMPLETED" | "FAILED" | "RUNNING" | "PENDING";
+  run_type?: "SYNC" | "BACKFILL" | "MANUAL" | "REPLAY";
+  operator_user_id?: string;
+  limit?: number;
+}): Promise<ReplayObservability> {
+  const qs = new URLSearchParams();
+  if (params?.window_hours) qs.set("window_hours", String(params.window_hours));
+  if (params?.provider) qs.set("provider", params.provider);
+  if (params?.outcome) qs.set("outcome", params.outcome);
+  if (params?.run_type) qs.set("run_type", params.run_type);
+  if (params?.operator_user_id) qs.set("operator_user_id", params.operator_user_id);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return request<ReplayObservability>(`/dashboard/ops/replay-observability${suffix}`);
 }
 
 export async function getDrReadiness(): Promise<DrReadiness> {
@@ -1845,132 +1748,6 @@ export async function revokeSupportImpersonationSession(
     `/dashboard/support/impersonation/${sessionId}/revoke`,
     { method: "POST" }
   );
-}
-
-export async function getSetupMvpQuickstartStatus(): Promise<SetupMvpQuickstartStatus> {
-  return request<SetupMvpQuickstartStatus>("/setup/mvp/quickstart");
-}
-
-export async function saveSetupMvpQuickstartKeys(body: {
-  gong_api_key: string;
-  openai_api_key: string;
-  gong_base_url?: string;
-}): Promise<{ saved: boolean; status: SetupMvpQuickstartStatus }> {
-  return request<{ saved: boolean; status: SetupMvpQuickstartStatus }>(
-    "/setup/mvp/quickstart",
-    {
-      method: "POST",
-      body: JSON.stringify(body),
-    }
-  );
-}
-
-export async function indexSetupMvpGongAccounts(body?: {
-  refresh?: boolean;
-  max_scan_calls?: number;
-}): Promise<{
-  generated_at: string;
-  total_calls_indexed: number;
-  total_accounts: number;
-  accounts: SetupMvpAccountRow[];
-  cached: boolean;
-}> {
-  return request<{
-    generated_at: string;
-    total_calls_indexed: number;
-    total_accounts: number;
-    accounts: SetupMvpAccountRow[];
-    cached: boolean;
-  }>("/setup/mvp/quickstart/gong/accounts/index", {
-    method: "POST",
-    body: JSON.stringify(body ?? {}),
-  });
-}
-
-export async function saveSetupMvpGongAccountSelection(body: {
-  account_names: string[];
-  trigger_ingest?: boolean;
-}): Promise<{
-  saved: boolean;
-  selected_account_names: string[];
-  ingest_started: boolean;
-  idempotency_key: string | null;
-}> {
-  return request<{
-    saved: boolean;
-    selected_account_names: string[];
-    ingest_started: boolean;
-    idempotency_key: string | null;
-  }>("/setup/mvp/quickstart/gong/accounts/selection", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
-export async function getSetupStatus(): Promise<SetupStatus> {
-  return request<SetupStatus>("/setup/status");
-}
-
-export async function getSetupPlans(): Promise<SetupPlanCatalog> {
-  return request<SetupPlanCatalog>("/setup/step/plan");
-}
-
-export async function selectSetupPlan(plan: "FREE_TRIAL" | "STARTER" | "PROFESSIONAL" | "ENTERPRISE"): Promise<{
-  completed: boolean;
-  checkoutUrl: string | null;
-  status: SetupStatus;
-}> {
-  return request<{ completed: boolean; checkoutUrl: string | null; status: SetupStatus }>(
-    "/setup/step/plan",
-    {
-      method: "POST",
-      body: JSON.stringify({ plan }),
-    }
-  );
-}
-
-export async function saveSetupOrgProfile(body: {
-  company_overview?: string;
-  products?: string[];
-  target_personas?: string[];
-  target_industries?: string[];
-}): Promise<{ updated: boolean; status: SetupStatus }> {
-  return request<{ updated: boolean; status: SetupStatus }>("/setup/step/org-profile", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
-export async function saveSetupGovernanceDefaults(body: {
-  retention_days?: number;
-  audit_log_retention_days?: number;
-  legal_hold_enabled?: boolean;
-  pii_export_enabled?: boolean;
-  deletion_requires_approval?: boolean;
-  allow_named_story_exports?: boolean;
-  rto_target_minutes?: number;
-  rpo_target_minutes?: number;
-}): Promise<{ updated: boolean; status: SetupStatus }> {
-  return request<{ updated: boolean; status: SetupStatus }>(
-    "/setup/step/governance-defaults",
-    {
-      method: "POST",
-      body: JSON.stringify(body),
-    }
-  );
-}
-
-export async function applySetupRolePresets(): Promise<{
-  updated: boolean;
-  status: SetupStatus;
-}> {
-  return request<{ updated: boolean; status: SetupStatus }>("/setup/step/role-presets", {
-    method: "POST",
-  });
-}
-
-export async function getFirstValueRecommendations(): Promise<FirstValueRecommendations> {
-  return request<FirstValueRecommendations>("/setup/first-value/recommendations");
 }
 
 export async function getBillingReadiness(): Promise<BillingReadiness> {
@@ -2139,8 +1916,10 @@ export async function createAutomationRule(body: {
   });
 }
 
-export async function runAutomationRule(ruleId: string): Promise<{ status: string; error?: string | null }> {
-  return request<{ status: string; error?: string | null }>(`/dashboard/automations/${ruleId}/run`, {
+export async function runAutomationRule(
+  ruleId: string
+): Promise<{ status: string; error?: string | null; report_asset_id?: string | null }> {
+  return request<{ status: string; error?: string | null; report_asset_id?: string | null }>(`/dashboard/automations/${ruleId}/run`, {
     method: "POST",
   });
 }
@@ -2149,6 +1928,29 @@ export async function deleteAutomationRule(ruleId: string): Promise<{ deleted: b
   return request<{ deleted: boolean }>(`/dashboard/automations/${ruleId}`, {
     method: "DELETE",
   });
+}
+
+export async function getAutomationReports(): Promise<{ reports: AutomationScheduledReport[] }> {
+  return request<{ reports: AutomationScheduledReport[] }>("/dashboard/automations/reports");
+}
+
+export async function downloadAutomationReport(
+  assetId: string,
+  format: "csv" | "json"
+): Promise<Blob> {
+  const headers = buildRequestHeaders();
+  const response = await fetch(
+    `${BASE_URL}/dashboard/automations/reports/${encodeURIComponent(assetId)}/export?format=${format}`,
+    {
+      method: "GET",
+      headers,
+    }
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(body.error ?? `Request failed: ${response.status}`);
+  }
+  return response.blob();
 }
 
 export async function getIntegrationHealth(): Promise<{
@@ -2332,6 +2134,50 @@ export async function rotateScimToken(): Promise<{
   });
 }
 
+export async function getOutboundWebhookSubscriptions(): Promise<{
+  subscriptions: OutboundWebhookSubscription[];
+  supported_events: OutboundWebhookEventType[];
+}> {
+  return request<{
+    subscriptions: OutboundWebhookSubscription[];
+    supported_events: OutboundWebhookEventType[];
+  }>("/dashboard/security/outbound-webhooks");
+}
+
+export async function createOutboundWebhookSubscription(body: {
+  url: string;
+  event_types: OutboundWebhookEventType[];
+  enabled?: boolean;
+  secret?: string;
+}): Promise<{ subscription: OutboundWebhookSubscription }> {
+  return request<{ subscription: OutboundWebhookSubscription }>(
+    "/dashboard/security/outbound-webhooks",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    }
+  );
+}
+
+export async function deleteOutboundWebhookSubscription(
+  subscriptionId: string
+): Promise<void> {
+  return request<void>(`/dashboard/security/outbound-webhooks/${subscriptionId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function testOutboundWebhookSubscription(
+  subscriptionId: string
+): Promise<{ delivered: boolean; status: number; error: string | null }> {
+  return request<{ delivered: boolean; status: number; error: string | null }>(
+    `/dashboard/security/outbound-webhooks/${subscriptionId}/test`,
+    {
+      method: "POST",
+    }
+  );
+}
+
 export async function getRoleProfiles(): Promise<{
   roles: RoleProfile[];
   users: RoleAssignableUser[];
@@ -2380,11 +2226,61 @@ export async function getEditorPageData(pageId: string): Promise<EditorPageData>
   return request<EditorPageData>(`/pages/${pageId}/edit-data`);
 }
 
-export async function savePageDraft(pageId: string, body: string): Promise<void> {
-  return request<void>(`/pages/${pageId}`, {
+export async function savePageDraft(
+  pageId: string,
+  body: string,
+  options?: { expectedUpdatedAt?: string; allowConflict?: boolean }
+): Promise<SavePageDraftResult> {
+  const headers = buildRequestHeaders();
+  const payload: Record<string, unknown> = { editable_body: body };
+  if (options?.expectedUpdatedAt) {
+    payload.expected_updated_at = options.expectedUpdatedAt;
+  }
+
+  const response = await fetch(`${BASE_URL}/pages/${encodeURIComponent(pageId)}`, {
     method: "PATCH",
-    body: JSON.stringify({ editable_body: body }),
+    headers,
+    body: JSON.stringify(payload),
   });
+
+  const parsed = await response.json().catch(() => ({ error: response.statusText }));
+  if (response.status === 409 && parsed.error === "concurrency_conflict") {
+    const conflict: SavePageDraftConflict = {
+      conflict: true,
+      expected_updated_at:
+        typeof parsed.expected_updated_at === "string"
+          ? parsed.expected_updated_at
+          : options?.expectedUpdatedAt ?? "",
+      current_updated_at:
+        typeof parsed.current_updated_at === "string"
+          ? parsed.current_updated_at
+          : "",
+      latest_editable_body:
+        typeof parsed.latest_editable_body === "string"
+          ? parsed.latest_editable_body
+          : "",
+      message:
+        typeof parsed.message === "string"
+          ? parsed.message
+          : "This page has newer changes from another editor.",
+    };
+    if (options?.allowConflict) {
+      return conflict;
+    }
+    throw new Error(conflict.message);
+  }
+
+  if (!response.ok) {
+    throw new Error(parsed.error ?? `Request failed: ${response.status}`);
+  }
+
+  return {
+    conflict: false,
+    updated_at:
+      typeof parsed.updated_at === "string"
+        ? parsed.updated_at
+        : new Date().toISOString(),
+  };
 }
 
 export async function getPreviewScrub(pageId: string): Promise<{
@@ -2407,6 +2303,49 @@ export async function publishPage(pageId: string, options: {
   return request<{ url?: string; queued_for_approval?: boolean; request_id?: string }>(`/pages/${pageId}/publish`, {
     method: "POST",
     body: JSON.stringify(options),
+  });
+}
+
+export async function getScheduledPagePublish(pageId: string): Promise<{
+  enabled: boolean;
+  scheduled: boolean;
+  state?: string;
+  publish_at?: string;
+  visibility?: string;
+  expires_at?: string | null;
+}> {
+  return request<{
+    enabled: boolean;
+    scheduled: boolean;
+    state?: string;
+    publish_at?: string;
+    visibility?: string;
+    expires_at?: string | null;
+  }>(`/pages/${pageId}/scheduled-publish`);
+}
+
+export async function schedulePagePublish(
+  pageId: string,
+  options: {
+    publish_at: string;
+    visibility: string;
+    password?: string;
+    expires_at?: string;
+    release_notes?: string;
+  }
+): Promise<{ scheduled: boolean; publish_at: string }> {
+  return request<{ scheduled: boolean; publish_at: string }>(
+    `/pages/${pageId}/schedule-publish`,
+    {
+      method: "POST",
+      body: JSON.stringify(options),
+    }
+  );
+}
+
+export async function cancelScheduledPagePublish(pageId: string): Promise<void> {
+  await request<void>(`/pages/${pageId}/scheduled-publish`, {
+    method: "DELETE",
   });
 }
 
@@ -2700,66 +2639,4 @@ export interface SupportAccountInfo {
   email: string | null;
   label: string;
   opted_out: boolean;
-}
-
-// Platform owner endpoints
-export async function getPlatformSettings(): Promise<PlatformSettings> {
-  return request<PlatformSettings>("/platform/settings");
-}
-
-export async function updatePlatformSettings(data: Partial<PlatformSettings>): Promise<PlatformSettings> {
-  return request<PlatformSettings>("/platform/settings", {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
-}
-
-export async function getPlatformTenants(): Promise<{ tenants: TenantOverview[] }> {
-  return request<{ tenants: TenantOverview[] }>("/platform/tenants");
-}
-
-export async function approveTenantDeletion(orgId: string): Promise<void> {
-  await request<void>(`/platform/tenants/${orgId}/deletion/approve`, { method: "POST" });
-}
-
-export async function rejectTenantDeletion(orgId: string): Promise<void> {
-  await request<void>(`/platform/tenants/${orgId}/deletion/reject`, { method: "POST" });
-}
-
-// Tenant-side endpoints
-export async function getSupportAccountInfo(): Promise<SupportAccountInfo> {
-  return request<SupportAccountInfo>("/dashboard/support-account");
-}
-
-export async function optOutSupportAccount(): Promise<void> {
-  await request<void>("/dashboard/support-account/opt-out", { method: "POST" });
-}
-
-export async function optInSupportAccount(): Promise<void> {
-  await request<void>("/dashboard/support-account/opt-in", { method: "POST" });
-}
-
-export async function requestAccountDeletion(reason?: string): Promise<void> {
-  await request<void>("/dashboard/account/request-deletion", {
-    method: "POST",
-    body: JSON.stringify({ reason }),
-  });
-}
-
-export async function cancelAccountDeletion(): Promise<void> {
-  await request<void>("/dashboard/account/cancel-deletion", { method: "POST" });
-}
-
-export async function getAccountDeletionStatus(): Promise<{
-  has_request: boolean;
-  status: string | null;
-  scheduled_delete_at: string | null;
-  created_at: string | null;
-}> {
-  return request<{
-    has_request: boolean;
-    status: string | null;
-    scheduled_delete_at: string | null;
-    created_at: string | null;
-  }>("/dashboard/account/deletion-status");
 }

@@ -201,7 +201,8 @@ export class TranscriptProcessor {
     const resolved = await this.configService.resolveClientWithFailover(
       organizationId,
       userId ?? "system",
-      "OWNER" as UserRole
+      "OWNER" as UserRole,
+      { operation: "TRANSCRIPT_TAGGING" }
     );
 
     return resolved;

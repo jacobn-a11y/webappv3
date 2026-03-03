@@ -1,15 +1,10 @@
 import type { NextFunction, Request, Response } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { hashSessionToken } from "../lib/session-token.js";
-
-interface SecurityPolicy {
-  enforce_mfa_for_admin_actions?: boolean;
-  ip_allowlist_enabled?: boolean;
-  ip_allowlist?: string[]; // legacy fallback
-  session_controls_enabled?: boolean;
-  max_session_age_hours?: number;
-  reauth_interval_minutes?: number;
-}
+import {
+  decodeSecurityPolicy,
+  type SecurityPolicyBoundary,
+} from "../types/json-boundaries.js";
 
 interface EnforceOptions {
   requireMfaIfConfigured?: boolean;
@@ -26,7 +21,10 @@ interface AuthenticatedRequest extends Request {
   sessionId?: string;
 }
 
-const policyCache = new Map<string, { policy: SecurityPolicy; expiresAt: number }>();
+const policyCache = new Map<
+  string,
+  { policy: SecurityPolicyBoundary; expiresAt: number }
+>();
 const ipAllowlistCache = new Map<string, { entries: string[]; expiresAt: number }>();
 const CACHE_TTL_MS = resolvePositiveInt(process.env.SECURITY_POLICY_CACHE_TTL_SECONDS, 60) * 1000;
 
@@ -215,7 +213,7 @@ export function requireOrgSecurityPolicy(
 async function getOrgSecurityPolicy(
   prisma: PrismaClient,
   organizationId: string
-): Promise<SecurityPolicy> {
+): Promise<SecurityPolicyBoundary> {
   const now = Date.now();
   const cached = policyCache.get(organizationId);
   if (cached && cached.expiresAt > now) {
@@ -226,11 +224,7 @@ async function getOrgSecurityPolicy(
     where: { organizationId },
     select: { securityPolicy: true },
   });
-  const rawPolicy = settings?.securityPolicy;
-  const policy =
-    rawPolicy && typeof rawPolicy === "object" && !Array.isArray(rawPolicy)
-      ? (rawPolicy as SecurityPolicy)
-      : {};
+  const policy = decodeSecurityPolicy(settings?.securityPolicy);
   policyCache.set(organizationId, { policy, expiresAt: now + CACHE_TTL_MS });
   return policy;
 }

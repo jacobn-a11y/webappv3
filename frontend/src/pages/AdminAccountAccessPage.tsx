@@ -11,6 +11,7 @@ import {
   type AccountSearchResult,
   type CrmReport,
 } from "../lib/api";
+import { AdminErrorState } from "../components/admin/AdminErrorState";
 
 // ─── Utility Functions ────────────────────────────────────────────────────────
 
@@ -858,13 +859,19 @@ export function AdminAccountAccessPage() {
     if (toasts.length === 0) return null;
 
     return (
-      <div className="admin-access__toast-container">
+      <div
+        className="admin-access__toast-container"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
         {toasts.map((toast: Toast) => (
           <div
             key={toast.id}
             className={
               "admin-access__toast admin-access__toast--" + toast.type
             }
+            role="status"
           >
             {toast.message}
           </div>
@@ -886,23 +893,22 @@ export function AdminAccountAccessPage() {
       </header>
 
       {loading && (
-        <div className="admin-access__loading-state">
-          <div className="admin-access__spinner" />
+        <div className="admin-access__loading-state" role="status" aria-live="polite">
+          <div className="admin-access__spinner" aria-hidden="true" />
           <p>Loading users...</p>
         </div>
       )}
 
       {error && !loading && (
-        <div className="admin-access__error-state">
-          <p>Failed to load users: {error}</p>
-          <button type="button" onClick={loadUsers}>
-            Retry
-          </button>
-        </div>
+        <AdminErrorState
+          title="Account Access Request Failed"
+          message={error}
+          onRetry={() => void loadUsers()}
+        />
       )}
 
       {!loading && !error && users.length === 0 && (
-        <div className="admin-access__empty-state">
+        <div className="admin-access__empty-state" role="status" aria-live="polite">
           <p>No users found.</p>
         </div>
       )}

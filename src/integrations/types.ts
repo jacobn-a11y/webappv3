@@ -53,6 +53,65 @@ export type ProviderCredentials =
   | SalesforceCredentials
   | MergeDevCredentials;
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+export function toProviderCredentials(
+  value: Record<string, unknown>
+): ProviderCredentials {
+  if (isNonEmptyString(value.accessKey) && isNonEmptyString(value.accessKeySecret)) {
+    return {
+      accessKey: value.accessKey,
+      accessKeySecret: value.accessKeySecret,
+      ...(isNonEmptyString(value.baseUrl) ? { baseUrl: value.baseUrl } : {}),
+    };
+  }
+
+  if (isNonEmptyString(value.apiToken)) {
+    return {
+      apiToken: value.apiToken,
+      ...(isNonEmptyString(value.baseUrl) ? { baseUrl: value.baseUrl } : {}),
+    };
+  }
+
+  if (
+    isNonEmptyString(value.instanceUrl) &&
+    isNonEmptyString(value.accessToken) &&
+    isNonEmptyString(value.refreshToken) &&
+    isNonEmptyString(value.clientId) &&
+    isNonEmptyString(value.clientSecret)
+  ) {
+    return {
+      instanceUrl: value.instanceUrl,
+      accessToken: value.accessToken,
+      refreshToken: value.refreshToken,
+      clientId: value.clientId,
+      clientSecret: value.clientSecret,
+    };
+  }
+
+  if (
+    isNonEmptyString(value.apiKey) &&
+    isNonEmptyString(value.accountToken) &&
+    isNonEmptyString(value.webhookSecret)
+  ) {
+    return {
+      apiKey: value.apiKey,
+      accountToken: value.accountToken,
+      webhookSecret: value.webhookSecret,
+    };
+  }
+
+  throw new Error("Invalid provider credentials shape");
+}
+
+export function coerceProviderCredentials(
+  value: Record<string, unknown>
+): ProviderCredentials {
+  return JSON.parse(JSON.stringify(value));
+}
+
 // ─── Normalized Data Types ──────────────────────────────────────────────────
 // These are the canonical shapes that providers normalize their API responses
 // into. The sync engine then persists them through the existing Prisma models.

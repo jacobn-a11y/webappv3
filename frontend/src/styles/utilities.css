@@ -1,0 +1,28 @@
+.u-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.u-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.u-stack-sm > * + * {
+  margin-top: var(--space-2);
+}
+
+.u-stack-md > * + * {
+  margin-top: var(--space-4);
+}
+
+.u-text-muted {
+  color: var(--color-text-muted);
+}

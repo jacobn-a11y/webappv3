@@ -11,6 +11,7 @@ import {
 } from "../lib/api";
 import { formatEnumLabel } from "../lib/format";
 import { useToast } from "../components/Toast";
+import { AdminErrorState } from "../components/admin/AdminErrorState";
 
 const PERMISSIONS = [
   "CREATE_LANDING_PAGE",
@@ -204,7 +205,13 @@ export function AdminRolesPage() {
         </div>
       </div>
 
-      {error && <div className="alert alert--error" role="alert">{error}</div>}
+      {error && (
+        <AdminErrorState
+          title="Role Management Request Failed"
+          message={error}
+          onRetry={() => void load()}
+        />
+      )}
 
       {/* Role Form */}
       <div className="card card--elevated">

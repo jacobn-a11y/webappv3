@@ -13,6 +13,8 @@ import { createStoryRoutes } from "../../src/api/story-routes.js";
 import { createTrialGate } from "../../src/middleware/billing.js";
 import type { RAGEngine } from "../../src/services/rag-engine.js";
 import type { StoryBuilder } from "../../src/services/story-builder.js";
+import type { AIConfigService } from "../../src/services/ai-config.js";
+import type { AIUsageTracker } from "../../src/services/ai-usage-tracker.js";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import type Stripe from "stripe";
 
@@ -36,6 +38,14 @@ export interface TestAppOptions {
    * User role to inject via fake auth middleware for authenticated requests.
    */
   userRole?: UserRole;
+  /**
+   * Optional AIConfigService mock used by story routes.
+   */
+  aiConfigService?: unknown;
+  /**
+   * Optional AIUsageTracker mock used by story routes.
+   */
+  aiUsageTracker?: unknown;
 }
 
 /**
@@ -50,6 +60,8 @@ export function createTestApp(options: TestAppOptions) {
     organizationId = "org-test-active",
     userId = "user-test-1",
     userRole = "OWNER",
+    aiConfigService,
+    aiUsageTracker,
   } = options;
 
   const app = express();
@@ -72,6 +84,25 @@ export function createTestApp(options: TestAppOptions) {
   );
 
   // ─── Routes ─────────────────────────────────────────────────────────────
+  const resolvedAIConfigService =
+    aiConfigService ??
+    ({
+      resolveClientWithFailover: async () => ({
+        primary: {
+          client: {
+            complete: async () => {
+              throw new Error("AI client mock should not be called in this test");
+            },
+          },
+          isPlatformBilled: false,
+          provider: "openai",
+        },
+        fallback: null,
+        retryBudget: 1,
+      }),
+    } as unknown);
+  const resolvedAIUsageTracker = (aiUsageTracker ?? {}) as unknown;
+
   app.use(
     "/api/rag",
     trialGate,
@@ -80,7 +111,12 @@ export function createTestApp(options: TestAppOptions) {
   app.use(
     "/api/stories",
     trialGate,
-    createStoryRoutes(storyBuilder as StoryBuilder, prisma as PrismaClient)
+    createStoryRoutes(
+      storyBuilder as StoryBuilder,
+      prisma as PrismaClient,
+      resolvedAIConfigService as AIConfigService,
+      resolvedAIUsageTracker as AIUsageTracker
+    )
   );
 
   return app;

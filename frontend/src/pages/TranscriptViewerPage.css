@@ -205,6 +205,13 @@
   border-bottom: none;
 }
 
+.transcript__seg--deep-linked {
+  border-color: rgba(79, 70, 229, 0.45);
+  background: rgba(79, 70, 229, 0.08);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(79, 70, 229, 0.3);
+}
+
 .transcript__seg-gutter {
   display: flex;
   flex-direction: column;

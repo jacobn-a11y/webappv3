@@ -14,6 +14,7 @@ import {
   type PermissionUser,
   type PermissionAccessGrant,
 } from "../lib/api";
+import { AdminErrorState } from "../components/admin/AdminErrorState";
 import { useToast } from "../components/Toast";
 import { formatEnumLabel } from "../lib/format";
 
@@ -162,16 +163,12 @@ export function AdminPermissionsPage() {
             <h1 className="page__title">Permissions</h1>
           </div>
         </div>
-        <div className="alert alert--error" role="alert">
-          <p>{error}</p>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => window.location.reload()}
-          >
-            Retry
-          </button>
-        </div>
+        <AdminErrorState
+          title="Permissions Load Failed"
+          message={error}
+          onRetry={() => window.location.reload()}
+          guidance="Retry loading permissions. If this keeps failing, verify policy-service health and API access for this organization."
+        />
       </div>
     );
   }

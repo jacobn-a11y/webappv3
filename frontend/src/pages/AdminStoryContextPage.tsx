@@ -11,6 +11,7 @@ import {
   STORY_TYPE_INPUT_LABELS,
 } from "../types/taxonomy";
 import { useToast } from "../components/Toast";
+import { AdminErrorState } from "../components/admin/AdminErrorState";
 
 const EMPTY_SETTINGS: StoryContextSettings = {
   company_overview: "",
@@ -22,6 +23,13 @@ const EMPTY_SETTINGS: StoryContextSettings = {
   banned_claims: [],
   writing_style_guide: "",
   approved_terminology: [],
+  published_branding: {
+    brand_name: "",
+    logo_url: "",
+    primary_color: "",
+    accent_color: "",
+    surface_color: "",
+  },
   default_story_length: "MEDIUM",
   default_story_outline: "CHRONOLOGICAL_JOURNEY",
   default_story_format: null,
@@ -53,7 +61,17 @@ export function AdminStoryContextPage() {
   useEffect(() => {
     getStoryContextSettings()
       .then((data) => {
-        setSettings(data);
+        setSettings({
+          ...EMPTY_SETTINGS,
+          ...data,
+          published_branding: {
+            brand_name: data.published_branding?.brand_name ?? "",
+            logo_url: data.published_branding?.logo_url ?? "",
+            primary_color: data.published_branding?.primary_color ?? "",
+            accent_color: data.published_branding?.accent_color ?? "",
+            surface_color: data.published_branding?.surface_color ?? "",
+          },
+        });
         setProductsCsv(data.products.join(", "));
         setPersonasCsv(data.target_personas.join(", "));
         setIndustriesCsv(data.target_industries.join(", "));
@@ -104,7 +122,13 @@ export function AdminStoryContextPage() {
         </div>
       </div>
 
-      {error && <div className="alert alert--error" role="alert">{error}</div>}
+      {error && (
+        <AdminErrorState
+          title="Story Context Request Failed"
+          message={error}
+          onRetry={() => window.location.reload()}
+        />
+      )}
 
       <div className="card card--elevated form-container--wide">
         <div className="card__header">
@@ -170,6 +194,99 @@ export function AdminStoryContextPage() {
               }
               rows={4}
               placeholder="Tone guidelines, brand voice notes, style preferences..."
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="card card--elevated form-container--wide">
+        <div className="card__header">
+          <div className="card__title">Published Surface Branding</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="form-group">
+            <label className="form-group__label">Brand Name</label>
+            <input
+              className="form-input"
+              value={settings.published_branding?.brand_name ?? ""}
+              onChange={(e) =>
+                setSettings((p) => ({
+                  ...p,
+                  published_branding: {
+                    ...(p.published_branding ?? EMPTY_SETTINGS.published_branding!),
+                    brand_name: e.target.value,
+                  },
+                }))
+              }
+              placeholder="Acme Inc."
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Logo URL</label>
+            <input
+              className="form-input"
+              value={settings.published_branding?.logo_url ?? ""}
+              onChange={(e) =>
+                setSettings((p) => ({
+                  ...p,
+                  published_branding: {
+                    ...(p.published_branding ?? EMPTY_SETTINGS.published_branding!),
+                    logo_url: e.target.value,
+                  },
+                }))
+              }
+              placeholder="https://cdn.example.com/logo.png"
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Primary Color</label>
+            <input
+              className="form-input"
+              value={settings.published_branding?.primary_color ?? ""}
+              onChange={(e) =>
+                setSettings((p) => ({
+                  ...p,
+                  published_branding: {
+                    ...(p.published_branding ?? EMPTY_SETTINGS.published_branding!),
+                    primary_color: e.target.value,
+                  },
+                }))
+              }
+              placeholder="#4f46e5"
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Accent/Hover Color</label>
+            <input
+              className="form-input"
+              value={settings.published_branding?.accent_color ?? ""}
+              onChange={(e) =>
+                setSettings((p) => ({
+                  ...p,
+                  published_branding: {
+                    ...(p.published_branding ?? EMPTY_SETTINGS.published_branding!),
+                    accent_color: e.target.value,
+                  },
+                }))
+              }
+              placeholder="#4338ca"
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-group__label">Surface Color</label>
+            <input
+              className="form-input"
+              value={settings.published_branding?.surface_color ?? ""}
+              onChange={(e) =>
+                setSettings((p) => ({
+                  ...p,
+                  published_branding: {
+                    ...(p.published_branding ?? EMPTY_SETTINGS.published_branding!),
+                    surface_color: e.target.value,
+                  },
+                }))
+              }
+              placeholder="#ffffff"
             />
           </div>
         </div>

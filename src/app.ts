@@ -23,6 +23,7 @@ import { createAuthRoutes } from "./api/auth-routes.js";
 import { createScimRoutes } from "./api/scim-routes.js";
 import { createRAGRoutes } from "./api/rag-routes.js";
 import { createStoryRoutes } from "./api/story-routes.js";
+import { createStoryCommentRoutes } from "./api/story-comments-routes.js";
 import { createLandingPageRoutes } from "./api/landing-page-routes.js";
 import { createExportRoutes } from "./api/export-routes.js";
 import { createPublicPageRoutes } from "./api/public-page-renderer.js";
@@ -260,13 +261,22 @@ export function createApp(deps: AppDeps): express.Application {
     apiRateLimiter,
     createStoryRoutes(storyBuilder, prisma, aiConfigService, aiUsageTracker)
   );
+  app.use(
+    "/api/stories",
+    trialGate,
+    apiRateLimiter,
+    createStoryCommentRoutes(prisma)
+  );
 
   // Landing Pages — CRUD, edit, publish, share (behind trial gate)
   app.use(
     "/api/pages",
     trialGate,
     apiRateLimiter,
-    createLandingPageRoutes(prisma)
+    createLandingPageRoutes(prisma, {
+      postPublishValidationQueue: queues.postPublishValidationQueue,
+      scheduledPublishQueue: queues.scheduledPagePublishQueue,
+    })
   );
 
   // Landing Page Exports — PDF, Google Doc, Slack (behind trial gate)

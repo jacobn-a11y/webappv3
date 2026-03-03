@@ -15,12 +15,22 @@
  */
 
 import crypto from "crypto";
-import type { PrismaClient, AIProviderType, UserRole } from "@prisma/client";
+import type {
+  PrismaClient,
+  AIProviderType,
+  UserRole,
+  AIOperation,
+} from "@prisma/client";
 import {
   createAIClient,
   type AIClient,
   type AIProviderName,
 } from "./ai-client.js";
+import { decodeDataGovernancePolicy } from "../types/json-boundaries.js";
+import {
+  resolveOperationModelPolicy,
+} from "./ai-operation-policy.js";
+import logger from "../lib/logger.js";
 
 // ─── Encryption ──────────────────────────────────────────────────────────────
 
@@ -106,6 +116,12 @@ export interface ResolvedAIClient {
   model?: string;
 }
 
+export interface ResolveAIClientOverrides {
+  operation?: AIOperation;
+  provider?: AIProviderName;
+  model?: string;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 export class AIConfigService {
@@ -130,7 +146,7 @@ export class AIConfigService {
     organizationId: string,
     userId: string,
     userRole: UserRole,
-    overrides?: { provider?: AIProviderName; model?: string }
+    overrides?: ResolveAIClientOverrides
   ): Promise<ResolvedAIClient> {
     const orgSettings = await this.prisma.orgAISettings.findUnique({
       where: { organizationId },
@@ -143,13 +159,52 @@ export class AIConfigService {
       userRole
     );
 
-    // Determine the target provider and model
-    const targetProvider =
-      overrides?.provider ??
-      (orgSettings?.defaultProvider as AIProviderName | null) ??
-      (access.allowedProviders[0] ?? "openai");
+    const operation = overrides?.operation ?? "STORY_GENERATION";
 
-    const targetModel = overrides?.model ?? orgSettings?.defaultModel ?? undefined;
+    const operationPolicy = resolveOperationModelPolicy({
+      operation,
+      orgDefaultProvider: orgSettings?.defaultProvider,
+      orgDefaultModel: orgSettings?.defaultModel,
+      overrideProvider: overrides?.provider,
+      overrideModel: overrides?.model,
+    });
+
+    // Determine the target provider and model
+    let targetProvider = operationPolicy.provider;
+    let targetModel = operationPolicy.model;
+    let providerSource: "override" | "org_default" | "operation_default" | "access_default" =
+      operationPolicy.providerSource;
+    let modelSource: "override" | "org_default" | "operation_default" | "access_default" =
+      operationPolicy.modelSource;
+
+    // Preserve least-surprise behavior when role/user access narrows choices.
+    if (
+      providerSource === "operation_default" &&
+      access.allowedProviders.length > 0 &&
+      !access.allowedProviders.includes(targetProvider)
+    ) {
+      targetProvider = access.allowedProviders[0];
+      providerSource = "access_default";
+    }
+
+    if (
+      modelSource === "operation_default" &&
+      access.allowedModels.length > 0 &&
+      !access.allowedModels.includes(targetModel)
+    ) {
+      targetModel = access.allowedModels[0];
+      modelSource = "access_default";
+    }
+
+    logger.info("Resolved AI operation policy", {
+      organizationId,
+      userId,
+      operation,
+      provider: targetProvider,
+      providerSource,
+      model: targetModel,
+      modelSource,
+    });
 
     // Validate the user has access to this provider
     if (
@@ -195,7 +250,7 @@ export class AIConfigService {
         client,
         isPlatformBilled: false,
         provider: targetProvider,
-        model: targetModel,
+        model: targetModel ?? undefined,
       };
     }
 
@@ -205,7 +260,7 @@ export class AIConfigService {
       client,
       isPlatformBilled: true,
       provider: targetProvider,
-      model: targetModel,
+      model: targetModel ?? undefined,
     };
   }
 
@@ -213,12 +268,13 @@ export class AIConfigService {
     organizationId: string,
     userId: string,
     userRole: UserRole,
-    overrides?: { provider?: AIProviderName; model?: string }
+    overrides?: ResolveAIClientOverrides
   ): Promise<{
     primary: ResolvedAIClient;
     fallback: ResolvedAIClient | null;
     retryBudget: number;
   }> {
+    const operation = overrides?.operation ?? "STORY_GENERATION";
     const [primary, retryBudget, access] = await Promise.all([
       this.resolveClient(organizationId, userId, userRole, overrides),
       this.resolveRetryBudget(organizationId),
@@ -235,7 +291,6 @@ export class AIConfigService {
     for (const candidate of fallbackOrder) {
       if (!allowedProviders.includes(candidate)) continue;
 
-      // eslint-disable-next-line no-await-in-loop
       const available = await this.isProviderAvailableForOrg(
         organizationId,
         candidate
@@ -245,12 +300,11 @@ export class AIConfigService {
       try {
         // Model override is intentionally omitted for fallback providers to avoid
         // cross-provider model mismatches.
-        // eslint-disable-next-line no-await-in-loop
         const fallback = await this.resolveClient(
           organizationId,
           userId,
           userRole,
-          { provider: candidate }
+          { operation, provider: candidate }
         );
         if (fallback.provider !== primary.provider) {
           return { primary, fallback, retryBudget };
@@ -675,11 +729,7 @@ export class AIConfigService {
       where: { organizationId },
       select: { dataGovernancePolicy: true },
     });
-    const rawPolicy = settings?.dataGovernancePolicy;
-    const policy =
-      rawPolicy && typeof rawPolicy === "object" && !Array.isArray(rawPolicy)
-        ? (rawPolicy as Record<string, unknown>)
-        : {};
+    const policy = decodeDataGovernancePolicy(settings?.dataGovernancePolicy);
     const orgBudget = policy.ai_retry_budget;
     if (typeof orgBudget !== "number" || !Number.isFinite(orgBudget)) {
       return defaultBudget;

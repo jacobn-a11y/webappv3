@@ -34,6 +34,33 @@ const FUNNEL_COLORS: Record<string, string> = {
   Internal: "#8A888E",
 };
 
+const SEGMENT_OPTIONS = [
+  { value: "ALL", label: "All Segments" },
+  { value: "Top of Funnel", label: "Top of Funnel" },
+  { value: "Mid-Funnel", label: "Mid-Funnel" },
+  { value: "Bottom of Funnel", label: "Bottom of Funnel" },
+  { value: "Post-Sale", label: "Post-Sale" },
+] as const;
+
+const FOCUS_OPTIONS = [
+  { value: "ALL", label: "All Metrics" },
+  { value: "PIPELINE", label: "Pipeline Focus" },
+  { value: "CONTENT", label: "Content Focus" },
+  { value: "ADOPTION", label: "Adoption Focus" },
+] as const;
+
+type SegmentValue = (typeof SEGMENT_OPTIONS)[number]["value"];
+type FocusValue = (typeof FOCUS_OPTIONS)[number]["value"];
+
+interface SavedAnalyticsView {
+  id: string;
+  name: string;
+  segment: SegmentValue;
+  focus: FocusValue;
+}
+
+const SAVED_ANALYTICS_VIEWS_KEY = "storyengine.analytics.savedViews.v1";
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function formatNumber(n: number): string {
@@ -89,6 +116,38 @@ function useChart(
   return canvasRef;
 }
 
+function loadSavedAnalyticsViews(): SavedAnalyticsView[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(SAVED_ANALYTICS_VIEWS_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw) as SavedAnalyticsView[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(
+      (view) =>
+        typeof view.id === "string" &&
+        typeof view.name === "string" &&
+        SEGMENT_OPTIONS.some((segment) => segment.value === view.segment) &&
+        FOCUS_OPTIONS.some((focus) => focus.value === view.focus)
+    );
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedAnalyticsViews(views: SavedAnalyticsView[]): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(SAVED_ANALYTICS_VIEWS_KEY, JSON.stringify(views));
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function AnalyticsDashboardPage() {
@@ -96,6 +155,13 @@ export function AnalyticsDashboardPage() {
   const [kpis, setKpis] = useState<RevOpsKpiData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [segment, setSegment] = useState<SegmentValue>("ALL");
+  const [focus, setFocus] = useState<FocusValue>("ALL");
+  const [savedViews, setSavedViews] = useState<SavedAnalyticsView[]>([]);
+
+  useEffect(() => {
+    setSavedViews(loadSavedAnalyticsViews());
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -110,6 +176,54 @@ export function AnalyticsDashboardPage() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  const segmentTopics =
+    data && segment !== "ALL"
+      ? data.topTopics.filter((topic) => topic.funnelStage === segment)
+      : data?.topTopics ?? [];
+  const segmentVolume = data?.funnelDistribution.find((item) => item.stage === segment)?.count ?? 0;
+  const segmentTotal = data?.funnelDistribution.reduce((sum, row) => sum + row.count, 0) ?? 0;
+  const segmentSharePct =
+    segment !== "ALL" && segmentTotal > 0
+      ? Math.round((segmentVolume / segmentTotal) * 100)
+      : null;
+
+  const showPipelineSections = focus === "ALL" || focus === "PIPELINE";
+  const showContentSections = focus === "ALL" || focus === "CONTENT";
+  const showAdoptionSections = focus === "ALL" || focus === "ADOPTION";
+
+  const saveCurrentView = () => {
+    const name = window.prompt("Saved view name");
+    if (!name || !name.trim()) {
+      return;
+    }
+    const next: SavedAnalyticsView[] = [
+      {
+        id: `${Date.now()}`,
+        name: name.trim(),
+        segment,
+        focus,
+      },
+      ...savedViews,
+    ].slice(0, 10);
+    setSavedViews(next);
+    persistSavedAnalyticsViews(next);
+  };
+
+  const applySavedView = (viewId: string) => {
+    const view = savedViews.find((item) => item.id === viewId);
+    if (!view) {
+      return;
+    }
+    setSegment(view.segment);
+    setFocus(view.focus);
+  };
+
+  const deleteSavedView = (viewId: string) => {
+    const next = savedViews.filter((view) => view.id !== viewId);
+    setSavedViews(next);
+    persistSavedAnalyticsViews(next);
+  };
 
   if (loading) {
     return (
@@ -137,6 +251,88 @@ export function AnalyticsDashboardPage() {
           Org-wide metrics and performance insights
         </p>
       </header>
+
+      <div className="analytics__view-controls">
+        <select
+          className="form-input"
+          value={segment}
+          onChange={(event) => setSegment(event.target.value as SegmentValue)}
+          aria-label="Filter analytics by funnel segment"
+        >
+          {SEGMENT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <select
+          className="form-input"
+          value={focus}
+          onChange={(event) => setFocus(event.target.value as FocusValue)}
+          aria-label="Choose analytics focus"
+        >
+          {FOCUS_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <button type="button" className="btn btn--secondary btn--sm" onClick={saveCurrentView}>
+          Save View
+        </button>
+        {savedViews.length > 0 && (
+          <select
+            className="form-input"
+            value=""
+            onChange={(event) => {
+              if (event.target.value) {
+                applySavedView(event.target.value);
+              }
+            }}
+            aria-label="Load saved analytics view"
+          >
+            <option value="">Load Saved View…</option>
+            {savedViews.map((view) => (
+              <option key={view.id} value={view.id}>
+                {view.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {savedViews.length > 0 && (
+        <div className="analytics__saved-views">
+          {savedViews.map((view) => (
+            <button
+              key={view.id}
+              type="button"
+              className="analytics__saved-pill"
+              onClick={() => applySavedView(view.id)}
+              title={`${view.segment} • ${view.focus}`}
+            >
+              {view.name}
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  deleteSavedView(view.id);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    deleteSavedView(view.id);
+                  }
+                }}
+              >
+                ×
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="analytics__summary-grid">
@@ -199,9 +395,22 @@ export function AnalyticsDashboardPage() {
             </svg>
           }
         />
+        {segment !== "ALL" && (
+          <SummaryCard
+            title={`${segment} Calls`}
+            value={`${formatNumber(segmentVolume)}${segmentSharePct != null ? ` (${segmentSharePct}%)` : ""}`}
+            icon={
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#14B8A6" strokeWidth="2" aria-hidden="true">
+                <path d="M3 12h18" />
+                <path d="M3 6h18" />
+                <path d="M3 18h18" />
+              </svg>
+            }
+          />
+        )}
       </div>
 
-      {kpis && (
+      {kpis && showPipelineSections && (
         <div className="analytics__section">
           <h3 className="analytics__section-title">RevOps KPI Package (Last {kpis.window_days} Days)</h3>
           <div className="analytics__summary-grid">
@@ -252,6 +461,7 @@ export function AnalyticsDashboardPage() {
       )}
 
       {/* Charts Row 1 */}
+      {showPipelineSections && (
       <div className="analytics__charts-row">
         <div className="analytics__chart-card">
           <h3 className="analytics__chart-title">Calls Per Week</h3>
@@ -262,8 +472,10 @@ export function AnalyticsDashboardPage() {
           <FunnelDonutChart data={data} />
         </div>
       </div>
+      )}
 
       {/* Charts Row 2 */}
+      {showPipelineSections && (
       <div className="analytics__charts-row">
         <div className="analytics__chart-card">
           <h3 className="analytics__chart-title">
@@ -278,8 +490,10 @@ export function AnalyticsDashboardPage() {
           <ResolutionChart data={data} />
         </div>
       </div>
+      )}
 
       {/* Charts Row 3 */}
+      {showAdoptionSections && (
       <div className="analytics__charts-row analytics__charts-row--full">
         <div className="analytics__chart-card">
           <h3 className="analytics__chart-title">
@@ -288,14 +502,18 @@ export function AnalyticsDashboardPage() {
           <PageViewsChart data={data} />
         </div>
       </div>
+      )}
 
       {/* Taxonomy Topics Treemap */}
+      {showContentSections && (
       <div className="analytics__section">
         <h3 className="analytics__section-title">Taxonomy Topics</h3>
-        <TaxonomyTreemap topics={data.topTopics} />
+        <TaxonomyTreemap topics={segmentTopics} />
       </div>
+      )}
 
       {/* Tables Row */}
+      {showContentSections && (
       <div className="analytics__tables-row">
         <div className="analytics__table-card">
           <h3 className="analytics__table-title">Quote Leaderboard</h3>
@@ -306,6 +524,7 @@ export function AnalyticsDashboardPage() {
           <TopPagesTable pages={data.topPagesByViews} />
         </div>
       </div>
+      )}
     </div>
   );
 }

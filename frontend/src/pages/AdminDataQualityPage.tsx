@@ -10,6 +10,12 @@ import {
   type StoryQualityFeedbackRow,
 } from "../lib/api";
 import { badgeClass, formatEnumLabel } from "../lib/format";
+import { AdminErrorState } from "../components/admin/AdminErrorState";
+import {
+  AdminKpi,
+  AdminKpiGrid,
+  AdminSection,
+} from "../components/admin/AdminLayoutPrimitives";
 
 export function AdminDataQualityPage() {
   const [overview, setOverview] = useState<DataQualityOverview | null>(null);
@@ -100,30 +106,44 @@ export function AdminDataQualityPage() {
   };
 
   if (loading) {
-    return <div className="state-view"><div className="spinner" /><div className="state-view__title">Loading quality dashboard...</div></div>;
+    return (
+      <div className="state-view" role="status" aria-live="polite">
+        <div className="spinner" />
+        <div className="state-view__title">Loading quality dashboard...</div>
+      </div>
+    );
   }
 
   return (
     <div className="page">
       <div className="page__header"><div className="page__header-text"><h1 className="page__title">Data Quality & Trust</h1><p className="page__subtitle">Monitor story confidence, lineage coverage, and human feedback</p></div></div>
-      {error && <div className="alert alert--error">{error}</div>}
-
-      {overview && (
-        <section className="card card--elevated">
-          <div>Stories Total: {overview.stories_total}</div>
-          <div>Confidence 30d: {overview.confidence.avg_30d}</div>
-          <div>
-            Drift: {formatEnumLabel(overview.confidence.drift_status)} ({overview.confidence.drift_delta})
-          </div>
-          <div>Lineage Claims 30d: {overview.lineage.claims_30d}</div>
-          <div>Lineage Coverage: {overview.lineage.coverage_ratio}</div>
-          <div>Sync Failures 30d: {overview.sync_errors.failures_30d}</div>
-          <div>Human Feedback Open: {overview.human_feedback.open}</div>
-        </section>
+      {error && (
+        <AdminErrorState
+          title="Quality Data Request Failed"
+          message={error}
+          onRetry={() => void load()}
+        />
       )}
 
-      <section className="card card--elevated">
-        <h2>Lookup Story Lineage</h2>
+      {overview && (
+        <AdminSection title="Quality Overview">
+          <AdminKpiGrid>
+            <AdminKpi label="Stories Total" value={overview.stories_total} />
+            <AdminKpi label="Confidence (30d)" value={overview.confidence.avg_30d} />
+            <AdminKpi
+              label="Drift"
+              value={formatEnumLabel(overview.confidence.drift_status)}
+              hint={overview.confidence.drift_delta}
+            />
+            <AdminKpi label="Lineage Claims (30d)" value={overview.lineage.claims_30d} />
+            <AdminKpi label="Lineage Coverage" value={overview.lineage.coverage_ratio} />
+            <AdminKpi label="Sync Failures (30d)" value={overview.sync_errors.failures_30d} />
+            <AdminKpi label="Open Feedback" value={overview.human_feedback.open} />
+          </AdminKpiGrid>
+        </AdminSection>
+      )}
+
+      <AdminSection title="Lookup Story Lineage">
         <div className="form-row">
           <input
             value={storyId}
@@ -147,7 +167,7 @@ export function AdminDataQualityPage() {
             </ul>
           </div>
         )}
-      </section>
+      </AdminSection>
 
       <section className="card card--elevated">
         <h2>Submit Quality Feedback (Human-in-the-loop)</h2>

@@ -13,6 +13,7 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { z } from "zod";
 import { AIConfigService } from "../services/ai-config.js";
 import { PROVIDER_MODELS, type AIProviderName } from "../services/ai-client.js";
+import { parseAIProviderName } from "../services/provider-policy.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -192,8 +193,8 @@ export function createPlatformAdminRoutes(
   router.delete(
     "/models/pricing/:provider/:modelId",
     async (req: Request, res: Response) => {
-      const provider = req.params.provider as AIProviderName;
-      if (!["openai", "anthropic", "google"].includes(provider)) {
+      const provider = parseAIProviderName(req.params.provider);
+      if (!provider) {
         res.status(400).json({ error: "Invalid provider" });
         return;
       }

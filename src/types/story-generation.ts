@@ -29,6 +29,15 @@ export interface StoryContextSettings {
   bannedClaims?: string[];
   writingStyleGuide?: string;
   approvedTerminology?: string[];
+  publishedBranding?: PublishedBrandingSettings;
+}
+
+export interface PublishedBrandingSettings {
+  brandName?: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  accentColor?: string;
+  surfaceColor?: string;
 }
 
 export interface StoryPromptDefaults {

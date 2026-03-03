@@ -15,6 +15,7 @@ import type { PrismaClient } from "@prisma/client";
 import { LandingPageExporter } from "../services/landing-page-exports.js";
 import { requirePageOwnerOrPermission } from "../middleware/permissions.js";
 import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.js";
+import { decodeDataGovernancePolicy } from "../types/json-boundaries.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -25,11 +26,6 @@ const GoogleDocExportSchema = z.object({
 const SlackExportSchema = z.object({
   webhook_url: z.string().url().optional(),
 });
-
-interface DataGovernancePolicy {
-  pii_export_enabled?: boolean;
-  allow_named_story_exports?: boolean;
-}
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
@@ -59,11 +55,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
       where: { organizationId },
       select: { dataGovernancePolicy: true },
     });
-    const rawPolicy = settings?.dataGovernancePolicy;
-    const policy =
-      rawPolicy && typeof rawPolicy === "object" && !Array.isArray(rawPolicy)
-        ? (rawPolicy as DataGovernancePolicy)
-        : {};
+    const policy = decodeDataGovernancePolicy(settings?.dataGovernancePolicy);
     if (policy.pii_export_enabled === false) {
       res.status(403).json({
         error: "policy_denied",

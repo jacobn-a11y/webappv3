@@ -10,6 +10,7 @@ import {
 } from "../lib/api";
 import { formatEnumLabel, badgeClass } from "../lib/format";
 import { useToast } from "../components/Toast";
+import { AdminErrorState } from "../components/admin/AdminErrorState";
 
 export function AdminBillingReadinessPage() {
   const [readiness, setReadiness] = useState<BillingReadiness | null>(null);
@@ -89,7 +90,13 @@ export function AdminBillingReadinessPage() {
         </div>
       </div>
 
-      {error && <div className="alert alert--error">{error}</div>}
+      {error && (
+        <AdminErrorState
+          title="Billing Request Failed"
+          message={error}
+          onRetry={() => void load()}
+        />
+      )}
 
       {readiness && (
         <>

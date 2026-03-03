@@ -14,9 +14,12 @@
  */
 
 import Fuse from "fuse.js";
-import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import { normalizeCompanyName } from "./entity-resolution.js";
+import {
+  decodeJsonObject,
+  encodeJsonValue,
+} from "../types/json-boundaries.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -420,10 +423,10 @@ export class AccountMergeService {
           secondaryAccountId,
           initiatedByUserId: initiatedByUserId ?? null,
           status: "COMPLETED",
-          mergePreview: {
+          mergePreview: encodeJsonValue({
             primary: mergePreview.primary,
             secondary: mergePreview.secondary,
-          } as unknown as Prisma.InputJsonValue,
+          }),
           movedContactIds,
           movedCallIds,
           movedStoryIds,
@@ -467,20 +470,32 @@ export class AccountMergeService {
         throw new Error("Merge run already undone");
       }
 
-      const preview =
-        run.mergePreview && typeof run.mergePreview === "object"
-          ? (run.mergePreview as unknown as {
-              secondary?: {
-                id: string;
-                name: string;
-                domain: string | null;
-                industry: string | null;
-                employeeCount: number | null;
-                annualRevenue: number | null;
-              };
-            })
-          : {};
-      const secondary = preview.secondary;
+      const preview = decodeJsonObject(run.mergePreview);
+      const secondaryRecord = decodeJsonObject(preview.secondary);
+      const secondary =
+        typeof secondaryRecord.id === "string" &&
+        typeof secondaryRecord.name === "string"
+          ? {
+              id: secondaryRecord.id,
+              name: secondaryRecord.name,
+              domain:
+                typeof secondaryRecord.domain === "string"
+                  ? secondaryRecord.domain
+                  : null,
+              industry:
+                typeof secondaryRecord.industry === "string"
+                  ? secondaryRecord.industry
+                  : null,
+              employeeCount:
+                typeof secondaryRecord.employeeCount === "number"
+                  ? secondaryRecord.employeeCount
+                  : null,
+              annualRevenue:
+                typeof secondaryRecord.annualRevenue === "number"
+                  ? secondaryRecord.annualRevenue
+                  : null,
+            }
+          : null;
       if (!secondary) {
         throw new Error("Merge run is missing secondary account snapshot");
       }

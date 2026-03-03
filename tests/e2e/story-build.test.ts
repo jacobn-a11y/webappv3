@@ -355,6 +355,18 @@ describe("POST /api/stories/build — successful builds", () => {
           quote[field] === null || typeof quote[field] === "string"
         ).toBe(true);
       }
+      if (quote.source_timestamp_ms != null) {
+        expect(typeof quote.source_timestamp_ms).toBe("number");
+      }
+      if (quote.source_chunk_id != null) {
+        expect(typeof quote.source_chunk_id).toBe("string");
+      }
+      if (quote.call_id) {
+        expect(typeof quote.transcript_deep_link).toBe("string");
+        expect(quote.transcript_deep_link).toContain(
+          `/calls/${encodeURIComponent(quote.call_id)}/transcript`
+        );
+      }
     }
   });
 

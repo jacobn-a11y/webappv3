@@ -17,13 +17,57 @@ import {
   rollbackPageVersion,
   savePageDraft,
   getPreviewScrub,
+  getScheduledPagePublish,
   publishPage,
+  schedulePagePublish,
+  cancelScheduledPagePublish,
   type ArtifactVersion,
   type EditorPageData,
+  type SavePageDraftConflict,
 } from "../lib/api";
 import { formatEnumLabel } from "../lib/format";
 
 // ─── Inline Confirm Dialog ──────────────────────────────────────────────────
+
+interface PostPublishValidationSnapshot {
+  status: "PASS" | "FAIL";
+  checked_at: string;
+  links_checked: number;
+  broken_links: Array<{
+    field: string;
+    url: string;
+    statusCode: number | null;
+    reason: string;
+  }>;
+}
+
+function getPostPublishValidation(
+  provenance: Record<string, unknown> | null
+): PostPublishValidationSnapshot | null {
+  if (!provenance || typeof provenance !== "object") {
+    return null;
+  }
+  const raw = (provenance as { post_publish_validation?: unknown }).post_publish_validation;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const validation = raw as Partial<PostPublishValidationSnapshot>;
+  if (
+    (validation.status !== "PASS" && validation.status !== "FAIL") ||
+    typeof validation.checked_at !== "string"
+  ) {
+    return null;
+  }
+  return {
+    status: validation.status,
+    checked_at: validation.checked_at,
+    links_checked:
+      typeof validation.links_checked === "number" ? validation.links_checked : 0,
+    broken_links: Array.isArray(validation.broken_links)
+      ? (validation.broken_links as PostPublishValidationSnapshot["broken_links"])
+      : [],
+  };
+}
 
 interface InlineConfirmProps {
   title: string;
@@ -132,8 +176,11 @@ export function LandingPageEditorPage() {
   const [pageData, setPageData] = useState<EditorPageData | null>(null);
   const [body, setBody] = useState("");
   const [status, setStatus] = useState("DRAFT");
+  const [editorVersion, setEditorVersion] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [saveConflict, setSaveConflict] = useState<SavePageDraftConflict | null>(null);
+  const [conflictDraftBody, setConflictDraftBody] = useState<string | null>(null);
 
   const [versions, setVersions] = useState<ArtifactVersion[]>([]);
   const [versionLoading, setVersionLoading] = useState(false);
@@ -151,6 +198,9 @@ export function LandingPageEditorPage() {
       setPageData(data);
       setBody(data.editableBody);
       setStatus(data.status);
+      setEditorVersion(data.updatedAt);
+      setSaveConflict(null);
+      setConflictDraftBody(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load page data");
     } finally {
@@ -190,7 +240,20 @@ export function LandingPageEditorPage() {
     setSaving(true);
     setSaveMessage(null);
     try {
-      await savePageDraft(pageId, body);
+      const result = await savePageDraft(pageId, body, {
+        expectedUpdatedAt: editorVersion ?? undefined,
+        allowConflict: true,
+      });
+      if (result.conflict) {
+        setSaveConflict(result);
+        setConflictDraftBody(body);
+        setSaveMessage("Save conflict detected");
+        setTimeout(() => setSaveMessage(null), 3000);
+        return;
+      }
+      setEditorVersion(result.updated_at);
+      setSaveConflict(null);
+      setConflictDraftBody(null);
       setSaveMessage("Draft saved");
       setHasUnsavedChanges(false);
       setLastSavedAt(new Date());
@@ -201,17 +264,33 @@ export function LandingPageEditorPage() {
     } finally {
       setSaving(false);
     }
-  }, [pageId, body]);
+  }, [pageId, body, editorVersion]);
 
   // Autosave after 30s of inactivity
   const handleBodyChange = useCallback((newBody: string) => {
     setBody(newBody);
     setHasUnsavedChanges(true);
+    if (saveConflict) {
+      setConflictDraftBody(newBody);
+    }
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = setTimeout(() => {
       if (pageId && newBody) {
-        savePageDraft(pageId, newBody)
-          .then(() => {
+        savePageDraft(pageId, newBody, {
+          expectedUpdatedAt: editorVersion ?? undefined,
+          allowConflict: true,
+        })
+          .then((result) => {
+            if (result.conflict) {
+              setSaveConflict(result);
+              setConflictDraftBody(newBody);
+              setSaveMessage("Autosave conflict detected");
+              setTimeout(() => setSaveMessage(null), 3000);
+              return;
+            }
+            setEditorVersion(result.updated_at);
+            setSaveConflict(null);
+            setConflictDraftBody(null);
             setSaveMessage("Autosaved");
             setHasUnsavedChanges(false);
             setLastSavedAt(new Date());
@@ -220,7 +299,7 @@ export function LandingPageEditorPage() {
           .catch(() => {});
       }
     }, 30000);
-  }, [pageId]);
+  }, [editorVersion, pageId, saveConflict]);
 
   // Cleanup autosave timer
   useEffect(() => {
@@ -254,6 +333,50 @@ export function LandingPageEditorPage() {
     }
   }, [pageId, rollbackVersionId, loadPage, loadVersions]);
 
+  const loadLatestConflictVersion = useCallback(() => {
+    if (!saveConflict) return;
+    setBody(saveConflict.latest_editable_body);
+    setEditorVersion(saveConflict.current_updated_at);
+    setHasUnsavedChanges(false);
+    setSaveConflict(null);
+    setConflictDraftBody(null);
+    setSaveMessage("Loaded latest saved version");
+    setTimeout(() => setSaveMessage(null), 2500);
+  }, [saveConflict]);
+
+  const overwriteConflictVersion = useCallback(async () => {
+    if (!pageId || !saveConflict || conflictDraftBody == null) {
+      return;
+    }
+    setSaving(true);
+    setSaveMessage(null);
+    try {
+      const result = await savePageDraft(pageId, conflictDraftBody, {
+        expectedUpdatedAt: saveConflict.current_updated_at,
+        allowConflict: true,
+      });
+      if (result.conflict) {
+        setSaveConflict(result);
+        setSaveMessage("Conflict still active");
+        setTimeout(() => setSaveMessage(null), 3000);
+        return;
+      }
+      setBody(conflictDraftBody);
+      setEditorVersion(result.updated_at);
+      setHasUnsavedChanges(false);
+      setLastSavedAt(new Date());
+      setSaveConflict(null);
+      setConflictDraftBody(null);
+      setSaveMessage("Draft saved after conflict resolution");
+      setTimeout(() => setSaveMessage(null), 3000);
+    } catch {
+      setSaveMessage("Save failed");
+      setTimeout(() => setSaveMessage(null), 3000);
+    } finally {
+      setSaving(false);
+    }
+  }, [conflictDraftBody, pageId, saveConflict]);
+
   if (!pageId) {
     return <div className="page-editor__error">No page ID provided.</div>;
   }
@@ -278,6 +401,7 @@ export function LandingPageEditorPage() {
 
   return (
     <div className="page-editor">
+      <h1 className="sr-only">Landing Page Editor</h1>
       {/* Breadcrumb */}
       <nav className="breadcrumbs" aria-label="Breadcrumb">
         <Link to="/dashboard/pages">Pages</Link>
@@ -322,6 +446,36 @@ export function LandingPageEditorPage() {
         </div>
       </div>
 
+      {saveConflict && (
+        <section className="page-editor__conflict" role="alert">
+          <p className="page-editor__conflict-message">
+            Another editor saved a newer draft at{" "}
+            {new Date(saveConflict.current_updated_at).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+            . Choose how to resolve this conflict.
+          </p>
+          <div className="page-editor__conflict-actions">
+            <button
+              type="button"
+              className="page-editor__btn page-editor__btn--secondary page-editor__btn--sm"
+              onClick={loadLatestConflictVersion}
+            >
+              Load Latest
+            </button>
+            <button
+              type="button"
+              className="page-editor__btn page-editor__btn--primary page-editor__btn--sm"
+              onClick={() => void overwriteConflictVersion()}
+              disabled={saving || conflictDraftBody == null}
+            >
+              Overwrite With My Draft
+            </button>
+          </div>
+        </section>
+      )}
+
       <div className="page-editor__area">
         <textarea
           className="page-editor__textarea"
@@ -359,6 +513,33 @@ export function LandingPageEditorPage() {
                     {new Date(v.created_at).toLocaleString()}
                     {v.release_notes ? ` · ${v.release_notes}` : ""}
                   </div>
+                  {(() => {
+                    const validation = getPostPublishValidation(v.provenance);
+                    if (!validation) {
+                      return (
+                        <div className="page-editor__validation page-editor__validation--pending">
+                          Validation pending
+                        </div>
+                      );
+                    }
+                    return (
+                      <div
+                        className={`page-editor__validation ${
+                          validation.status === "PASS"
+                            ? "page-editor__validation--pass"
+                            : "page-editor__validation--fail"
+                        }`}
+                      >
+                        Validation {validation.status === "PASS" ? "passed" : "failed"} ·{" "}
+                        {validation.broken_links.length} broken link
+                        {validation.broken_links.length === 1 ? "" : "s"} ·{" "}
+                        {new Date(validation.checked_at).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <button
                   type="button"
@@ -409,6 +590,11 @@ interface PublishModalProps {
   onPublished: () => void;
 }
 
+interface ScheduledPublishState {
+  publish_at: string;
+  state?: string;
+}
+
 function PublishModal({
   pageId,
   initialVisibility,
@@ -421,6 +607,7 @@ function PublishModal({
   const [password, setPassword] = useState("");
   const [expirationDate, setExpirationDate] = useState("");
   const [releaseNotes, setReleaseNotes] = useState("");
+  const [scheduleAt, setScheduleAt] = useState("");
   const [includeCompanyName, setIncludeCompanyName] = useState(initialIncludeCompanyName);
 
   const [previewLoading, setPreviewLoading] = useState(true);
@@ -430,6 +617,9 @@ function PublishModal({
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   const [publishing, setPublishing] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
+  const [cancellingSchedule, setCancellingSchedule] = useState(false);
+  const [scheduledState, setScheduledState] = useState<ScheduledPublishState | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
@@ -453,9 +643,26 @@ function PublishModal({
     }
   }, [pageId]);
 
+  const loadScheduledState = useCallback(async () => {
+    try {
+      const data = await getScheduledPagePublish(pageId);
+      if (data.scheduled && data.publish_at) {
+        setScheduledState({
+          publish_at: data.publish_at,
+          state: data.state,
+        });
+      } else {
+        setScheduledState(null);
+      }
+    } catch {
+      setScheduledState(null);
+    }
+  }, [pageId]);
+
   useEffect(() => {
     loadPreview();
-  }, [loadPreview]);
+    void loadScheduledState();
+  }, [loadPreview, loadScheduledState]);
 
   // Focus management: capture focus, trap Tab, Escape to close
   useEffect(() => {
@@ -542,6 +749,67 @@ function PublishModal({
     }
   };
 
+  const handleSchedulePublish = async () => {
+    setPublishError(null);
+    if (!scheduleAt) {
+      setPublishError("Select a future schedule time.");
+      return;
+    }
+    if (password && password.length < 4) {
+      setPublishError("Password must be at least 4 characters.");
+      return;
+    }
+    const scheduleDate = new Date(scheduleAt);
+    if (Number.isNaN(scheduleDate.getTime()) || scheduleDate.getTime() <= Date.now()) {
+      setPublishError("Schedule time must be in the future.");
+      return;
+    }
+
+    setScheduling(true);
+    try {
+      const payload: {
+        publish_at: string;
+        visibility: string;
+        password?: string;
+        expires_at?: string;
+        release_notes?: string;
+      } = {
+        publish_at: scheduleDate.toISOString(),
+        visibility,
+      };
+      if (password) payload.password = password;
+      if (expirationDate) payload.expires_at = new Date(expirationDate).toISOString();
+      if (releaseNotes.trim()) payload.release_notes = releaseNotes.trim();
+
+      const scheduled = await schedulePagePublish(pageId, payload);
+      setScheduledState({ publish_at: scheduled.publish_at, state: "delayed" });
+      setPublishError("Publish scheduled successfully.");
+      onPublished();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to schedule publish.";
+      setPublishError(message);
+    } finally {
+      setScheduling(false);
+    }
+  };
+
+  const handleCancelScheduledPublish = async () => {
+    setPublishError(null);
+    setCancellingSchedule(true);
+    try {
+      await cancelScheduledPagePublish(pageId);
+      setScheduledState(null);
+      setPublishError("Scheduled publish cancelled.");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to cancel scheduled publish.";
+      setPublishError(message);
+    } finally {
+      setCancellingSchedule(false);
+    }
+  };
+
   const handleCopyUrl = async () => {
     if (!publishedUrl) return;
     try {
@@ -578,6 +846,27 @@ function PublishModal({
         {!isSuccessState ? (
           <div className="page-editor__modal-body">
             <div className="page-editor__publish-settings">
+              {scheduledState && (
+                <div className="page-editor__field page-editor__field--full">
+                  <div className="page-editor__toggle-row">
+                    <div>
+                      <div className="page-editor__toggle-row-label">Scheduled Publish Active</div>
+                      <div className="page-editor__toggle-row-desc">
+                        {new Date(scheduledState.publish_at).toLocaleString()} ({scheduledState.state ?? "queued"})
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="page-editor__btn page-editor__btn--secondary page-editor__btn--sm"
+                      onClick={() => void handleCancelScheduledPublish()}
+                      disabled={cancellingSchedule}
+                    >
+                      {cancellingSchedule ? "Cancelling..." : "Cancel Schedule"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="page-editor__field">
                 <label className="page-editor__field-label">Visibility</label>
                 <div className="page-editor__toggle-group">
@@ -620,6 +909,17 @@ function PublishModal({
                   className="page-editor__text-input"
                   value={expirationDate}
                   onChange={(e) => setExpirationDate(e.target.value)}
+                />
+              </div>
+
+              <div className="page-editor__field">
+                <label className="page-editor__field-label" htmlFor="publish-schedule-at">Schedule Publish Time</label>
+                <input
+                  id="publish-schedule-at"
+                  type="datetime-local"
+                  className="page-editor__text-input"
+                  value={scheduleAt}
+                  onChange={(e) => setScheduleAt(e.target.value)}
                 />
               </div>
 
@@ -714,9 +1014,17 @@ function PublishModal({
               </button>
               <button
                 type="button"
+                className="page-editor__btn page-editor__btn--secondary"
+                onClick={() => void handleSchedulePublish()}
+                disabled={publishing || scheduling || previewLoading}
+              >
+                {scheduling ? "Scheduling..." : "Schedule Publish"}
+              </button>
+              <button
+                type="button"
                 className="page-editor__btn page-editor__btn--primary"
                 onClick={handlePublish}
-                disabled={publishing || previewLoading}
+                disabled={publishing || scheduling || previewLoading}
               >
                 {publishing ? "Publishing..." : "Publish Page"}
               </button>

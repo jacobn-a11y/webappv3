@@ -21,6 +21,7 @@ import {
   type TeamApprovalAdminScopeRow,
 } from "../lib/api";
 import { badgeClass, formatEnumLabel } from "../lib/format";
+import { AdminErrorState, isPermissionError } from "../components/admin/AdminErrorState";
 
 const DEFAULT_POLICY: DataGovernanceSettings = {
   retention_days: 365,
@@ -220,18 +221,27 @@ export function AdminDataGovernancePage() {
   };
 
   if (loading) {
-    return <div className="state-view"><div className="spinner" /><div className="state-view__title">Loading data governance...</div></div>;
+    return (
+      <div className="state-view" role="status" aria-live="polite">
+        <div className="spinner" />
+        <div className="state-view__title">Loading data governance...</div>
+      </div>
+    );
   }
 
-  if (error && (error.includes("permission") || error.includes("denied") || error.includes("forbidden") || error.includes("unauthorized"))) {
+  if (error && isPermissionError(error)) {
     return (
-      <div className="access-denied">
-        <div className="access-denied__icon">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg>
+      <div className="page">
+        <div className="page__header">
+          <div className="page__header-text">
+            <h1 className="page__title">Data Governance</h1>
+          </div>
         </div>
-        <h2 className="access-denied__title">Access Restricted</h2>
-        <p className="access-denied__message">You don't have permission to view data governance settings. Contact your administrator.</p>
-        <a href="/" className="btn btn--primary">Return to Home</a>
+        <AdminErrorState
+          title="Access Restricted"
+          message={error}
+          guidance="You do not have permission to view data governance settings. Contact an organization owner or admin."
+        />
       </div>
     );
   }
@@ -239,7 +249,13 @@ export function AdminDataGovernancePage() {
   return (
     <div className="page">
       <div className="page__header"><div className="page__header-text"><h1 className="page__title">Data Governance</h1><p className="page__subtitle">Manage retention policies, deletion approvals, and artifact governance</p></div></div>
-      {error && <div className="alert alert--error">{error}</div>}
+      {error && (
+        <AdminErrorState
+          title="Governance Action Failed"
+          message={error}
+          onRetry={() => void load()}
+        />
+      )}
       {notice && <div className="alert alert--success">{notice}</div>}
 
       <section className="card card--elevated">

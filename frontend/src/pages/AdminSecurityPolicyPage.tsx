@@ -1,13 +1,19 @@
 import { useEffect, useState } from "react";
 import {
+  createOutboundWebhookSubscription,
   createIpAllowlistEntry,
+  deleteOutboundWebhookSubscription,
+  getOutboundWebhookSubscriptions,
   deleteIpAllowlistEntry,
   getIpAllowlistEntries,
   getScimProvisioning,
   getSecuritySessions,
   getSecurityPolicySettings,
+  testOutboundWebhookSubscription,
   revokeSecuritySession,
   rotateScimToken,
+  type OutboundWebhookEventType,
+  type OutboundWebhookSubscription,
   updateIpAllowlistEntry,
   updateScimProvisioning,
   updateSecurityPolicySettings,
@@ -16,6 +22,7 @@ import {
   type SecuritySession,
   type SecurityPolicySettings,
 } from "../lib/api";
+import { AdminErrorState, isPermissionError } from "../components/admin/AdminErrorState";
 
 const DEFAULT_POLICY: SecurityPolicySettings = {
   enforce_mfa_for_admin_actions: false,
@@ -38,6 +45,17 @@ export function AdminSecurityPolicyPage() {
   const [sessions, setSessions] = useState<SecuritySession[]>([]);
   const [scim, setScim] = useState<ScimProvisioningSettings | null>(null);
   const [newScimToken, setNewScimToken] = useState<string | null>(null);
+  const [webhookSubscriptions, setWebhookSubscriptions] = useState<
+    OutboundWebhookSubscription[]
+  >([]);
+  const [supportedWebhookEvents, setSupportedWebhookEvents] = useState<
+    OutboundWebhookEventType[]
+  >([]);
+  const [newWebhookUrl, setNewWebhookUrl] = useState("");
+  const [newWebhookSecret, setNewWebhookSecret] = useState("");
+  const [newWebhookEvent, setNewWebhookEvent] =
+    useState<OutboundWebhookEventType>("story_generated");
+  const [savingWebhook, setSavingWebhook] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,14 +67,17 @@ export function AdminSecurityPolicyPage() {
       getIpAllowlistEntries(),
       getSecuritySessions(),
       getScimProvisioning(),
+      getOutboundWebhookSubscriptions(),
     ])
-      .then(([policyRes, ipRes, sessionRes, scimRes]) => {
+      .then(([policyRes, ipRes, sessionRes, scimRes, webhookRes]) => {
         setPolicy(policyRes);
         setAllowedDomainsText((policyRes.allowed_sso_domains ?? []).join(", "));
         setIpAllowlistText((policyRes.ip_allowlist ?? []).join(", "));
         setIpEntries(ipRes.entries);
         setSessions(sessionRes.sessions);
         setScim(scimRes);
+        setWebhookSubscriptions(webhookRes.subscriptions);
+        setSupportedWebhookEvents(webhookRes.supported_events);
       })
       .catch((err) =>
         setError(err instanceof Error ? err.message : "Failed to load policy")
@@ -90,15 +111,19 @@ export function AdminSecurityPolicyPage() {
 
   if (loading) return <div className="state-view" role="status" aria-live="polite"><div className="spinner" /><div className="state-view__title">Loading security policy...</div></div>;
 
-  if (error && (error.includes("permission") || error.includes("denied") || error.includes("forbidden") || error.includes("unauthorized"))) {
+  if (error && isPermissionError(error)) {
     return (
-      <div className="access-denied">
-        <div className="access-denied__icon">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg>
+      <div className="page">
+        <div className="page__header">
+          <div className="page__header-text">
+            <h1 className="page__title">Security Policy</h1>
+          </div>
         </div>
-        <h2 className="access-denied__title">Access Restricted</h2>
-        <p className="access-denied__message">You don't have permission to view security settings. Contact your administrator.</p>
-        <a href="/" className="btn btn--primary">Return to Home</a>
+        <AdminErrorState
+          title="Access Restricted"
+          message={error}
+          guidance="You do not have permission to view security settings. Contact an organization owner or admin."
+        />
       </div>
     );
   }
@@ -129,10 +154,44 @@ export function AdminSecurityPolicyPage() {
     setScim(refreshed);
   };
 
+  const refreshWebhooks = async () => {
+    const refreshed = await getOutboundWebhookSubscriptions();
+    setWebhookSubscriptions(refreshed.subscriptions);
+    setSupportedWebhookEvents(refreshed.supported_events);
+  };
+
+  const createWebhook = async () => {
+    if (!newWebhookUrl.trim()) return;
+    setSavingWebhook(true);
+    setError(null);
+    try {
+      await createOutboundWebhookSubscription({
+        url: newWebhookUrl.trim(),
+        secret: newWebhookSecret.trim() || undefined,
+        enabled: true,
+        event_types: [newWebhookEvent],
+      });
+      setNewWebhookUrl("");
+      setNewWebhookSecret("");
+      await refreshWebhooks();
+      setNotice("Outbound webhook subscription created.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create outbound webhook");
+    } finally {
+      setSavingWebhook(false);
+    }
+  };
+
   return (
     <div className="page">
       <div className="page__header"><div className="page__header-text"><h1 className="page__title">Security Policy</h1><p className="page__subtitle">Configure authentication, session controls, and access policies</p></div></div>
-      {error && <div className="alert alert--error" role="alert">{error}</div>}
+      {error && (
+        <AdminErrorState
+          title="Security Policy Request Failed"
+          message={error}
+          onRetry={() => window.location.reload()}
+        />
+      )}
       {notice && <div className="alert alert--success" role="status" aria-live="polite">{notice}</div>}
 
       <section className="card card--elevated">
@@ -339,6 +398,119 @@ export function AdminSecurityPolicyPage() {
                 </td>
               </tr>
             ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="card card--elevated">
+        <h2>Outbound Webhooks</h2>
+        <p className="form-help">
+          Send StoryEngine events to external systems in real time.
+        </p>
+        <div className="form-grid">
+          <label className="form-group">
+            Endpoint URL
+            <input
+              value={newWebhookUrl}
+              onChange={(e) => setNewWebhookUrl(e.target.value)}
+              placeholder="https://example.com/webhooks/storyengine"
+            />
+          </label>
+          <label className="form-group">
+            Secret (optional)
+            <input
+              value={newWebhookSecret}
+              onChange={(e) => setNewWebhookSecret(e.target.value)}
+              placeholder="Leave blank to auto-generate"
+            />
+          </label>
+          <label className="form-group">
+            Event type
+            <select
+              value={newWebhookEvent}
+              onChange={(e) => setNewWebhookEvent(e.target.value as OutboundWebhookEventType)}
+            >
+              {(supportedWebhookEvents.length > 0
+                ? supportedWebhookEvents.filter((value) => value !== "ALL_EVENTS")
+                : [
+                    "landing_page_published",
+                    "story_generated",
+                    "story_generation_failed",
+                    "scheduled_report_generated",
+                  ]
+              ).map((eventType) => (
+                <option key={eventType} value={eventType}>
+                  {eventType}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <button
+          className="btn btn--secondary"
+          onClick={createWebhook}
+          disabled={savingWebhook}
+        >
+          {savingWebhook ? "Creating..." : "Add Webhook"}
+        </button>
+
+        <table className="data-table" style={{ marginTop: 16 }}>
+          <thead>
+            <tr>
+              <th>URL</th>
+              <th>Events</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {webhookSubscriptions.map((subscription) => (
+              <tr key={subscription.id}>
+                <td>{subscription.url}</td>
+                <td>{subscription.event_types.join(", ")}</td>
+                <td>{subscription.enabled ? "Enabled" : "Disabled"}</td>
+                <td>
+                  <button
+                    className="btn btn--secondary"
+                    onClick={async () => {
+                      try {
+                        const result = await testOutboundWebhookSubscription(subscription.id);
+                        setNotice(
+                          result.delivered
+                            ? "Test webhook delivered successfully."
+                            : `Test webhook failed (status ${result.status}).`
+                        );
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : "Failed to test webhook");
+                      }
+                    }}
+                  >
+                    Send Test
+                  </button>{" "}
+                  <button
+                    className="btn btn--secondary"
+                    onClick={async () => {
+                      try {
+                        await deleteOutboundWebhookSubscription(subscription.id);
+                        await refreshWebhooks();
+                        setNotice("Outbound webhook removed.");
+                      } catch (err) {
+                        setError(
+                          err instanceof Error ? err.message : "Failed to delete webhook"
+                        );
+                      }
+                    }}
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {webhookSubscriptions.length === 0 && (
+              <tr>
+                <td colSpan={4}>No outbound webhook subscriptions configured yet.</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </section>

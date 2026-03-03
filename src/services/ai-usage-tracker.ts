@@ -19,6 +19,7 @@ import type { PrismaClient, AIOperation } from "@prisma/client";
 import type { AIClient, ChatCompletionOptions, ChatCompletionResult, AIProviderName } from "./ai-client.js";
 import type { AIConfigService } from "./ai-config.js";
 import logger from "../lib/logger.js";
+import { decodeDataGovernancePolicy } from "../types/json-boundaries.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -595,11 +596,7 @@ export class AIUsageTracker {
       ? Math.max(1_000, Math.floor(platformDailyThreshold))
       : 50_000;
 
-    const rawPolicy = orgSettings?.dataGovernancePolicy;
-    const policy =
-      rawPolicy && typeof rawPolicy === "object" && !Array.isArray(rawPolicy)
-        ? (rawPolicy as Record<string, unknown>)
-        : {};
+    const policy = decodeDataGovernancePolicy(orgSettings?.dataGovernancePolicy);
     const orgThresholdRaw = policy.ai_spend_alert_daily_cents;
     const orgThreshold =
       typeof orgThresholdRaw === "number" && Number.isFinite(orgThresholdRaw)

@@ -10,6 +10,8 @@ import {
   getOpsDiagnostics,
   getPipelineStatus,
   getQueueSloMetrics,
+  getReplayObservability,
+  getSellerAdoptionMetrics,
   getSyntheticHealth,
   getSupportImpersonationSessions,
   runBackupVerification,
@@ -28,10 +30,31 @@ import {
   type OpsDiagnostics,
   type PipelineStatus,
   type QueueSloMetrics,
+  type ReplayObservability,
+  type SellerAdoptionMetrics,
   type SupportImpersonationSession,
   type SyntheticHealth,
 } from "../lib/api";
 import { badgeClass, formatEnumLabel } from "../lib/format";
+import { AdminErrorState } from "../components/admin/AdminErrorState";
+
+function formatDurationMs(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) {
+    return "-";
+  }
+  const seconds = Math.max(0, Math.round(value / 1000));
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remSeconds = seconds % 60;
+  if (minutes < 60) {
+    return `${minutes}m ${remSeconds}s`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return `${hours}h ${remMinutes}m`;
+}
 
 export function AdminOpsDiagnosticsPage() {
   const [data, setData] = useState<OpsDiagnostics | null>(null);
@@ -39,6 +62,8 @@ export function AdminOpsDiagnosticsPage() {
   const [backfills, setBackfills] = useState<BackfillRun[]>([]);
   const [integrationHealth, setIntegrationHealth] = useState<IntegrationHealthRow[]>([]);
   const [queueSlo, setQueueSlo] = useState<QueueSloMetrics | null>(null);
+  const [replayObservability, setReplayObservability] = useState<ReplayObservability | null>(null);
+  const [sellerAdoption, setSellerAdoption] = useState<SellerAdoptionMetrics | null>(null);
   const [syntheticHealth, setSyntheticHealth] = useState<SyntheticHealth | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus | null>(null);
   const [drReadiness, setDrReadiness] = useState<DrReadiness | null>(null);
@@ -61,6 +86,11 @@ export function AdminOpsDiagnosticsPage() {
   const [incidentUpdateText, setIncidentUpdateText] = useState<Record<string, string>>({});
   const [incidentUpdateStatus, setIncidentUpdateStatus] = useState<Record<string, "OPEN" | "MONITORING" | "RESOLVED" | "">>({});
   const [updatingIncidentId, setUpdatingIncidentId] = useState<string | null>(null);
+  const [replayWindowHours, setReplayWindowHours] = useState(24);
+  const [replayProviderFilter, setReplayProviderFilter] = useState("");
+  const [replayOutcomeFilter, setReplayOutcomeFilter] = useState("");
+  const [replayRunTypeFilter, setReplayRunTypeFilter] = useState("");
+  const [replayOperatorFilter, setReplayOperatorFilter] = useState("");
   const [replayingRunId, setReplayingRunId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -69,12 +99,43 @@ export function AdminOpsDiagnosticsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [res, dlq, backfillRes, healthRes, queueSloRes, syntheticHealthRes, pipelineRes, drRes, supportRes, incidentRes] = await Promise.all([
+      const replayOutcome =
+        replayOutcomeFilter === "" ? undefined : (
+          replayOutcomeFilter as "COMPLETED" | "FAILED" | "RUNNING" | "PENDING"
+        );
+      const replayRunType =
+        replayRunTypeFilter === "" ? undefined : (
+          replayRunTypeFilter as "SYNC" | "BACKFILL" | "MANUAL" | "REPLAY"
+        );
+
+      const [
+        res,
+        dlq,
+        backfillRes,
+        healthRes,
+        queueSloRes,
+        replayRes,
+        sellerAdoptionRes,
+        syntheticHealthRes,
+        pipelineRes,
+        drRes,
+        supportRes,
+        incidentRes,
+      ] = await Promise.all([
         getOpsDiagnostics(),
         getIntegrationDeadLetterRuns({ limit: 100 }),
         getIntegrationBackfills({ limit: 100 }),
         getIntegrationHealth(),
         getQueueSloMetrics(),
+        getReplayObservability({
+          window_hours: replayWindowHours,
+          provider: replayProviderFilter || undefined,
+          outcome: replayOutcome,
+          run_type: replayRunType,
+          operator_user_id: replayOperatorFilter || undefined,
+          limit: 50,
+        }),
+        getSellerAdoptionMetrics(30),
         getSyntheticHealth(),
         getPipelineStatus(),
         getDrReadiness(),
@@ -86,6 +147,8 @@ export function AdminOpsDiagnosticsPage() {
       setBackfills(backfillRes.backfills);
       setIntegrationHealth(healthRes.integrations);
       setQueueSlo(queueSloRes);
+      setReplayObservability(replayRes);
+      setSellerAdoption(sellerAdoptionRes);
       setSyntheticHealth(syntheticHealthRes);
       setPipelineStatus(pipelineRes);
       setDrReadiness(drRes);
@@ -254,7 +317,13 @@ export function AdminOpsDiagnosticsPage() {
       </header>
 
       {loading && <div role="status" aria-live="polite">Loading diagnostics...</div>}
-      {error && <div className="alert alert--error" role="alert">{error}</div>}
+      {error && (
+        <AdminErrorState
+          title="Diagnostics Request Failed"
+          message={error}
+          onRetry={() => void load()}
+        />
+      )}
 
       {!loading && data && (
         <>
@@ -386,6 +455,186 @@ export function AdminOpsDiagnosticsPage() {
               </>
             ) : (
               <div>No queue metrics available.</div>
+            )}
+          </section>
+
+          <section className="card card--elevated">
+            <h2>Seller Adoption (Last 30d)</h2>
+            {sellerAdoption ? (
+              <>
+                <div className="kpi-grid">
+                  <div>Events: {sellerAdoption.totals.event_count}</div>
+                  <div>Flows: {sellerAdoption.totals.flow_count}</div>
+                  <div>Users: {sellerAdoption.totals.user_count}</div>
+                  <div>
+                    Median Time to First Story:{" "}
+                    {formatDurationMs(sellerAdoption.kpis.median_time_to_first_story_ms)}
+                  </div>
+                  <div>
+                    Median Time to Share:{" "}
+                    {formatDurationMs(sellerAdoption.kpis.median_time_to_share_ms)}
+                  </div>
+                </div>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Funnel Step</th>
+                      <th>Flows</th>
+                      <th>Conversion</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sellerAdoption.funnel.steps.map((row) => (
+                      <tr key={row.step}>
+                        <td>{formatEnumLabel(row.step)}</td>
+                        <td>{row.flows}</td>
+                        <td>{Math.round(row.conversion_from_start * 100)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            ) : (
+              <div>No seller adoption telemetry available.</div>
+            )}
+          </section>
+
+          <section className="card card--elevated">
+            <h2>Replay Observability</h2>
+            <div className="form-row">
+              <label>
+                Window (hours)
+                <input
+                  type="number"
+                  min={1}
+                  max={168}
+                  value={replayWindowHours}
+                  onChange={(e) => setReplayWindowHours(Number(e.target.value) || 24)}
+                />
+              </label>
+              <input
+                value={replayProviderFilter}
+                onChange={(e) => setReplayProviderFilter(e.target.value.toUpperCase())}
+                placeholder="Provider (optional)"
+              />
+              <select
+                value={replayOutcomeFilter}
+                onChange={(e) => setReplayOutcomeFilter(e.target.value)}
+              >
+                <option value="">All outcomes</option>
+                <option value="COMPLETED">Completed</option>
+                <option value="FAILED">Failed</option>
+                <option value="RUNNING">Running</option>
+                <option value="PENDING">Pending</option>
+              </select>
+              <select
+                value={replayRunTypeFilter}
+                onChange={(e) => setReplayRunTypeFilter(e.target.value)}
+              >
+                <option value="">All source run types</option>
+                <option value="SYNC">Sync</option>
+                <option value="BACKFILL">Backfill</option>
+                <option value="MANUAL">Manual</option>
+                <option value="REPLAY">Replay</option>
+              </select>
+              <input
+                value={replayOperatorFilter}
+                onChange={(e) => setReplayOperatorFilter(e.target.value)}
+                placeholder="Operator user ID (optional)"
+              />
+              <button className="btn btn--secondary" onClick={load}>
+                Apply Replay Filters
+              </button>
+            </div>
+            {replayObservability ? (
+              <>
+                <div className="kpi-grid">
+                  <div>Replay Triggers: {replayObservability.totals.replay_triggers}</div>
+                  <div>Unique Operators: {replayObservability.totals.unique_operators}</div>
+                  <div>Window: {replayObservability.window_hours}h</div>
+                </div>
+
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Outcome</th>
+                      <th>Count</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {replayObservability.outcomes.map((row) => (
+                      <tr key={row.outcome}>
+                        <td>{formatEnumLabel(row.outcome)}</td>
+                        <td>{row.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <h3>By Operator</h3>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Operator</th>
+                      <th>Role</th>
+                      <th>Replay Triggers</th>
+                      <th>Providers</th>
+                      <th>Last Triggered</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {replayObservability.operators.map((row, idx) => (
+                      <tr key={`${row.actor_user_id ?? "unknown"}-${idx}`}>
+                        <td>{row.actor_user_email ?? row.actor_user_id ?? "Unknown actor"}</td>
+                        <td>{row.actor_user_role ? formatEnumLabel(row.actor_user_role) : "-"}</td>
+                        <td>{row.replay_triggers}</td>
+                        <td>{row.providers.map((provider) => formatEnumLabel(provider)).join(", ") || "-"}</td>
+                        <td>{new Date(row.last_triggered_at).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <h3>Recent Replay Events</h3>
+                {replayObservability.recent_events.length === 0 ? (
+                  <div>No replay events for current filters.</div>
+                ) : (
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Triggered</th>
+                        <th>Provider</th>
+                        <th>Outcome</th>
+                        <th>Operator</th>
+                        <th>Source Run</th>
+                        <th>Replay Attempt</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {replayObservability.recent_events.map((event) => (
+                        <tr key={event.audit_log_id}>
+                          <td>{new Date(event.triggered_at).toLocaleString()}</td>
+                          <td>{formatEnumLabel(event.provider)}</td>
+                          <td>
+                            <span className={badgeClass(event.outcome)}>
+                              {formatEnumLabel(event.outcome)}
+                            </span>
+                          </td>
+                          <td>{event.actor_user_id ?? "-"}</td>
+                          <td>{event.source_run_id ?? "-"}</td>
+                          <td>
+                            {event.replay_attempt !== null
+                              ? `${event.replay_attempt}${event.replay_attempt_cap !== null ? `/${event.replay_attempt_cap}` : ""}`
+                              : "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            ) : (
+              <div>No replay observability data.</div>
             )}
           </section>
 

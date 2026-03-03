@@ -55,6 +55,7 @@ function createApp(
   app.use((req, _res, next) => {
     (req as any).organizationId = "org-test";
     (req as any).userId = "user-test";
+    (req as any).userRole = "OWNER";
     next();
   });
   app.use(

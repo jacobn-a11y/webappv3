@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 const repoRoot = path.resolve(new URL("../../", import.meta.url).pathname);
 const frontendDist = path.join(repoRoot, "frontend", "dist", "assets");
@@ -51,4 +52,27 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
+console.log("Frontend bundle budget check passed.");
+
+const endpointPerf = spawnSync(
+  "npm",
+  ["run", "-s", "test", "--", "tests/perf-endpoint-load-budget.test.ts"],
+  {
+    cwd: repoRoot,
+    encoding: "utf8",
+  }
+);
+
+if (endpointPerf.status !== 0) {
+  console.error("Endpoint latency budget check failed.");
+  if (endpointPerf.stdout) {
+    console.error(endpointPerf.stdout.trim());
+  }
+  if (endpointPerf.stderr) {
+    console.error(endpointPerf.stderr.trim());
+  }
+  process.exit(endpointPerf.status ?? 1);
+}
+
+console.log("Endpoint latency budget check passed.");
 console.log("Performance budget check passed.");

@@ -52,6 +52,50 @@ function formatActionText(action: string): string {
     );
 }
 
+interface FirstValueAction {
+  id: string;
+  title: string;
+  detail: string;
+  ctaLabel: string;
+  ctaPath: string;
+  state: "DONE" | "READY" | "BLOCKED";
+}
+
+function buildFirstValueActions(data: RoleAwareHome): FirstValueAction[] {
+  const hasStory = data.summary.stories_30d > 0;
+  const hasPage = data.summary.pages_30d > 0;
+  return [
+    {
+      id: "generate_story",
+      title: "Generate first deal story",
+      detail: hasStory
+        ? "You have generated stories recently."
+        : "Generate a story from one high-signal account to create deal-ready proof.",
+      ctaLabel: "Generate Story",
+      ctaPath: "/accounts",
+      state: hasStory ? "DONE" : "READY",
+    },
+    {
+      id: "publish_page",
+      title: "Publish and package",
+      detail: hasPage
+        ? "At least one page is already published."
+        : "Publish one page so sellers can copy, send, and share immediately.",
+      ctaLabel: hasPage ? "View Pages" : "Publish Page",
+      ctaPath: "/dashboard/pages",
+      state: hasPage ? "DONE" : hasStory ? "READY" : "BLOCKED",
+    },
+    {
+      id: "review_setup",
+      title: "Review setup defaults",
+      detail: "Confirm connectors, permissions, and governance defaults for your team.",
+      ctaLabel: "Open Setup",
+      ctaPath: "/admin/setup",
+      state: "READY",
+    },
+  ];
+}
+
 export function HomePage() {
   const [data, setData] = useState<RoleAwareHome | null>(null);
   const [csHealth, setCsHealth] = useState<CustomerSuccessHealth | null>(null);
@@ -194,6 +238,8 @@ function ExecDashboard({
           <p className="page__subtitle">Executive Overview</p>
         </div>
       </div>
+
+      <FirstValueFastPathCard data={data} />
 
       {/* High-level KPIs */}
       <div className="kpi-grid">
@@ -365,6 +411,8 @@ function CsmDashboard({
           <p className="page__subtitle">Customer Success Dashboard</p>
         </div>
       </div>
+
+      <FirstValueFastPathCard data={data} />
 
       {/* Customer Health — Primary Section */}
       {csHealth && (
@@ -568,6 +616,8 @@ function MemberDashboard({
         </div>
       </div>
 
+      <FirstValueFastPathCard data={data} />
+
       {/* Quick Actions — Primary CTA */}
       <div className="home-cta-row">
         <Link to="/accounts" className="home-cta home-cta--primary">
@@ -676,6 +726,8 @@ function AdminDashboard({
           </p>
         </div>
       </div>
+
+      <FirstValueFastPathCard data={data} />
 
       {/* Recommended Actions — shown first for actionability */}
       {data.recommended_actions.length > 0 && (
@@ -904,6 +956,68 @@ function AdminDashboard({
 }
 
 // ─── Shared Components ───────────────────────────────────────────────────────
+
+function FirstValueFastPathCard({ data }: { data: RoleAwareHome }) {
+  if (data.summary.stories_30d > 0 && data.summary.pages_30d > 0) {
+    return null;
+  }
+
+  const actions = buildFirstValueActions(data);
+  return (
+    <div className="card card--elevated">
+      <div className="card__header">
+        <div>
+          <div className="card__title">First Value Fast Path</div>
+          <div className="card__subtitle">Get to first story and first share quickly.</div>
+        </div>
+      </div>
+      <div className="action-list">
+        {actions.map((action) => (
+          <div className="action-item" key={action.id}>
+            <div className="action-item__icon">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4" />
+                <path d="M12 16h.01" />
+              </svg>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600 }}>{action.title}</div>
+              <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+                {action.detail}
+              </div>
+            </div>
+            <span
+              className={`badge ${
+                action.state === "DONE"
+                  ? "badge--success"
+                  : action.state === "READY"
+                    ? "badge--accent"
+                    : "badge--draft"
+              }`}
+            >
+              {action.state === "DONE"
+                ? "Done"
+                : action.state === "READY"
+                  ? "Ready"
+                  : "Blocked"}
+            </span>
+            <Link to={action.ctaPath} className="btn btn--ghost btn--sm">
+              {action.ctaLabel}
+            </Link>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function RecommendedActions({ actions }: { actions: string[] }) {
   return (

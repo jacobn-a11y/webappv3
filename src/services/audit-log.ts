@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { decodeDataGovernancePolicy } from "../types/json-boundaries.js";
 
 export interface AuditLogInput {
   organizationId: string;
@@ -25,11 +26,7 @@ export class AuditLogService {
       where: { organizationId },
       select: { dataGovernancePolicy: true },
     });
-    const rawPolicy = settings?.dataGovernancePolicy;
-    const policy =
-      rawPolicy && typeof rawPolicy === "object" && !Array.isArray(rawPolicy)
-        ? (rawPolicy as Record<string, unknown>)
-        : {};
+    const policy = decodeDataGovernancePolicy(settings?.dataGovernancePolicy);
     const configured = policy.audit_log_retention_days;
     if (typeof configured !== "number" || !Number.isFinite(configured)) {
       return DEFAULT_AUDIT_RETENTION_DAYS;

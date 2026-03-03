@@ -97,7 +97,7 @@ const PII_PATTERNS: Array<{
   {
     type: "street_address",
     regex:
-      /\b\d{1,6}\s+[A-Za-z0-9.\-'\s]{2,40}\s(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl)\b(?:,\s*[A-Za-z .'-]{2,30})?(?:,\s*[A-Z]{2})?(?:\s+\d{5}(?:-\d{4})?)?/gi,
+      /\b\d{1,6}\s+[A-Za-z0-9.\-'\s]{2,40}\s(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl|Terrace|Ter)\b(?:,\s*[A-Za-z .'-]{2,30})?(?:,\s*[A-Z]{2})?(?:\s+\d{5}(?:-\d{4})?)?/gi,
     replacement: "[ADDRESS_REDACTED]",
     priority: 92,
   },
@@ -244,7 +244,7 @@ function collectHeuristicCandidates(text: string): DetectionCandidate[] {
   }
 
   const idRegex =
-    /\b(?:customer|employee|member|account|case|ticket)\s*(?:id|identifier)[:#\s-]*([A-Z0-9][A-Z0-9\-]{5,})\b/gi;
+    /\b(?:customer|employee|member|account|case|ticket)\s*(?:identifier|id)[:#\s-]*([A-Z0-9][A-Z0-9-]{5,})\b/gi;
   let idMatch: RegExpExecArray | null;
   while ((idMatch = idRegex.exec(text)) !== null) {
     const full = idMatch[0];
