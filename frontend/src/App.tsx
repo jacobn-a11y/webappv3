@@ -33,6 +33,7 @@ import {
   StoryPickerModal,
 } from "./app/global-modals";
 import { useI18n } from "./i18n";
+import { FOCUSABLE_SELECTOR, trapDialogFocus } from "./lib/focus";
 
 // ─── Sidebar Component ────────────────────────────────────────────────────────
 
@@ -41,44 +42,6 @@ const GROUPS_KEY = "sidebar_groups";
 const CONTRAST_KEY = "a11y_high_contrast";
 const THEME_KEY = "ui_theme";
 type ThemePreference = "dark" | "light";
-
-const FOCUSABLE_SELECTOR = [
-  "a[href]",
-  "button:not([disabled])",
-  "textarea:not([disabled])",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  '[tabindex]:not([tabindex="-1"])',
-].join(", ");
-
-function trapDialogFocus(
-  event: KeyboardEvent,
-  container: HTMLElement,
-  onClose?: () => void
-) {
-  if (event.key === "Escape") {
-    onClose?.();
-    return;
-  }
-  if (event.key !== "Tab") return;
-  const focusable = Array.from(
-    container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
-  ).filter((el) => !el.hasAttribute("disabled"));
-  if (focusable.length === 0) return;
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  if (!first || !last) return;
-  const active = document.activeElement as HTMLElement | null;
-  if (event.shiftKey && active === first) {
-    event.preventDefault();
-    last.focus();
-    return;
-  }
-  if (!event.shiftKey && active === last) {
-    event.preventDefault();
-    first.focus();
-  }
-}
 
 function ensureAccessibleFormLabels(container: ParentNode) {
   const controls = container.querySelectorAll<HTMLElement>("input, select, textarea");

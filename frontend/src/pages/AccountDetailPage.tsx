@@ -12,25 +12,10 @@ import {
   getChatAccounts,
   type StorySummary,
 } from "../lib/api";
+import { saveBlob } from "../lib/download";
+import { slugifyTitle } from "../lib/format";
 import { STORY_TYPE_LABELS } from "../types/taxonomy";
-
-const STORY_STATUS_LABELS: Record<StorySummary["story_status"], string> = {
-  DRAFT: "Draft",
-  PAGE_CREATED: "Page Created",
-  PUBLISHED: "Published",
-  ARCHIVED: "Archived",
-};
-
-function saveBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  URL.revokeObjectURL(url);
-}
+import { STORY_STATUS_LABELS } from "../types/story-status";
 
 export function AccountDetailPage({ userRole }: { userRole?: string }) {
   const { accountId } = useParams<{ accountId: string }>();
@@ -46,9 +31,12 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
 
   const isViewer = userRole === "VIEWER";
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!accountId) return;
     setLoading(true);
+    setLoadError(null);
     Promise.all([getAccountStories(accountId), getChatAccounts(accountId)])
       .then(([storiesRes, accountsRes]) => {
         setStories(storiesRes.stories);
@@ -57,8 +45,9 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
           setAccountName(exact.name);
         }
       })
-      .catch(() => {
+      .catch((err) => {
         setStories([]);
+        setLoadError(err instanceof Error ? err.message : "Failed to load account data");
       })
       .finally(() => setLoading(false));
   }, [accountId]);
@@ -76,7 +65,9 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
     if (!accountId) return;
     getAccountStories(accountId)
       .then((res) => setStories(res.stories))
-      .catch(() => {});
+      .catch(() => {
+        // Refresh is best-effort; the list keeps its previous state.
+      });
   };
 
   const handleLandingPageCreated = (pageId: string, _slug: string) => {
@@ -158,7 +149,14 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
           </div>
         )}
 
-        {!loading && stories.length === 0 && (
+        {!loading && loadError && (
+          <div className="state-view state-view--error" role="alert">
+            <div className="state-view__title">Failed to load account data</div>
+            <div className="state-view__message">{loadError}</div>
+          </div>
+        )}
+
+        {!loading && !loadError && stories.length === 0 && (
           <div className="stories-empty">
             <div className="stories-empty__icon">
               <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
@@ -292,21 +290,13 @@ function StoryCard({
   };
 
   const handleDownload = () => {
-    const safeTitle = story.title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 80);
+    const safeTitle = slugifyTitle(story.title);
     const blob = new Blob([story.markdown], { type: "text/markdown;charset=utf-8" });
     saveBlob(blob, `${safeTitle || "story"}.md`);
   };
 
   const handleDownloadExport = async (format: "pdf" | "docx") => {
-    const safeTitle = story.title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 80);
+    const safeTitle = slugifyTitle(story.title);
     setExportingFormat(format);
     setPageError(null);
     try {

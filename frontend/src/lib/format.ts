@@ -91,6 +91,18 @@ export function formatRelativeTime(dateStr: string): string {
 }
 
 /**
+ * Convert a title string into a URL/filename-safe slug.
+ * E.g. "My Great Story!" → "my-great-story"
+ */
+export function slugifyTitle(title: string, maxLength = 80): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, maxLength);
+}
+
+/**
  * Get the badge CSS class for a given status string.
  */
 export function badgeClass(status: string): string {

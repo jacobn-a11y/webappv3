@@ -1,42 +1,84 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  createStoryComment,
   createLandingPage,
   deleteStory,
   downloadStoryExport,
-  getStoryComments,
   getStoryLibrary,
   requestWriteback,
   trackSellerAdoptionEvent,
-  type StoryComment,
   type StoryLibraryItem,
 } from "../lib/api";
+import { saveBlob } from "../lib/download";
+import { slugifyTitle } from "../lib/format";
 import { STORY_TYPE_LABELS } from "../types/taxonomy";
+import {
+  STORY_STATUS_LABELS,
+  STORY_STATUS_HINTS,
+  STORY_STATUS_BADGES,
+} from "../types/story-status";
+import {
+  StoryActionButtons,
+  type StoryActionCallbacks,
+} from "../components/StoryActionButtons";
+import { StoryCommentThread } from "../components/StoryCommentThread";
 
-const STORY_STATUS_LABELS: Record<
-  StoryLibraryItem["story_status"],
-  string
-> = {
-  DRAFT: "Draft",
-  PAGE_CREATED: "Page Created",
-  PUBLISHED: "Published",
-  ARCHIVED: "Archived",
-};
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const STORY_STATUS_HINTS: Record<StoryLibraryItem["story_status"], string> = {
-  DRAFT: "Story is generated but not yet packaged into a page.",
-  PAGE_CREATED: "Landing page exists and can be finalized for share.",
-  PUBLISHED: "Published and share-ready.",
-  ARCHIVED: "Archived and hidden from active workflows.",
-};
+function getStoryPreview(markdown: string): string {
+  return markdown
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/[>#*_~-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 260);
+}
 
-const STORY_STATUS_BADGES: Record<StoryLibraryItem["story_status"], string> = {
-  DRAFT: "badge--draft",
-  PAGE_CREATED: "badge--accent",
-  PUBLISHED: "badge--success",
-  ARCHIVED: "badge--archived",
-};
+function getStoryConfidence(story: StoryLibraryItem): number | null {
+  const scores = story.quotes
+    .map((quote) => quote.confidence_score)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (scores.length === 0) return null;
+  return scores.reduce((sum, value) => sum + value, 0) / scores.length;
+}
+
+function buildCrmNote(story: StoryLibraryItem): string {
+  const funnel = story.funnel_stages.length > 0 ? story.funnel_stages.join(", ") : "N/A";
+  const topQuote = story.quotes[0]?.quote_text ?? "No quote captured";
+  const topMetric = story.quotes.find((quote) => quote.metric_value)?.metric_value ?? "N/A";
+  return [
+    `Story: ${story.title}`,
+    `Account: ${story.account.name}`,
+    `Funnel Stage(s): ${funnel}`,
+    `Top Metric: ${topMetric}`,
+    `Proof Quote: "${topQuote}"`,
+    "",
+    "Summary:",
+    story.markdown.slice(0, 1200),
+  ].join("\n");
+}
+
+function trackStoryLibraryAction(
+  story: StoryLibraryItem,
+  eventType: "share_action" | "library_action",
+  actionName: string,
+  metadata?: Record<string, unknown>,
+) {
+  void trackSellerAdoptionEvent({
+    event_type: eventType,
+    flow_id: `library-${story.id}-${Date.now()}`,
+    account_id: story.account.id,
+    story_id: story.id,
+    action_name: actionName,
+    stage_preset: story.funnel_stages[0] ?? "unknown",
+    metadata,
+  }).catch(() => {
+    // Best-effort telemetry only.
+  });
+}
+
+// ─── Main Component ──────────────────────────────────────────────────────────
 
 export function StoryLibraryPage({ userRole }: { userRole: string }) {
   const navigate = useNavigate();
@@ -58,14 +100,10 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
   const [commentStory, setCommentStory] = useState<StoryLibraryItem | null>(null);
-  const [commentTarget, setCommentTarget] = useState<"story" | "page">("story");
-  const [comments, setComments] = useState<StoryComment[]>([]);
-  const [commentsLoading, setCommentsLoading] = useState(false);
-  const [commentsError, setCommentsError] = useState<string | null>(null);
-  const [commentDraft, setCommentDraft] = useState("");
-  const [commentSubmitting, setCommentSubmitting] = useState(false);
 
   const isViewer = userRole === "VIEWER";
+
+  // ─── Data Fetching ──────────────────────────────────────────────────
 
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -108,6 +146,8 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     };
   }, [page, pageSize, search, status, storyType]);
 
+  // ─── Derived State ──────────────────────────────────────────────────
+
   const uniqueStoryTypes = useMemo(() => {
     return Object.keys(STORY_TYPE_LABELS).sort();
   }, []);
@@ -125,105 +165,34 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     setBulkMessage(null);
   }, [page, search, storyType, status]);
 
-  useEffect(() => {
-    if (!commentStory) {
-      setComments([]);
-      setCommentsError(null);
-      return;
-    }
-    let cancelled = false;
-    setCommentsLoading(true);
-    setCommentsError(null);
-    void getStoryComments(commentStory.id, {
-      target: commentTarget,
-      page_id: commentTarget === "page" ? commentStory.landing_page?.id : undefined,
-    })
-      .then((res) => {
-        if (cancelled) return;
-        setComments(res.comments);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setCommentsError(err instanceof Error ? err.message : "Failed to load comments");
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setCommentsLoading(false);
-        }
-      });
+  // ─── Story Actions (shared between card + table views) ─────────────
 
-    return () => {
-      cancelled = true;
-    };
-  }, [commentStory, commentTarget]);
+  const storyCallbacks: StoryActionCallbacks = useMemo(() => ({
+    onShare: (story) => void handleShare(story),
+    onCopyMarkdown: (story) => void handleCopyStoryMarkdown(story),
+    onCreateOrEditPage: (story) => void handleCreateOrEditPage(story),
+    onExport: (story, format) => void handleExport(story, format),
+    onCopyCrmNote: (story) => void handleCopyCrmNote(story),
+    onPushCrmNote: (story) => void handlePushCrmNote(story),
+    onOpenComments: (story) => {
+      setCommentStory(story);
+      trackStoryLibraryAction(story, "library_action", "open_comment_thread");
+    },
+    onDelete: (story) => void handleDelete(story),
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps -- handlers use stable setters
 
-  const saveBlob = (blob: Blob, filename: string) => {
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
-  };
-
-  const getStoryPreview = (markdown: string): string => {
-    return markdown
-      .replace(/```[\s\S]*?```/g, " ")
-      .replace(/`[^`]*`/g, " ")
-      .replace(/[>#*_~-]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 260);
-  };
-
-  const getStoryConfidence = (story: StoryLibraryItem): number | null => {
-    const scores = story.quotes
-      .map((quote) => quote.confidence_score)
-      .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-    if (scores.length === 0) {
-      return null;
-    }
-    return scores.reduce((sum, value) => sum + value, 0) / scores.length;
-  };
-
-  const trackStoryLibraryAction = (
-    story: StoryLibraryItem,
-    eventType: "share_action" | "library_action",
-    actionName: string,
-    metadata?: Record<string, unknown>
-  ) => {
-    void trackSellerAdoptionEvent({
-      event_type: eventType,
-      flow_id: `library-${story.id}-${Date.now()}`,
-      account_id: story.account.id,
-      story_id: story.id,
-      action_name: actionName,
-      stage_preset: story.funnel_stages[0] ?? "unknown",
-      metadata,
-    }).catch(() => {
-      // Best-effort telemetry only.
-    });
-  };
-
-  const handleExport = async (story: StoryLibraryItem, format: "pdf" | "docx") => {
+  async function handleExport(story: StoryLibraryItem, format: "pdf" | "docx") {
     setBusyStoryId(story.id);
     try {
       const blob = await downloadStoryExport(story.id, format);
-      const safeTitle = story.title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 80);
-      saveBlob(blob, `${safeTitle || "story"}.${format}`);
+      saveBlob(blob, `${slugifyTitle(story.title) || "story"}.${format}`);
       trackStoryLibraryAction(story, "share_action", `export_${format}`);
     } finally {
       setBusyStoryId(null);
     }
-  };
+  }
 
-  const handleCreateOrEditPage = async (story: StoryLibraryItem) => {
+  async function handleCreateOrEditPage(story: StoryLibraryItem) {
     setBusyStoryId(story.id);
     try {
       if (story.landing_page?.id) {
@@ -233,21 +202,21 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
         navigate(`/pages/${story.landing_page.id}/edit`);
         return;
       }
-      const page = await createLandingPage({
+      const created = await createLandingPage({
         story_id: story.id,
         title: story.title,
       });
       trackStoryLibraryAction(story, "share_action", "create_page", {
-        page_id: page.id,
-        page_slug: page.slug,
+        page_id: created.id,
+        page_slug: created.slug,
       });
-      navigate(`/pages/${page.id}/edit`);
+      navigate(`/pages/${created.id}/edit`);
     } finally {
       setBusyStoryId(null);
     }
-  };
+  }
 
-  const handleShare = async (story: StoryLibraryItem) => {
+  async function handleShare(story: StoryLibraryItem) {
     if (story.landing_page?.slug) {
       const shareUrl = `${window.location.origin}/p/${story.landing_page.slug}`;
       try {
@@ -271,20 +240,19 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     setBulkMessage(
       story.landing_page
         ? "Page exists but is not published yet. Open the editor to publish first."
-        : "Create a landing page first, then publish to get a share link."
+        : "Create a landing page first, then publish to get a share link.",
     );
     trackStoryLibraryAction(story, "library_action", "share_blocked", {
       has_page: !!story.landing_page,
       page_status: story.landing_page?.status ?? null,
     });
-  };
+  }
 
-  const handleDelete = async (story: StoryLibraryItem) => {
+  async function handleDelete(story: StoryLibraryItem) {
     const confirmed = window.confirm(
-      `Delete story \"${story.title}\"? This cannot be undone.`
+      `Delete story "${story.title}"? This cannot be undone.`,
     );
     if (!confirmed) return;
-
     setBusyStoryId(story.id);
     try {
       await deleteStory(story.id);
@@ -294,44 +262,26 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     } finally {
       setBusyStoryId(null);
     }
-  };
+  }
 
-  const buildCrmNote = (story: StoryLibraryItem): string => {
-    const funnel = story.funnel_stages.length > 0 ? story.funnel_stages.join(", ") : "N/A";
-    const topQuote = story.quotes[0]?.quote_text ?? "No quote captured";
-    const topMetric = story.quotes.find((quote) => quote.metric_value)?.metric_value ?? "N/A";
-    return [
-      `Story: ${story.title}`,
-      `Account: ${story.account.name}`,
-      `Funnel Stage(s): ${funnel}`,
-      `Top Metric: ${topMetric}`,
-      `Proof Quote: "${topQuote}"`,
-      "",
-      "Summary:",
-      story.markdown.slice(0, 1200),
-    ].join("\n");
-  };
-
-  const handleCopyStoryMarkdown = async (story: StoryLibraryItem) => {
+  async function handleCopyStoryMarkdown(story: StoryLibraryItem) {
     await navigator.clipboard.writeText(story.markdown);
     setBulkMessage(`Copied story markdown for "${story.title}".`);
     trackStoryLibraryAction(story, "share_action", "copy_story_markdown");
-  };
+  }
 
-  const handleCopyCrmNote = async (story: StoryLibraryItem) => {
+  async function handleCopyCrmNote(story: StoryLibraryItem) {
     const note = buildCrmNote(story);
     await navigator.clipboard.writeText(note);
     setBulkMessage(`Copied CRM note for "${story.title}".`);
     trackStoryLibraryAction(story, "share_action", "copy_crm_note");
-  };
+  }
 
-  const handlePushCrmNote = async (story: StoryLibraryItem) => {
+  async function handlePushCrmNote(story: StoryLibraryItem) {
     const confirmed = window.confirm(
-      `Push a CRM note for "${story.title}" to account "${story.account.name}"?`
+      `Push a CRM note for "${story.title}" to account "${story.account.name}"?`,
     );
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
     setBusyStoryId(story.id);
     try {
       await requestWriteback({
@@ -350,18 +300,20 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
       setBulkMessage(
         err instanceof Error
           ? `CRM writeback failed: ${err.message}`
-          : "CRM writeback failed."
+          : "CRM writeback failed.",
       );
     } finally {
       setBusyStoryId(null);
     }
-  };
+  }
+
+  // ─── Bulk Actions ───────────────────────────────────────────────────
 
   const toggleStorySelection = (storyId: string) => {
     setSelectedStoryIds((prev) =>
       prev.includes(storyId)
         ? prev.filter((id) => id !== storyId)
-        : [...prev, storyId]
+        : [...prev, storyId],
     );
   };
 
@@ -374,46 +326,36 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
   };
 
   const handleBulkCopy = async () => {
-    if (selectedStories.length === 0) {
-      return;
-    }
+    if (selectedStories.length === 0) return;
     const payload = selectedStories
       .map(
         (story) =>
-          `# ${story.title}\n\nAccount: ${story.account.name}\nStatus: ${STORY_STATUS_LABELS[story.story_status]}\n\n${story.markdown}`
+          `# ${story.title}\n\nAccount: ${story.account.name}\nStatus: ${STORY_STATUS_LABELS[story.story_status]}\n\n${story.markdown}`,
       )
       .join("\n\n---\n\n");
     await navigator.clipboard.writeText(payload);
     setBulkMessage(
-      `Copied ${selectedStories.length} stor${selectedStories.length === 1 ? "y" : "ies"} to clipboard.`
+      `Copied ${selectedStories.length} stor${selectedStories.length === 1 ? "y" : "ies"} to clipboard.`,
     );
   };
 
   const handleBulkExport = async (format: "pdf" | "docx") => {
-    if (selectedStories.length === 0) {
-      return;
-    }
+    if (selectedStories.length === 0) return;
     if (
       selectedStories.length > 5 &&
       !window.confirm(
-        `Export ${selectedStories.length} files as ${format.toUpperCase()}? Your browser will download them one by one.`
+        `Export ${selectedStories.length} files as ${format.toUpperCase()}? Your browser will download them one by one.`,
       )
     ) {
       return;
     }
-
     setBulkBusy(true);
     let successCount = 0;
     let failedCount = 0;
     for (const story of selectedStories) {
       try {
         const blob = await downloadStoryExport(story.id, format);
-        const safeTitle = story.title
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-+|-+$/g, "")
-          .slice(0, 80);
-        saveBlob(blob, `${safeTitle || "story"}.${format}`);
+        saveBlob(blob, `${slugifyTitle(story.title) || "story"}.${format}`);
         successCount += 1;
       } catch {
         failedCount += 1;
@@ -421,19 +363,17 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     }
     setBulkBusy(false);
     setBulkMessage(
-      `Bulk export complete: ${successCount} succeeded${failedCount > 0 ? `, ${failedCount} failed` : ""}.`
+      `Bulk export complete: ${successCount} succeeded${failedCount > 0 ? `, ${failedCount} failed` : ""}.`,
     );
   };
 
   const handleBulkDelete = async () => {
-    if (isViewer || selectedStories.length === 0) {
-      return;
-    }
+    if (isViewer || selectedStories.length === 0) return;
     const blocked = selectedStories.filter((story) => !!story.landing_page);
     const deletable = selectedStories.filter((story) => !story.landing_page);
     if (deletable.length === 0) {
       setBulkMessage(
-        "No selected stories can be deleted because they already have linked pages."
+        "No selected stories can be deleted because they already have linked pages.",
       );
       return;
     }
@@ -443,9 +383,7 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
         ? `${blocked.length} stor${blocked.length === 1 ? "y has" : "ies have"} linked pages and will be skipped.`
         : "This cannot be undone.",
     ].join("\n");
-    if (!window.confirm(confirmText)) {
-      return;
-    }
+    if (!window.confirm(confirmText)) return;
 
     setBulkBusy(true);
     const deletedIds: string[] = [];
@@ -463,49 +401,11 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     setTotalCount((prev) => Math.max(0, prev - deletedIds.length));
     setBulkBusy(false);
     setBulkMessage(
-      `Deleted ${deletedIds.length} stor${deletedIds.length === 1 ? "y" : "ies"}${blocked.length > 0 ? `, skipped ${blocked.length}` : ""}.`
+      `Deleted ${deletedIds.length} stor${deletedIds.length === 1 ? "y" : "ies"}${blocked.length > 0 ? `, skipped ${blocked.length}` : ""}.`,
     );
   };
 
-  const openCommentThread = (story: StoryLibraryItem) => {
-    setCommentStory(story);
-    setCommentTarget(story.landing_page ? "page" : "story");
-    setCommentDraft("");
-    setComments([]);
-    setCommentsError(null);
-    trackStoryLibraryAction(story, "library_action", "open_comment_thread");
-  };
-
-  const closeCommentThread = () => {
-    setCommentStory(null);
-    setCommentDraft("");
-    setComments([]);
-    setCommentsError(null);
-  };
-
-  const submitComment = async () => {
-    if (!commentStory || !commentDraft.trim()) {
-      return;
-    }
-    setCommentSubmitting(true);
-    setCommentsError(null);
-    try {
-      const created = await createStoryComment(commentStory.id, {
-        message: commentDraft.trim(),
-        target: commentTarget,
-        page_id: commentTarget === "page" ? commentStory.landing_page?.id : undefined,
-      });
-      setComments((prev) => [...prev, created]);
-      setCommentDraft("");
-      trackStoryLibraryAction(commentStory, "library_action", "post_comment", {
-        target: commentTarget,
-      });
-    } catch (err) {
-      setCommentsError(err instanceof Error ? err.message : "Failed to post comment");
-    } finally {
-      setCommentSubmitting(false);
-    }
-  };
+  // ─── Render ─────────────────────────────────────────────────────────
 
   return (
     <div className="page">
@@ -715,74 +615,12 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
                     <p className="story-library__card-preview">{getStoryPreview(story.markdown)}</p>
                     <blockquote className="story-library__card-quote">"{topQuote}"</blockquote>
                     <div className="story-library__card-actions">
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--primary"
-                        onClick={() => void handleShare(story)}
-                        disabled={busyStoryId === story.id || bulkBusy}
-                      >
-                        Share
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--ghost"
-                        onClick={() => void handleCopyStoryMarkdown(story)}
-                        disabled={busyStoryId === story.id || bulkBusy}
-                      >
-                        Copy
-                      </button>
-                      {!isViewer && (
-                        <button
-                          type="button"
-                          className="btn btn--sm btn--secondary"
-                          onClick={() => void handleCreateOrEditPage(story)}
-                          disabled={busyStoryId === story.id || bulkBusy}
-                        >
-                          {story.landing_page ? "Edit Page" : "Create Page"}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--ghost"
-                        onClick={() => void handleExport(story, "pdf")}
-                        disabled={busyStoryId === story.id || bulkBusy}
-                      >
-                        PDF
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--ghost"
-                        onClick={() => void handleExport(story, "docx")}
-                        disabled={busyStoryId === story.id || bulkBusy}
-                      >
-                        DOCX
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--ghost"
-                        onClick={() => void handleCopyCrmNote(story)}
-                        disabled={busyStoryId === story.id || bulkBusy}
-                      >
-                        Copy CRM Note
-                      </button>
-                      {!isViewer && (
-                        <button
-                          type="button"
-                          className="btn btn--sm btn--ghost"
-                          onClick={() => void handlePushCrmNote(story)}
-                          disabled={busyStoryId === story.id || bulkBusy}
-                        >
-                          Push CRM Note
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--ghost"
-                        onClick={() => openCommentThread(story)}
-                        disabled={bulkBusy}
-                      >
-                        Comments
-                      </button>
+                      <StoryActionButtons
+                        story={story}
+                        callbacks={storyCallbacks}
+                        busy={busyStoryId === story.id || bulkBusy}
+                        isViewer={isViewer}
+                      />
                     </div>
                   </article>
                 );
@@ -833,79 +671,17 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
                       <td>{new Date(story.generated_at).toLocaleDateString()}</td>
                       <td>
                         <div className="story-library__actions">
-                          <button
-                            type="button"
-                            className="btn btn--sm btn--primary"
-                            onClick={() => void handleShare(story)}
-                            disabled={busyStoryId === story.id || bulkBusy}
-                          >
-                            Share
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--sm btn--ghost"
-                            onClick={() => void handleCopyStoryMarkdown(story)}
-                            disabled={busyStoryId === story.id || bulkBusy}
-                          >
-                            Copy
-                          </button>
-                          {!isViewer && (
-                            <button
-                              type="button"
-                              className="btn btn--sm btn--secondary"
-                              onClick={() => void handleCreateOrEditPage(story)}
-                              disabled={busyStoryId === story.id || bulkBusy}
-                            >
-                              {story.landing_page ? "Edit Page" : "Create Page"}
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="btn btn--sm btn--ghost"
-                            onClick={() => void handleExport(story, "pdf")}
-                            disabled={busyStoryId === story.id || bulkBusy}
-                          >
-                            PDF
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--sm btn--ghost"
-                            onClick={() => void handleExport(story, "docx")}
-                            disabled={busyStoryId === story.id || bulkBusy}
-                          >
-                            DOCX
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--sm btn--ghost"
-                            onClick={() => void handleCopyCrmNote(story)}
-                            disabled={busyStoryId === story.id || bulkBusy}
-                          >
-                            Copy CRM Note
-                          </button>
-                          {!isViewer && (
-                            <button
-                              type="button"
-                              className="btn btn--sm btn--ghost"
-                              onClick={() => void handlePushCrmNote(story)}
-                              disabled={busyStoryId === story.id || bulkBusy}
-                            >
-                              Push CRM Note
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="btn btn--sm btn--ghost"
-                            onClick={() => openCommentThread(story)}
-                            disabled={bulkBusy}
-                          >
-                            Comments
-                          </button>
+                          <StoryActionButtons
+                            story={story}
+                            callbacks={storyCallbacks}
+                            busy={busyStoryId === story.id || bulkBusy}
+                            isViewer={isViewer}
+                          />
                           {!isViewer && (
                             <button
                               type="button"
                               className="btn btn--sm btn--danger"
-                              onClick={() => void handleDelete(story)}
+                              onClick={() => storyCallbacks.onDelete?.(story)}
                               disabled={
                                 busyStoryId === story.id || bulkBusy || !!story.landing_page
                               }
@@ -952,104 +728,13 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
       )}
 
       {commentStory && (
-        <div className="story-library__comments-overlay" role="dialog" aria-modal="true">
-          <div className="story-library__comments-modal">
-            <div className="story-library__comments-header">
-              <div>
-                <h2 className="story-library__comments-title">Feedback Thread</h2>
-                <p className="story-library__comments-subtitle">{commentStory.title}</p>
-              </div>
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                onClick={closeCommentThread}
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="story-library__comments-targets">
-              <button
-                type="button"
-                className={`btn btn--sm ${
-                  commentTarget === "story" ? "btn--primary" : "btn--secondary"
-                }`}
-                onClick={() => setCommentTarget("story")}
-              >
-                Story Thread
-              </button>
-              {commentStory.landing_page && (
-                <button
-                  type="button"
-                  className={`btn btn--sm ${
-                    commentTarget === "page" ? "btn--primary" : "btn--secondary"
-                  }`}
-                  onClick={() => setCommentTarget("page")}
-                >
-                  Page Thread
-                </button>
-              )}
-            </div>
-
-            <div className="story-library__comments-list">
-              {commentsLoading && (
-                <div className="story-library__comments-empty">Loading comments...</div>
-              )}
-              {!commentsLoading && comments.length === 0 && (
-                <div className="story-library__comments-empty">
-                  No comments yet. Start the thread.
-                </div>
-              )}
-              {!commentsLoading &&
-                comments.map((comment) => (
-                  <div className="story-library__comment" key={comment.id}>
-                    <div className="story-library__comment-meta">
-                      <strong>
-                        {comment.author?.name || comment.author?.email || "Unknown user"}
-                      </strong>
-                      <span>{new Date(comment.created_at).toLocaleString()}</span>
-                    </div>
-                    <div className="story-library__comment-body">{comment.message}</div>
-                  </div>
-                ))}
-            </div>
-
-            {commentsError && (
-              <div className="story-library__comments-error" role="alert">
-                {commentsError}
-              </div>
-            )}
-
-            <div className="story-library__comments-compose">
-              <textarea
-                className="form-textarea"
-                rows={3}
-                value={commentDraft}
-                onChange={(event) => setCommentDraft(event.target.value)}
-                placeholder="Add feedback for this story/page..."
-                aria-label="Comment message"
-              />
-              <div className="story-library__comments-compose-actions">
-                <button
-                  type="button"
-                  className="btn btn--secondary btn--sm"
-                  onClick={closeCommentThread}
-                  disabled={commentSubmitting}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--primary btn--sm"
-                  onClick={() => void submitComment()}
-                  disabled={commentSubmitting || !commentDraft.trim()}
-                >
-                  {commentSubmitting ? "Posting..." : "Post Comment"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <StoryCommentThread
+          story={commentStory}
+          onClose={() => setCommentStory(null)}
+          onTrack={(actionName, metadata) =>
+            trackStoryLibraryAction(commentStory, "library_action", actionName, metadata)
+          }
+        />
       )}
     </div>
   );
