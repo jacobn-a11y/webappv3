@@ -1,11 +1,7 @@
-import { Router, type Request, type Response } from "express";
+import { Router, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-}
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 
 const ListCommentsQuerySchema = z.object({
   target: z.enum(["story", "page"]).default("story"),
@@ -55,7 +51,7 @@ async function resolveCommentTarget(
 export function createStoryCommentRoutes(prisma: PrismaClient): Router {
   const router = Router();
 
-  router.get("/:storyId/comments", async (req: AuthReq, res: Response) => {
+  router.get("/:storyId/comments", async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
@@ -119,7 +115,7 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
     }
   });
 
-  router.post("/:storyId/comments", async (req: AuthReq, res: Response) => {
+  router.post("/:storyId/comments", async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId || !req.userId) {
       res.status(401).json({ error: "Authentication required" });
       return;

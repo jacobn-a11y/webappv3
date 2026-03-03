@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import type { AuthUser } from "../lib/api";
 import { ProtectedRoute, AccessDenied } from "../components/ProtectedRoute";
+import { PageSkeleton } from "../components/PageSkeleton";
 
 const AccountDetailPage = lazy(() => import("../pages/AccountDetailPage").then(m => ({ default: m.AccountDetailPage })));
 const AccountsIndexPage = lazy(() => import("../pages/AccountsIndexPage").then(m => ({ default: m.AccountsIndexPage })));
@@ -43,7 +44,7 @@ interface AuthenticatedRoutesProps {
 
 export function AuthenticatedRoutes({ user }: AuthenticatedRoutesProps) {
   return (
-    <Suspense fallback={<div className="page-loading"><div className="spinner" /></div>}>
+    <Suspense fallback={<PageSkeleton />}>
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/accounts" element={<AccountsIndexPage />} />
@@ -185,7 +186,7 @@ export function AuthenticatedRoutes({ user }: AuthenticatedRoutesProps) {
 
 export function PublicRoutes() {
   return (
-    <Suspense fallback={<div className="page-loading"><div className="spinner" /></div>}>
+    <Suspense fallback={<PageSkeleton />}>
     <Routes>
       <Route path="/auth" element={<AuthPage />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />

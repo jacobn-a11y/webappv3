@@ -7,19 +7,19 @@ import {
 } from "../../services/ai-client.js";
 import type { AISettingsRouteContext, AuthReq } from "./types.js";
 import logger from "../../lib/logger.js";
+import { asyncHandler } from "../../lib/async-handler.js";
 
 export function registerAISettingsUserRoutes({
   configService,
   router,
   usageTracker,
 }: Pick<AISettingsRouteContext, "configService" | "router" | "usageTracker">): void {
-  router.get("/providers", async (req: AuthReq, res: Response) => {
+  router.get("/providers", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId || !req.userRole) {
       sendUnauthorized(res);
       return;
     }
 
-    try {
       const access = await configService.resolveUserAccess(
         req.organizationId,
         req.userId,
@@ -51,19 +51,15 @@ export function registerAISettingsUserRoutes({
         })),
         user_access: access,
       });
-    } catch (err) {
-      logger.error("List providers error", { error: err });
-      res.status(500).json({ error: "Failed to list AI providers" });
-    }
-  });
+    
+  }));
 
-  router.get("/usage/me", async (req: AuthReq, res: Response) => {
+  router.get("/usage/me", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
       sendUnauthorized(res);
       return;
     }
 
-    try {
       const status = await usageTracker.getLimitStatus(req.organizationId, req.userId);
 
       res.json({
@@ -90,19 +86,15 @@ export function registerAISettingsUserRoutes({
             }
           : null,
       });
-    } catch (err) {
-      logger.error("Usage status error", { error: err });
-      res.status(500).json({ error: "Failed to get usage status" });
-    }
-  });
+    
+  }));
 
-  router.get("/balance/me", async (req: AuthReq, res: Response) => {
+  router.get("/balance/me", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
       sendUnauthorized(res);
       return;
     }
 
-    try {
       const balance = await usageTracker.getBalance(req.organizationId, req.userId);
       if (!balance) {
         res.json({ balance: null });
@@ -122,19 +114,15 @@ export function registerAISettingsUserRoutes({
           })),
         },
       });
-    } catch (err) {
-      logger.error("Balance error", { error: err });
-      res.status(500).json({ error: "Failed to get balance" });
-    }
-  });
+    
+  }));
 
-  router.get("/notifications", async (req: AuthReq, res: Response) => {
+  router.get("/notifications", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
       sendUnauthorized(res);
       return;
     }
 
-    try {
       const notifications = await usageTracker.getPendingNotifications(
         req.organizationId,
         req.userId
@@ -151,19 +139,15 @@ export function registerAISettingsUserRoutes({
           created_at: notice.createdAt.toISOString(),
         })),
       });
-    } catch (err) {
-      logger.error("Notifications error", { error: err });
-      res.status(500).json({ error: "Failed to get notifications" });
-    }
-  });
+    
+  }));
 
-  router.post("/notifications/:id/acknowledge", async (req: AuthReq, res: Response) => {
+  router.post("/notifications/:id/acknowledge", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
       sendUnauthorized(res);
       return;
     }
 
-    try {
       const acknowledged = await usageTracker.acknowledgeNotification(
         req.organizationId,
         req.userId,
@@ -175,27 +159,20 @@ export function registerAISettingsUserRoutes({
       }
 
       res.json({ acknowledged: true });
-    } catch (err) {
-      logger.error("Acknowledge notification error", { error: err });
-      res.status(500).json({ error: "Failed to acknowledge notification" });
-    }
-  });
+    
+  }));
 
-  router.post("/notifications/acknowledge-all", async (req: AuthReq, res: Response) => {
+  router.post("/notifications/acknowledge-all", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
       sendUnauthorized(res);
       return;
     }
 
-    try {
       const acknowledgedCount = await usageTracker.acknowledgeAllNotifications(
         req.organizationId,
         req.userId
       );
       res.json({ acknowledged: true, count: acknowledgedCount });
-    } catch (err) {
-      logger.error("Acknowledge all notifications error", { error: err });
-      res.status(500).json({ error: "Failed to acknowledge notifications" });
-    }
-  });
+    
+  }));
 }

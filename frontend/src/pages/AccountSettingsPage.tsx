@@ -217,9 +217,9 @@ export function AccountSettingsPage() {
       {/* Delete Confirmation Dialog */}
       {showDeleteConfirm && (
         <div className="modal-overlay" onClick={() => setShowDeleteConfirm(false)}>
-          <div className="modal modal--sm" onClick={(e) => e.stopPropagation()} role="alertdialog">
-            <h3 className="modal__title">Delete Account</h3>
-            <p className="modal__message">
+          <div className="modal modal--sm" onClick={(e) => e.stopPropagation()} role="alertdialog" aria-labelledby="delete-confirm-title" aria-describedby="delete-confirm-msg">
+            <h3 id="delete-confirm-title" className="modal__title">Delete Account</h3>
+            <p id="delete-confirm-msg" className="modal__message">
               This will schedule your account for permanent deletion in 30 days. All data will be irreversibly removed. You can cancel any time during the grace period.
             </p>
             <div className="form-group" style={{ marginBottom: 16 }}>

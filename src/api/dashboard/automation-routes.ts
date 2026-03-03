@@ -1,13 +1,16 @@
-import { type Request, type Response, type Router } from "express";
+import { type Response, type Router } from "express";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
-import type { PrismaClient, UserRole } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import { requirePermission } from "../../middleware/permissions.js";
 import type { AuditLogService } from "../../services/audit-log.js";
 import logger from "../../lib/logger.js";
 import { parseRequestBody } from "../_shared/validators.js";
+import { sendSuccess, sendCreated, sendNotFound, sendBadRequest, sendError } from "../_shared/responses.js";
 import { encodeJsonValue } from "../../types/json-boundaries.js";
 import { dispatchOutboundWebhookEvent } from "../../services/outbound-webhooks.js";
+import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
+import { asyncHandler } from "../../lib/async-handler.js";
 
 const UpsertAutomationRuleSchema = z.object({
   name: z.string().min(2).max(140),
@@ -27,12 +30,6 @@ const UpsertAutomationRuleSchema = z.object({
 const ReportExportFormatSchema = z.object({
   format: z.enum(["csv", "json"]).default("csv"),
 });
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
 
 interface RegisterAutomationRoutesOptions {
   router: Router;
@@ -153,258 +150,240 @@ export function registerAutomationRoutes({
   router.get(
     "/automations",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const rules = await prisma.automationRule.findMany({
-          where: { organizationId: req.organizationId },
-          orderBy: { updatedAt: "desc" },
-        });
-        res.json({
-          rules: rules.map((r) => ({
-            id: r.id,
-            name: r.name,
-            description: r.description,
-            enabled: r.enabled,
-            trigger_type: r.triggerType,
-            metric: r.metric,
-            operator: r.operator,
-            threshold: r.threshold,
-            schedule_cron: r.scheduleCron,
-            event_type: r.eventType,
-            delivery_type: r.deliveryType,
-            delivery_target: r.deliveryTarget,
-            payload_template: r.payloadTemplate,
-            last_run_at: r.lastRunAt?.toISOString() ?? null,
-            last_run_status: r.lastRunStatus ?? null,
-            last_run_error: r.lastRunError ?? null,
-            created_at: r.createdAt.toISOString(),
-            updated_at: r.updatedAt.toISOString(),
-          })),
-        });
-      } catch (err) {
-        logger.error("List automation rules error", { error: err });
-        res.status(500).json({ error: "Failed to load automation rules" });
-      }
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+
+      const rules = await prisma.automationRule.findMany({
+      where: { organizationId: req.organizationId },
+      orderBy: { updatedAt: "desc" },
+      });
+      sendSuccess(res, {
+      rules: rules.map((r) => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        enabled: r.enabled,
+        trigger_type: r.triggerType,
+        metric: r.metric,
+        operator: r.operator,
+        threshold: r.threshold,
+        schedule_cron: r.scheduleCron,
+        event_type: r.eventType,
+        delivery_type: r.deliveryType,
+        delivery_target: r.deliveryTarget,
+        payload_template: r.payloadTemplate,
+        last_run_at: r.lastRunAt?.toISOString() ?? null,
+        last_run_status: r.lastRunStatus ?? null,
+        last_run_error: r.lastRunError ?? null,
+        created_at: r.createdAt.toISOString(),
+        updated_at: r.updatedAt.toISOString(),
+      })),
+      });
+      
     }
-  );
+  ));
 
   router.get(
     "/automations/reports",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const reports = await prisma.sharedAsset.findMany({
-          where: {
-            organizationId: req.organizationId,
-            assetType: "REPORT",
-          },
-          orderBy: { createdAt: "desc" },
-          take: 20,
-        });
-        res.json({
-          reports: reports.map((report) => {
-            const metadata = decodePayloadTemplate(report.metadata);
-            const payload =
-              metadata.payload && typeof metadata.payload === "object"
-                ? (metadata.payload as AutomationReportPayload)
-                : null;
-            return {
-              id: report.id,
-              title: report.title,
-              description: report.description,
-              created_at: report.createdAt.toISOString(),
-              metrics: payload?.metrics ?? null,
-              window_days: payload?.window_days ?? null,
-            };
-          }),
-        });
-      } catch (err) {
-        logger.error("List automation reports error", { error: err });
-        res.status(500).json({ error: "Failed to load scheduled reports" });
-      }
-    }
-  );
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-  router.get(
-    "/automations/reports/:assetId/export",
-    requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      const parse = ReportExportFormatSchema.safeParse(req.query);
-      if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
-        return;
-      }
-      try {
-        const asset = await prisma.sharedAsset.findFirst({
-          where: {
-            id: String(req.params.assetId),
-            organizationId: req.organizationId,
-            assetType: "REPORT",
-          },
-        });
-        if (!asset) {
-          res.status(404).json({ error: "report_not_found" });
-          return;
-        }
-        const metadata = decodePayloadTemplate(asset.metadata);
+      const reports = await prisma.sharedAsset.findMany({
+      where: {
+        organizationId: req.organizationId,
+        assetType: "REPORT",
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      });
+      sendSuccess(res, {
+      reports: reports.map((report) => {
+        const metadata = decodePayloadTemplate(report.metadata);
         const payload =
           metadata.payload && typeof metadata.payload === "object"
             ? (metadata.payload as AutomationReportPayload)
             : null;
-        if (!payload) {
-          res.status(400).json({ error: "report_payload_missing" });
-          return;
-        }
-        if (parse.data.format === "json") {
-          res.setHeader("Content-Type", "application/json");
-          res.setHeader(
-            "Content-Disposition",
-            `attachment; filename="${asset.title.replace(/\s+/g, "-").toLowerCase()}.json"`
-          );
-          res.send(JSON.stringify(payload, null, 2));
-          return;
-        }
-
-        const csv = reportPayloadToCsv(payload);
-        res.setHeader("Content-Type", "text/csv; charset=utf-8");
-        res.setHeader(
-          "Content-Disposition",
-          `attachment; filename="${asset.title.replace(/\s+/g, "-").toLowerCase()}.csv"`
-        );
-        res.send(csv);
-      } catch (err) {
-        logger.error("Export automation report error", { error: err });
-        res.status(500).json({ error: "Failed to export scheduled report" });
-      }
+        return {
+          id: report.id,
+          title: report.title,
+          description: report.description,
+          created_at: report.createdAt.toISOString(),
+          metrics: payload?.metrics ?? null,
+          window_days: payload?.window_days ?? null,
+        };
+      }),
+      });
+      
     }
-  );
+  ));
+
+  router.get(
+    "/automations/reports/:assetId/export",
+    requirePermission(prisma, "manage_permissions"),
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+      const parse = ReportExportFormatSchema.safeParse(req.query);
+      if (!parse.success) {
+        sendBadRequest(res, "validation_error", parse.error.issues);
+        return;
+      }
+
+      const asset = await prisma.sharedAsset.findFirst({
+      where: {
+        id: String(req.params.assetId),
+        organizationId: req.organizationId,
+        assetType: "REPORT",
+      },
+      });
+      if (!asset) {
+      sendNotFound(res, "report_not_found");
+      return;
+      }
+      const metadata = decodePayloadTemplate(asset.metadata);
+      const payload =
+      metadata.payload && typeof metadata.payload === "object"
+        ? (metadata.payload as AutomationReportPayload)
+        : null;
+      if (!payload) {
+      sendBadRequest(res, "report_payload_missing");
+      return;
+      }
+      if (parse.data.format === "json") {
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${asset.title.replace(/\s+/g, "-").toLowerCase()}.json"`
+      );
+      res.send(JSON.stringify(payload, null, 2));
+      return;
+      }
+
+      const csv = reportPayloadToCsv(payload);
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${asset.title.replace(/\s+/g, "-").toLowerCase()}.csv"`
+      );
+      res.send(csv);
+      
+    }
+  ));
 
   router.post(
     "/automations",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const payload = parseRequestBody(UpsertAutomationRuleSchema, req.body, res);
       if (!payload) {
         return;
       }
-      try {
-        const d = payload;
-        const rule = await prisma.automationRule.create({
-          data: {
-            organizationId: req.organizationId,
-            name: d.name,
-            description: d.description,
-            enabled: d.enabled,
-            triggerType: d.trigger_type,
-            metric: d.metric,
-            operator: d.operator,
-            threshold: d.threshold,
-            scheduleCron: d.schedule_cron,
-            eventType: d.event_type,
-            deliveryType: d.delivery_type,
-            deliveryTarget: d.delivery_target,
-            payloadTemplate: (d.payload_template ?? undefined) as
-              | Prisma.InputJsonValue
-              | undefined,
-          },
-        });
-        await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
-          category: "AUTOMATION",
-          action: "AUTOMATION_RULE_CREATED",
-          targetType: "automation_rule",
-          targetId: rule.id,
-          severity: "INFO",
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        res.status(201).json({ id: rule.id });
-      } catch (err) {
-        logger.error("Create automation rule error", { error: err });
-        res.status(500).json({ error: "Failed to create automation rule" });
-      }
+
+      const d = payload;
+      const rule = await prisma.automationRule.create({
+      data: {
+        organizationId: req.organizationId,
+        name: d.name,
+        description: d.description,
+        enabled: d.enabled,
+        triggerType: d.trigger_type,
+        metric: d.metric,
+        operator: d.operator,
+        threshold: d.threshold,
+        scheduleCron: d.schedule_cron,
+        eventType: d.event_type,
+        deliveryType: d.delivery_type,
+        deliveryTarget: d.delivery_target,
+        payloadTemplate: (d.payload_template ?? undefined) as
+          | Prisma.InputJsonValue
+          | undefined,
+      },
+      });
+      await auditLogs.record({
+      organizationId: req.organizationId,
+      actorUserId: req.userId,
+      category: "AUTOMATION",
+      action: "AUTOMATION_RULE_CREATED",
+      targetType: "automation_rule",
+      targetId: rule.id,
+      severity: "INFO",
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+      });
+      sendCreated(res, { id: rule.id });
+      
     }
-  );
+  ));
 
   router.patch(
     "/automations/:ruleId",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const payload = parseRequestBody(UpsertAutomationRuleSchema, req.body, res);
       if (!payload) {
         return;
       }
-      try {
-        const ruleId = String(req.params.ruleId);
-        const existing = await prisma.automationRule.findFirst({
-          where: { id: ruleId, organizationId: req.organizationId },
-        });
-        if (!existing) {
-          res.status(404).json({ error: "automation_rule_not_found" });
-          return;
-        }
-        const d = payload;
-        await prisma.automationRule.update({
-          where: { id: existing.id },
-          data: {
-            name: d.name,
-            description: d.description,
-            enabled: d.enabled,
-            triggerType: d.trigger_type,
-            metric: d.metric,
-            operator: d.operator,
-            threshold: d.threshold,
-            scheduleCron: d.schedule_cron,
-            eventType: d.event_type,
-            deliveryType: d.delivery_type,
-            deliveryTarget: d.delivery_target,
-            payloadTemplate: (d.payload_template ?? undefined) as
-              | Prisma.InputJsonValue
-              | undefined,
-          },
-        });
-        res.json({ updated: true });
-      } catch (err) {
-        logger.error("Update automation rule error", { error: err });
-        res.status(500).json({ error: "Failed to update automation rule" });
+
+      const ruleId = String(req.params.ruleId);
+      const existing = await prisma.automationRule.findFirst({
+      where: { id: ruleId, organizationId: req.organizationId },
+      });
+      if (!existing) {
+      sendNotFound(res, "automation_rule_not_found");
+      return;
       }
+      const d = payload;
+      await prisma.automationRule.update({
+      where: { id: existing.id },
+      data: {
+        name: d.name,
+        description: d.description,
+        enabled: d.enabled,
+        triggerType: d.trigger_type,
+        metric: d.metric,
+        operator: d.operator,
+        threshold: d.threshold,
+        scheduleCron: d.schedule_cron,
+        eventType: d.event_type,
+        deliveryType: d.delivery_type,
+        deliveryTarget: d.delivery_target,
+        payloadTemplate: (d.payload_template ?? undefined) as
+          | Prisma.InputJsonValue
+          | undefined,
+      },
+      });
+      sendSuccess(res, { updated: true });
+      
     }
-  );
+  ));
 
   router.delete(
     "/automations/:ruleId",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const ruleId = String(req.params.ruleId);
-        const existing = await prisma.automationRule.findFirst({
-          where: { id: ruleId, organizationId: req.organizationId },
-        });
-        if (!existing) {
-          res.status(404).json({ error: "automation_rule_not_found" });
-          return;
-        }
-        await prisma.automationRule.delete({ where: { id: existing.id } });
-        res.json({ deleted: true });
-      } catch (err) {
-        logger.error("Delete automation rule error", { error: err });
-        res.status(500).json({ error: "Failed to delete automation rule" });
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+
+      const ruleId = String(req.params.ruleId);
+      const existing = await prisma.automationRule.findFirst({
+      where: { id: ruleId, organizationId: req.organizationId },
+      });
+      if (!existing) {
+      sendNotFound(res, "automation_rule_not_found");
+      return;
       }
+      await prisma.automationRule.delete({ where: { id: existing.id } });
+      sendSuccess(res, { deleted: true });
+      
     }
-  );
+  ));
 
   router.post(
     "/automations/:ruleId/run",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       try {
         const ruleId = String(req.params.ruleId);
         const rule = await prisma.automationRule.findFirst({
           where: { id: ruleId, organizationId: req.organizationId },
         });
         if (!rule) {
-          res.status(404).json({ error: "automation_rule_not_found" });
+          sendNotFound(res, "automation_rule_not_found");
           return;
         }
 
@@ -489,15 +468,15 @@ export function registerAutomationRoutes({
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
         });
-        res.json({
+        sendSuccess(res, {
           status,
           error,
           report_asset_id: reportAsset?.assetId ?? null,
         });
       } catch (err) {
         logger.error("Run automation rule error", { error: err });
-        res.status(500).json({ error: "Failed to run automation rule" });
+        sendError(res, 500, "internal_error", "Failed to run automation rule");
       }
     }
-  );
+  ));
 }

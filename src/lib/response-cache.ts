@@ -6,6 +6,14 @@ interface CacheEntry<T> {
 const DEFAULT_MAX_SIZE = 500;
 const PURGE_INTERVAL_MS = 60_000;
 
+/**
+ * In-memory cache with TTL and LRU eviction.
+ *
+ * Uses Map insertion order for LRU tracking: accessed entries are
+ * re-inserted at the end so the least-recently-used entry is always
+ * first. When the cache exceeds maxSize, the oldest (least recently
+ * used) entries are evicted.
+ */
 export class ResponseCache<T> {
   private readonly entries = new Map<string, CacheEntry<T>>();
   private readonly maxSize: number;
@@ -21,8 +29,12 @@ export class ResponseCache<T> {
     const now = Date.now();
     const cached = this.entries.get(key);
     if (cached && cached.expiresAt > now) {
+      this.entries.delete(key);
+      this.entries.set(key, cached);
       return cached.value;
     }
+
+    if (cached) this.entries.delete(key);
 
     const value = await loader();
     this.entries.set(key, { value, expiresAt: now + this.ttlMs });
@@ -31,9 +43,10 @@ export class ResponseCache<T> {
   }
 
   private evictIfNeeded(): void {
-    if (this.entries.size > this.maxSize) {
+    while (this.entries.size > this.maxSize) {
       const firstKey = this.entries.keys().next().value;
       if (firstKey !== undefined) this.entries.delete(firstKey);
+      else break;
     }
   }
 

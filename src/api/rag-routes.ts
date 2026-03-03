@@ -7,18 +7,15 @@
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import type { PrismaClient, UserRole } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import type { RAGEngine } from "../services/rag-engine.js";
 import { AccountAccessService } from "../services/account-access.js";
+import { sendSuccess, sendUnauthorized, sendForbidden } from "./_shared/responses.js";
 import logger from "../lib/logger.js";
+import { asyncHandler } from "../lib/async-handler.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
 
 const ChatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
@@ -85,10 +82,10 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    *     "tokens_used": 1234
    *   }
    */
-  router.post("/query", async (req: AuthReq, res: Response) => {
+  router.post("/query", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const orgId = req.organizationId;
     if (!orgId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
@@ -104,12 +101,8 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
     const { query, account_id, organization_id, top_k, funnel_stages } =
       parseResult.data;
 
-    try {
       if (organization_id && organization_id !== orgId) {
-        res.status(403).json({
-          error: "organization_mismatch",
-          message: "organization_id does not match the authenticated tenant.",
-        });
+        sendForbidden(res, "organization_id does not match the authenticated tenant.");
         return;
       }
 
@@ -121,10 +114,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
           req.userRole
         );
         if (!canAccessAccount) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "You do not have access to this account.",
-          });
+          sendForbidden(res, "You do not have access to this account.");
           return;
         }
       }
@@ -137,7 +127,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
         funnelStages: funnel_stages,
       });
 
-      res.json({
+      sendSuccess(res, {
         answer: result.answer,
         sources: result.sources.map((s) => ({
           chunk_id: s.chunkId,
@@ -150,11 +140,8 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
         })),
         tokens_used: result.tokensUsed,
       });
-    } catch (err) {
-      logger.error("RAG query error", { error: err });
-      res.status(500).json({ error: "Failed to process query" });
-    }
-  });
+    
+  }));
 
   /**
    * POST /api/rag/chat
@@ -163,10 +150,10 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    * follow-up questions are resolved with context.
    * When account_id is null, searches across all org accounts.
    */
-  router.post("/chat", async (req: AuthReq, res: Response) => {
+  router.post("/chat", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const orgId = req.organizationId;
     if (!orgId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
@@ -182,7 +169,6 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
     const { query, account_id, history, top_k, funnel_stages } =
       parseResult.data;
 
-    try {
       if (account_id && req.userId) {
         const canAccessAccount = await accessService.canAccessAccount(
           req.userId,
@@ -191,10 +177,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
           req.userRole
         );
         if (!canAccessAccount) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "You do not have access to this account.",
-          });
+          sendForbidden(res, "You do not have access to this account.");
           return;
         }
       }
@@ -208,7 +191,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
         funnelStages: funnel_stages,
       });
 
-      res.json({
+      sendSuccess(res, {
         answer: result.answer,
         sources: result.sources.map((s) => ({
           chunk_id: s.chunkId,
@@ -221,11 +204,8 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
         })),
         tokens_used: result.tokensUsed,
       });
-    } catch (err) {
-      logger.error("RAG chat error", { error: err });
-      res.status(500).json({ error: "Failed to process chat query" });
-    }
-  });
+    
+  }));
 
   /**
    * GET /api/rag/accounts
@@ -234,14 +214,13 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    * context selector in the chat UI.
    * Query params: search (optional text filter)
    */
-  router.get("/accounts", async (req: AuthReq, res: Response) => {
+  router.get("/accounts", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const orgId = req.organizationId;
     if (!orgId || !req.userId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
-    try {
       const accessibleIds = await accessService.getAccessibleAccountIds(
         req.userId,
         orgId,
@@ -271,7 +250,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
         take: 100,
       });
 
-      res.json({
+      sendSuccess(res, {
         accounts: accounts.map((a) => ({
           id: a.id,
           name: a.name,
@@ -280,11 +259,8 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
           call_count: a._count.calls,
         })),
       });
-    } catch (err) {
-      logger.error("List accounts error", { error: err });
-      res.status(500).json({ error: "Failed to load accounts" });
-    }
-  });
+    
+  }));
 
   /**
    * GET /api/rag/health
@@ -292,7 +268,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    * Health check for the RAG service.
    */
   router.get("/health", (_req: Request, res: Response) => {
-    res.json({ status: "ok", service: "rag-engine" });
+    sendSuccess(res, { status: "ok", service: "rag-engine" });
   });
 
   return router;

@@ -65,6 +65,15 @@ function wrapText(text: string, maxWidth: number, font: any, size: number): stri
   return lines;
 }
 
+const yieldToEventLoop = (): Promise<void> =>
+  new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * TODO: For large documents, consider offloading to a worker_threads Worker
+ * to fully avoid blocking the event loop. The current implementation yields
+ * periodically via setImmediate which is sufficient for typical story lengths
+ * but may still cause latency spikes on very large markdown inputs.
+ */
 export async function markdownToPdfBuffer(title: string, markdown: string): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -102,8 +111,14 @@ export async function markdownToPdfBuffer(title: string, markdown: string): Prom
     y -= level > 0 ? 6 : 2;
   };
 
+  const lines = markdownToPlainLines(markdown);
   drawLine(title, { level: 1 });
-  for (const line of markdownToPlainLines(markdown)) {
+
+  const YIELD_EVERY = 50;
+  for (let i = 0; i < lines.length; i++) {
+    if (i > 0 && i % YIELD_EVERY === 0) await yieldToEventLoop();
+
+    const line = lines[i];
     if (line.text.length === 0) {
       y -= 8;
       continue;
@@ -122,7 +137,13 @@ export async function markdownToDocxBuffer(title: string, markdown: string): Pro
     }),
   ];
 
-  for (const line of markdownToPlainLines(markdown)) {
+  const lines = markdownToPlainLines(markdown);
+  const YIELD_EVERY = 50;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (i > 0 && i % YIELD_EVERY === 0) await yieldToEventLoop();
+
+    const line = lines[i];
     if (line.text.length === 0) {
       children.push(new Paragraph({ children: [new TextRun("")] }));
       continue;
@@ -173,5 +194,8 @@ export async function markdownToDocxBuffer(title: string, markdown: string): Pro
     ],
   });
 
-  return Packer.toBuffer(doc);
+  // Packer.toBuffer is CPU-intensive; yield before and after
+  await yieldToEventLoop();
+  const buffer = await Packer.toBuffer(doc);
+  return buffer;
 }

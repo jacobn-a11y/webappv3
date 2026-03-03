@@ -10,11 +10,13 @@
  *   GET /api/accounts/stages   — Available funnel stages for the filter bar
  */
 
-import { Router, type Request, type Response } from "express";
+import { Router, type Response } from "express";
 import { z } from "zod";
-import type { PrismaClient, UserRole, FunnelStage } from "@prisma/client";
+import type { PrismaClient, FunnelStage } from "@prisma/client";
 import { AccountsListService } from "../services/accounts-list.js";
 import logger from "../lib/logger.js";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import { asyncHandler } from "../lib/async-handler.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -46,12 +48,6 @@ const AccountListQuerySchema = z.object({
   sort_order: z.enum(["asc", "desc"]).optional(),
 });
 
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
-
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
 export function createAccountsRoutes(prisma: PrismaClient): Router {
@@ -81,7 +77,7 @@ export function createAccountsRoutes(prisma: PrismaClient): Router {
    *   OWNER/ADMIN see all org accounts.
    *   MEMBER/VIEWER see only accounts they've been granted access to.
    */
-  router.get("/", async (req: AuthReq, res: Response) => {
+  router.get("/", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId || !req.userId) {
       res.status(401).json({ error: "Authentication required" });
       return;
@@ -95,7 +91,6 @@ export function createAccountsRoutes(prisma: PrismaClient): Router {
       return;
     }
 
-    try {
       const result = await accountsService.listAccounts(
         req.organizationId,
         req.userId,
@@ -119,11 +114,8 @@ export function createAccountsRoutes(prisma: PrismaClient): Router {
       );
 
       res.json(result);
-    } catch (err) {
-      logger.error("Accounts list error", { error: err });
-      res.status(500).json({ error: "Failed to load accounts" });
-    }
-  });
+    
+  }));
 
   /**
    * GET /api/accounts/stages
@@ -131,7 +123,7 @@ export function createAccountsRoutes(prisma: PrismaClient): Router {
    * Returns the available funnel stages with their labels for the quick-filter bar.
    * This is a static endpoint — no auth scoping needed beyond org membership.
    */
-  router.get("/stages", async (req: AuthReq, res: Response) => {
+  router.get("/stages", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId) {
       res.status(401).json({ error: "Authentication required" });
       return;
@@ -147,7 +139,7 @@ export function createAccountsRoutes(prisma: PrismaClient): Router {
         { value: "VERTICAL", label: "Vertical" },
       ],
     });
-  });
+  }));
 
   return router;
 }

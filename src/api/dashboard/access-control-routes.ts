@@ -1,10 +1,9 @@
-import { type Request, type Response, type Router } from "express";
+import { type Response, type Router } from "express";
 import { z } from "zod";
 import type {
   AccountScopeType,
   PermissionType,
   PrismaClient,
-  UserRole,
 } from "@prisma/client";
 import {
   requirePermission,
@@ -14,6 +13,9 @@ import type { RoleProfileService } from "../../services/role-profiles.js";
 import type { AuditLogService } from "../../services/audit-log.js";
 import logger from "../../lib/logger.js";
 import { parseRequestBody } from "../_shared/validators.js";
+import { sendSuccess, sendCreated, sendNotFound, sendBadRequest } from "../_shared/responses.js";
+import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
+import { asyncHandler } from "../../lib/async-handler.js";
 
 const RolePermissionEnum = z.enum([
   "CREATE_LANDING_PAGE",
@@ -68,12 +70,6 @@ const GrantPermissionSchema = z.object({
   ]),
 });
 
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
-
 interface RegisterAccessControlRoutesOptions {
   router: Router;
   prisma: PrismaClient;
@@ -99,81 +95,74 @@ export function registerAccessControlRoutes({
   router.get(
     "/permissions",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const matrix = await permManager.getOrgPermissionMatrix(
-          req.organizationId
-        );
-        res.json({ users: matrix });
-      } catch (err) {
-        logger.error("Get permissions error", { error: err });
-        res.status(500).json({ error: "Failed to load permissions" });
-      }
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+
+      const matrix = await permManager.getOrgPermissionMatrix(
+      req.organizationId
+      );
+      sendSuccess(res, { users: matrix });
+      
     }
-  );
+  ));
 
   // ── Admin: Team/Role Profiles ────────────────────────────────────────
 
   router.get(
     "/roles",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        await roleProfiles.ensurePresetRoles(req.organizationId);
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-        const [roles, users] = await Promise.all([
-          prisma.roleProfile.findMany({
-            where: { organizationId: req.organizationId },
-            orderBy: [{ isPreset: "desc" }, { name: "asc" }],
-            include: {
-              assignments: {
-                select: {
-                  userId: true,
-                  user: { select: { name: true, email: true } },
-                },
-              },
-            },
-          }),
-          prisma.user.findMany({
-            where: { organizationId: req.organizationId },
+      await roleProfiles.ensurePresetRoles(req.organizationId);
+
+      const [roles, users] = await Promise.all([
+      prisma.roleProfile.findMany({
+        where: { organizationId: req.organizationId },
+        orderBy: [{ isPreset: "desc" }, { name: "asc" }],
+        include: {
+          assignments: {
             select: {
-              id: true,
-              name: true,
-              email: true,
-              role: true,
-              roleAssignment: { select: { roleProfileId: true } },
+              userId: true,
+              user: { select: { name: true, email: true } },
             },
-            orderBy: { email: "asc" },
-          }),
-        ]);
+          },
+        },
+      }),
+      prisma.user.findMany({
+        where: { organizationId: req.organizationId },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          roleAssignment: { select: { roleProfileId: true } },
+        },
+        orderBy: { email: "asc" },
+      }),
+      ]);
 
-        res.json({
-          roles,
-          users: users.map((u) => ({
-            id: u.id,
-            name: u.name,
-            email: u.email,
-            base_role: u.role,
-            role_profile_id: u.roleAssignment?.roleProfileId ?? null,
-          })),
-        });
-      } catch (err) {
-        logger.error("Get role profiles error", { error: err });
-        res.status(500).json({ error: "Failed to load role profiles" });
-      }
+      sendSuccess(res, {
+      roles,
+      users: users.map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        base_role: u.role,
+        role_profile_id: u.roleAssignment?.roleProfileId ?? null,
+      })),
+      });
+      
     }
-  );
+  ));
 
   router.post(
     "/roles",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const payload = parseRequestBody(UpsertRoleProfileSchema, req.body, res);
       if (!payload) {
         return;
       }
 
-      try {
         const d = payload;
         const role = await prisma.roleProfile.create({
           data: {
@@ -196,34 +185,30 @@ export function registerAccessControlRoutes({
             maxStoriesPerMonth: d.max_stories_per_month ?? null,
           },
         });
-        res.status(201).json({ role });
-      } catch (err) {
-        logger.error("Create role profile error", { error: err });
-        res.status(500).json({ error: "Failed to create role profile" });
-      }
+        sendCreated(res, { role });
+      
     }
-  );
+  ));
 
   router.patch(
     "/roles/:roleId",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const payload = parseRequestBody(UpsertRoleProfileSchema, req.body, res);
       if (!payload) {
         return;
       }
 
-      try {
         const existing = await prisma.roleProfile.findFirst({
           where: { id: req.params.roleId as string, organizationId: req.organizationId },
         });
         if (!existing) {
-          res.status(404).json({ error: "Role profile not found" });
+          sendNotFound(res, "Role profile not found");
           return;
         }
 
         if (existing.isPreset && existing.key !== payload.key) {
-          res.status(400).json({ error: "Preset role keys cannot be changed" });
+          sendBadRequest(res, "Preset role keys cannot be changed");
           return;
         }
 
@@ -248,47 +233,41 @@ export function registerAccessControlRoutes({
             maxStoriesPerMonth: d.max_stories_per_month ?? null,
           },
         });
-        res.json({ role });
-      } catch (err) {
-        logger.error("Update role profile error", { error: err });
-        res.status(500).json({ error: "Failed to update role profile" });
-      }
+        sendSuccess(res, { role });
+      
     }
-  );
+  ));
 
   router.delete(
     "/roles/:roleId",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const role = await prisma.roleProfile.findFirst({
-          where: { id: req.params.roleId as string, organizationId: req.organizationId },
-        });
-        if (!role) {
-          res.status(404).json({ error: "Role profile not found" });
-          return;
-        }
-        if (role.isPreset) {
-          res.status(400).json({ error: "Preset roles cannot be deleted" });
-          return;
-        }
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-        await prisma.userRoleAssignment.deleteMany({
-          where: { roleProfileId: role.id },
-        });
-        await prisma.roleProfile.delete({ where: { id: role.id } });
-        res.json({ deleted: true });
-      } catch (err) {
-        logger.error("Delete role profile error", { error: err });
-        res.status(500).json({ error: "Failed to delete role profile" });
+      const role = await prisma.roleProfile.findFirst({
+      where: { id: req.params.roleId as string, organizationId: req.organizationId },
+      });
+      if (!role) {
+      sendNotFound(res, "Role profile not found");
+      return;
       }
+      if (role.isPreset) {
+      sendBadRequest(res, "Preset roles cannot be deleted");
+      return;
+      }
+
+      await prisma.userRoleAssignment.deleteMany({
+      where: { roleProfileId: role.id },
+      });
+      await prisma.roleProfile.delete({ where: { id: role.id } });
+      sendSuccess(res, { deleted: true });
+      
     }
-  );
+  ));
 
   router.post(
     "/roles/assign",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const payload = parseRequestBody(AssignRoleSchema, req.body, res);
       if (!payload) {
         return;
@@ -313,15 +292,13 @@ export function registerAccessControlRoutes({
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
         });
-        res.json({ assigned: true });
+        sendSuccess(res, { assigned: true });
       } catch (err) {
         logger.error("Assign role profile error", { error: err });
-        res.status(400).json({
-          error: err instanceof Error ? err.message : "Failed to assign role profile",
-        });
+        sendBadRequest(res, err instanceof Error ? err.message : "Failed to assign role profile");
       }
     }
-  );
+  ));
 
   /**
    * POST /api/dashboard/permissions/grant
@@ -331,13 +308,12 @@ export function registerAccessControlRoutes({
   router.post(
     "/permissions/grant",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const payload = parseRequestBody(GrantPermissionSchema, req.body, res);
       if (!payload) {
         return;
       }
 
-      try {
         await permManager.grantPermission(
           payload.user_id,
           payload.permission as PermissionType,
@@ -355,13 +331,10 @@ export function registerAccessControlRoutes({
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
         });
-        res.json({ granted: true });
-      } catch (err) {
-        logger.error("Grant permission error", { error: err });
-        res.status(500).json({ error: "Failed to grant permission" });
-      }
+        sendSuccess(res, { granted: true });
+      
     }
-  );
+  ));
 
   /**
    * POST /api/dashboard/permissions/revoke
@@ -371,13 +344,12 @@ export function registerAccessControlRoutes({
   router.post(
     "/permissions/revoke",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const payload = parseRequestBody(GrantPermissionSchema, req.body, res);
       if (!payload) {
         return;
       }
 
-      try {
         await permManager.revokePermission(
           payload.user_id,
           payload.permission as PermissionType
@@ -394,11 +366,8 @@ export function registerAccessControlRoutes({
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
         });
-        res.json({ revoked: true });
-      } catch (err) {
-        logger.error("Revoke permission error", { error: err });
-        res.status(500).json({ error: "Failed to revoke permission" });
-      }
+        sendSuccess(res, { revoked: true });
+      
     }
-  );
+  ));
 }

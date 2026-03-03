@@ -691,29 +691,32 @@ export class SyncEngine {
       },
     });
 
-    for (const participant of input.participants) {
-      if (!participant.email) continue;
-      const domain = extractEmailDomain(participant.email);
-      if (!domain) continue;
-      await this.prisma.contact.upsert({
-        where: {
-          accountId_email: {
-            accountId: account.id,
-            email: participant.email.toLowerCase(),
+    const upsertOps = input.participants
+      .filter((p) => p.email && extractEmailDomain(p.email))
+      .map((participant) => {
+        const domain = extractEmailDomain(participant.email!)!;
+        return this.prisma.contact.upsert({
+          where: {
+            accountId_email: {
+              accountId: account.id,
+              email: participant.email!.toLowerCase(),
+            },
           },
-        },
-        create: {
-          accountId: account.id,
-          email: participant.email.toLowerCase(),
-          emailDomain: domain,
-          name: participant.name ?? null,
-          title: participant.title ?? null,
-        },
-        update: {
-          name: participant.name ?? undefined,
-          title: participant.title ?? undefined,
-        },
+          create: {
+            accountId: account.id,
+            email: participant.email!.toLowerCase(),
+            emailDomain: domain,
+            name: participant.name ?? null,
+            title: participant.title ?? null,
+          },
+          update: {
+            name: participant.name ?? undefined,
+            title: participant.title ?? undefined,
+          },
+        });
       });
+    if (upsertOps.length > 0) {
+      await this.prisma.$transaction(upsertOps);
     }
   }
 
@@ -741,10 +744,12 @@ export class SyncEngine {
       });
     }
 
-    // Sync accounts first (contacts reference them)
+    // Accounts must sync first (contacts and opportunities reference them)
     const accountCount = await this.syncAccounts(config, provider, credentials);
-    const contactCount = await this.syncContacts(config, provider, credentials);
-    const opportunityCount = await this.syncOpportunities(config, provider, credentials);
+    const [contactCount, opportunityCount] = await Promise.all([
+      this.syncContacts(config, provider, credentials),
+      this.syncOpportunities(config, provider, credentials),
+    ]);
 
     // Mark sync complete
     await this.prisma.integrationConfig.update({
@@ -774,9 +779,15 @@ export class SyncEngine {
         { attempts: 4, baseDelayMs: 1000 }
       );
 
-      for (const account of result.data) {
-        await this.persistAccount(config.organizationId, account);
-        total++;
+      const PAGE_CONCURRENCY = 10;
+      for (let i = 0; i < result.data.length; i += PAGE_CONCURRENCY) {
+        const batch = result.data.slice(i, i + PAGE_CONCURRENCY);
+        await Promise.all(
+          batch.map((account) =>
+            this.persistAccount(config.organizationId, account)
+          )
+        );
+        total += batch.length;
       }
 
       cursor = result.nextCursor;
@@ -868,9 +879,15 @@ export class SyncEngine {
         { attempts: 4, baseDelayMs: 1000 }
       );
 
-      for (const contact of result.data) {
-        await this.persistContact(config.organizationId, contact);
-        total++;
+      const PAGE_CONCURRENCY = 10;
+      for (let i = 0; i < result.data.length; i += PAGE_CONCURRENCY) {
+        const batch = result.data.slice(i, i + PAGE_CONCURRENCY);
+        await Promise.all(
+          batch.map((contact) =>
+            this.persistContact(config.organizationId, contact)
+          )
+        );
+        total += batch.length;
       }
 
       cursor = result.nextCursor;
@@ -970,9 +987,15 @@ export class SyncEngine {
         { attempts: 4, baseDelayMs: 1000 }
       );
 
-      for (const opp of result.data) {
-        await this.persistOpportunity(config.organizationId, opp);
-        total++;
+      const PAGE_CONCURRENCY = 10;
+      for (let i = 0; i < result.data.length; i += PAGE_CONCURRENCY) {
+        const batch = result.data.slice(i, i + PAGE_CONCURRENCY);
+        await Promise.all(
+          batch.map((opp) =>
+            this.persistOpportunity(config.organizationId, opp)
+          )
+        );
+        total += batch.length;
       }
 
       cursor = result.nextCursor;

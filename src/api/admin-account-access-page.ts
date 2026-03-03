@@ -5,16 +5,11 @@
  * access scope and provides actions to grant/revoke access.
  */
 
-import { Router, type Request, type Response } from "express";
-import type { PrismaClient, UserRole } from "@prisma/client";
+import { Router, type Response } from "express";
+import type { PrismaClient } from "@prisma/client";
 import { requirePermission } from "../middleware/permissions.js";
 import { renderAccountAccessPage } from "./templates/admin-account-access-template.js";
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
@@ -29,7 +24,7 @@ export function createAdminAccountAccessPage(prisma: PrismaClient): Router {
   router.get(
     "/",
     requirePermission(prisma, "manage_permissions"),
-    async (_req: AuthReq, res: Response) => {
+    async (_req: AuthenticatedRequest, res: Response) => {
       res.setHeader("Cache-Control", "private, no-cache");
       res.send(renderAccountAccessPage());
     }

@@ -1,7 +1,7 @@
 import type { UserRole } from "@prisma/client";
 import type { Response } from "express";
 import { requirePermission } from "../../middleware/permissions.js";
-import { sendUnauthorized } from "../_shared/responses.js";
+import { sendUnauthorized, sendSuccess, sendBadRequest } from "../_shared/responses.js";
 import logger from "../../lib/logger.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import { PROVIDER_MODELS, type AIProviderName } from "../../services/ai-client.js";
@@ -15,6 +15,7 @@ import {
   ValidateKeySchema,
 } from "./schemas.js";
 import type { AISettingsRouteContext, AuthReq } from "./types.js";
+import { asyncHandler } from "../../lib/async-handler.js";
 
 export function registerAISettingsAdminRoutes({
   configService,
@@ -25,29 +26,25 @@ export function registerAISettingsAdminRoutes({
   router.get(
     "/admin/settings",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
         sendUnauthorized(res);
         return;
       }
 
-      try {
         const settings = await prisma.orgAISettings.findUnique({
           where: { organizationId: req.organizationId },
         });
 
-        res.json({ settings: settings ?? null });
-      } catch (err) {
-        logger.error("Get org AI settings error", { error: err });
-        res.status(500).json({ error: "Failed to get AI settings" });
-      }
+        sendSuccess(res, { settings: settings ?? null });
+      
     }
-  );
+  ));
 
   router.put(
     "/admin/settings",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const payload = parseRequestBody(OrgAISettingsSchema, req.body, res);
       if (!payload) {
         return;
@@ -58,7 +55,6 @@ export function registerAISettingsAdminRoutes({
         return;
       }
 
-      try {
         await prisma.orgAISettings.upsert({
           where: { organizationId: req.organizationId },
           create: {
@@ -78,27 +74,23 @@ export function registerAISettingsAdminRoutes({
           },
         });
 
-        res.json({ saved: true });
-      } catch (err) {
-        logger.error("Update org AI settings error", { error: err });
-        res.status(500).json({ error: "Failed to update AI settings" });
-      }
+        sendSuccess(res, { saved: true });
+      
     }
-  );
+  ));
 
   router.get(
     "/admin/providers",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
         sendUnauthorized(res);
         return;
       }
 
-      try {
         const configs = await configService.listOrgConfigs(req.organizationId);
 
-        res.json({
+        sendSuccess(res, {
           providers: configs.map((config) => ({
             id: config.id,
             provider: config.provider,
@@ -113,17 +105,14 @@ export function registerAISettingsAdminRoutes({
             updated_at: config.updatedAt,
           })),
         });
-      } catch (err) {
-        logger.error("Admin list providers error", { error: err });
-        res.status(500).json({ error: "Failed to list AI providers" });
-      }
+      
     }
-  );
+  ));
 
   router.post(
     "/admin/providers",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const payload = parseRequestBody(UpsertProviderSchema, req.body, res);
       if (!payload) {
         return;
@@ -134,7 +123,6 @@ export function registerAISettingsAdminRoutes({
         return;
       }
 
-      try {
         const configId = await configService.upsertOrgConfig(req.organizationId, {
           provider: payload.provider as AIProviderName,
           apiKey: payload.api_key,
@@ -144,41 +132,34 @@ export function registerAISettingsAdminRoutes({
           isDefault: payload.is_default,
         });
 
-        res.json({ id: configId, saved: true });
-      } catch (err) {
-        logger.error("Upsert provider error", { error: err });
-        res.status(500).json({ error: "Failed to save AI provider config" });
-      }
+        sendSuccess(res, { id: configId, saved: true });
+      
     }
-  );
+  ));
 
   router.post(
     "/admin/providers/validate",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const payload = parseRequestBody(ValidateKeySchema, req.body, res);
       if (!payload) {
         return;
       }
 
-      try {
         const result = await configService.validateApiKey(
           payload.provider as AIProviderName,
           payload.api_key
         );
 
-        res.json(result);
-      } catch (err) {
-        logger.error("Validate key error", { error: err });
-        res.status(500).json({ error: "Failed to validate API key" });
-      }
+        sendSuccess(res, result);
+      
     }
-  );
+  ));
 
   router.delete(
     "/admin/providers/:provider",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
         sendUnauthorized(res);
         return;
@@ -186,47 +167,39 @@ export function registerAISettingsAdminRoutes({
 
       const provider = parseAIProviderName(req.params.provider);
       if (!provider) {
-        res.status(400).json({ error: "Invalid provider" });
+        sendBadRequest(res, "Invalid provider");
         return;
       }
 
-      try {
         await configService.deleteOrgConfig(req.organizationId, provider);
-        res.json({ deleted: true });
-      } catch (err) {
-        logger.error("Delete provider error", { error: err });
-        res.status(500).json({ error: "Failed to delete AI provider" });
-      }
+        sendSuccess(res, { deleted: true });
+      
     }
-  );
+  ));
 
   router.get(
     "/admin/role-defaults",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
         sendUnauthorized(res);
         return;
       }
 
-      try {
         const defaults = await prisma.orgAIRoleDefault.findMany({
           where: { organizationId: req.organizationId },
           orderBy: { role: "asc" },
         });
 
-        res.json({ role_defaults: defaults });
-      } catch (err) {
-        logger.error("List role defaults error", { error: err });
-        res.status(500).json({ error: "Failed to list role defaults" });
-      }
+        sendSuccess(res, { role_defaults: defaults });
+      
     }
-  );
+  ));
 
   router.post(
     "/admin/role-defaults",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const payload = parseRequestBody(SetRoleDefaultSchema, req.body, res);
       if (!payload) {
         return;
@@ -237,7 +210,6 @@ export function registerAISettingsAdminRoutes({
         return;
       }
 
-      try {
         await prisma.orgAIRoleDefault.upsert({
           where: {
             organizationId_role: {
@@ -265,24 +237,20 @@ export function registerAISettingsAdminRoutes({
           },
         });
 
-        res.json({ saved: true });
-      } catch (err) {
-        logger.error("Set role default error", { error: err });
-        res.status(500).json({ error: "Failed to set role default" });
-      }
+        sendSuccess(res, { saved: true });
+      
     }
-  );
+  ));
 
   router.delete(
     "/admin/role-defaults/:role",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
         sendUnauthorized(res);
         return;
       }
 
-      try {
         await prisma.orgAIRoleDefault.deleteMany({
           where: {
             organizationId: req.organizationId,
@@ -290,24 +258,20 @@ export function registerAISettingsAdminRoutes({
           },
         });
 
-        res.json({ deleted: true });
-      } catch (err) {
-        logger.error("Delete role default error", { error: err });
-        res.status(500).json({ error: "Failed to delete role default" });
-      }
+        sendSuccess(res, { deleted: true });
+      
     }
-  );
+  ));
 
   router.get(
     "/admin/user-access",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
         sendUnauthorized(res);
         return;
       }
 
-      try {
         const access = await prisma.userAIAccess.findMany({
           where: { organizationId: req.organizationId },
           include: {
@@ -315,18 +279,15 @@ export function registerAISettingsAdminRoutes({
           },
         });
 
-        res.json({ user_access: access });
-      } catch (err) {
-        logger.error("List user access error", { error: err });
-        res.status(500).json({ error: "Failed to list user access" });
-      }
+        sendSuccess(res, { user_access: access });
+      
     }
-  );
+  ));
 
   router.post(
     "/admin/user-access",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const payload = parseRequestBody(SetUserAccessSchema, req.body, res);
       if (!payload) {
         return;
@@ -337,7 +298,6 @@ export function registerAISettingsAdminRoutes({
         return;
       }
 
-      try {
         await prisma.userAIAccess.upsert({
           where: {
             organizationId_userId: {
@@ -363,24 +323,20 @@ export function registerAISettingsAdminRoutes({
           },
         });
 
-        res.json({ saved: true });
-      } catch (err) {
-        logger.error("Set user access error", { error: err });
-        res.status(500).json({ error: "Failed to set user access" });
-      }
+        sendSuccess(res, { saved: true });
+      
     }
-  );
+  ));
 
   router.delete(
     "/admin/user-access/:userId",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
         sendUnauthorized(res);
         return;
       }
 
-      try {
         await prisma.userAIAccess.deleteMany({
           where: {
             organizationId: req.organizationId,
@@ -388,26 +344,22 @@ export function registerAISettingsAdminRoutes({
           },
         });
 
-        res.json({ deleted: true });
-      } catch (err) {
-        logger.error("Delete user access error", { error: err });
-        res.status(500).json({ error: "Failed to delete user access" });
-      }
+        sendSuccess(res, { deleted: true });
+      
     }
-  );
+  ));
 
   router.get(
     "/admin/limits",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
         sendUnauthorized(res);
         return;
       }
 
-      try {
         const limits = await usageTracker.listLimits(req.organizationId);
-        res.json({
+        sendSuccess(res, {
           limits: limits.map((limit) => ({
             id: limit.id,
             user: limit.user
@@ -424,17 +376,14 @@ export function registerAISettingsAdminRoutes({
             updated_at: limit.updatedAt,
           })),
         });
-      } catch (err) {
-        logger.error("List limits error", { error: err });
-        res.status(500).json({ error: "Failed to list usage limits" });
-      }
+      
     }
-  );
+  ));
 
   router.post(
     "/admin/limits",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const payload = parseRequestBody(SetLimitSchema, req.body, res);
       if (!payload) {
         return;
@@ -445,7 +394,6 @@ export function registerAISettingsAdminRoutes({
         return;
       }
 
-      try {
         await usageTracker.setLimit({
           organizationId: req.organizationId,
           userId: payload.user_id,
@@ -457,54 +405,46 @@ export function registerAISettingsAdminRoutes({
           warningThresholdPct: payload.warning_threshold_pct,
         });
 
-        res.json({ saved: true });
-      } catch (err) {
-        logger.error("Set limit error", { error: err });
-        res.status(500).json({ error: "Failed to set usage limit" });
-      }
+        sendSuccess(res, { saved: true });
+      
     }
-  );
+  ));
 
   router.delete(
     "/admin/limits/:userId",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
         sendUnauthorized(res);
         return;
       }
 
-      try {
         const userId =
           req.params.userId === "org_default"
             ? undefined
             : (req.params.userId as string);
 
         await usageTracker.removeLimit(req.organizationId, userId);
-        res.json({ deleted: true });
-      } catch (err) {
-        logger.error("Remove limit error", { error: err });
-        res.status(500).json({ error: "Failed to remove usage limit" });
-      }
+        sendSuccess(res, { deleted: true });
+      
     }
-  );
+  ));
 
   router.get(
     "/admin/usage",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
         sendUnauthorized(res);
         return;
       }
 
-      try {
         const userId = req.query.user_id as string | undefined;
         const days = parseInt(req.query.days as string, 10) || 30;
 
         const records = await usageTracker.getUsageHistory(req.organizationId, userId, days);
 
-        res.json({
+        sendSuccess(res, {
           records: records.map((record) => ({
             id: record.id,
             user_id: record.userId,
@@ -518,23 +458,19 @@ export function registerAISettingsAdminRoutes({
             created_at: record.createdAt.toISOString(),
           })),
         });
-      } catch (err) {
-        logger.error("Usage history error", { error: err });
-        res.status(500).json({ error: "Failed to get usage history" });
-      }
+      
     }
-  );
+  ));
 
   router.get(
     "/admin/usage/summary",
     requirePermission(prisma, "manage_ai_settings"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
         sendUnauthorized(res);
         return;
       }
 
-      try {
         const startOfMonth = new Date();
         startOfMonth.setDate(1);
         startOfMonth.setHours(0, 0, 0, 0);
@@ -556,7 +492,7 @@ export function registerAISettingsAdminRoutes({
         });
         const userMap = new Map(users.map((user) => [user.id, user]));
 
-        res.json({
+        sendSuccess(res, {
           period_start: startOfMonth.toISOString(),
           users: byUser.map((bucket) => {
             const user = userMap.get(bucket.userId);
@@ -570,10 +506,7 @@ export function registerAISettingsAdminRoutes({
             };
           }),
         });
-      } catch (err) {
-        logger.error("Usage summary error", { error: err });
-        res.status(500).json({ error: "Failed to get usage summary" });
-      }
+      
     }
-  );
+  ));
 }

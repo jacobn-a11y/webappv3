@@ -1,10 +1,12 @@
-import { type Request, type Response, type Router } from "express";
+import { type Response, type Router } from "express";
 import { z } from "zod";
-import type { PrismaClient, UserRole } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import { requirePermission } from "../../middleware/permissions.js";
 import type { AuditLogService } from "../../services/audit-log.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import logger from "../../lib/logger.js";
+import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
+import { asyncHandler } from "../../lib/async-handler.js";
 
 const SellerAdoptionEventSchema = z.object({
   event_type: z
@@ -33,12 +35,6 @@ const SellerAdoptionEventSchema = z.object({
 const SellerAdoptionMetricsQuerySchema = z.object({
   window_days: z.coerce.number().int().min(1).max(365).default(30),
 });
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
 
 interface RegisterSellerAdoptionRoutesOptions {
   router: Router;
@@ -82,7 +78,7 @@ export function registerSellerAdoptionRoutes({
 }: RegisterSellerAdoptionRoutesOptions): void {
   router.post(
     "/seller-adoption/events",
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId || !req.userId) {
         res.status(401).json({ error: "Authentication required" });
         return;
@@ -91,42 +87,39 @@ export function registerSellerAdoptionRoutes({
       if (!payload) {
         return;
       }
-      try {
-        await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
-          category: "SELLER_ADOPTION",
-          action: "FLOW_EVENT",
-          targetType: "seller_flow",
-          targetId: payload.flow_id,
-          severity: "INFO",
-          metadata: {
-            event_type: payload.event_type,
-            flow_id: payload.flow_id,
-            step: payload.step ?? null,
-            account_id: payload.account_id ?? null,
-            story_id: payload.story_id ?? null,
-            stage_preset: payload.stage_preset ?? null,
-            visibility_mode: payload.visibility_mode ?? null,
-            action_name: payload.action_name ?? null,
-            duration_ms: payload.duration_ms ?? null,
-            ...(payload.metadata ?? {}),
-          },
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        res.status(202).json({ accepted: true });
-      } catch (err) {
-        logger.error("Record seller adoption event error", { error: err });
-        res.status(500).json({ error: "Failed to record adoption telemetry" });
-      }
+
+      await auditLogs.record({
+      organizationId: req.organizationId,
+      actorUserId: req.userId,
+      category: "SELLER_ADOPTION",
+      action: "FLOW_EVENT",
+      targetType: "seller_flow",
+      targetId: payload.flow_id,
+      severity: "INFO",
+      metadata: {
+        event_type: payload.event_type,
+        flow_id: payload.flow_id,
+        step: payload.step ?? null,
+        account_id: payload.account_id ?? null,
+        story_id: payload.story_id ?? null,
+        stage_preset: payload.stage_preset ?? null,
+        visibility_mode: payload.visibility_mode ?? null,
+        action_name: payload.action_name ?? null,
+        duration_ms: payload.duration_ms ?? null,
+        ...(payload.metadata ?? {}),
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+      });
+      res.status(202).json({ accepted: true });
+      
     }
-  );
+  ));
 
   router.get(
     "/seller-adoption/metrics",
     requirePermission(prisma, "view_analytics"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const query = SellerAdoptionMetricsQuerySchema.safeParse(req.query);
       if (!query.success) {
         res.status(400).json({ error: "validation_error", details: query.error.issues });
@@ -140,7 +133,6 @@ export function registerSellerAdoptionRoutes({
       const windowDays = query.data.window_days;
       const windowStart = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
-      try {
         const logs = await prisma.auditLog.findMany({
           where: {
             organizationId: req.organizationId,
@@ -317,10 +309,7 @@ export function registerSellerAdoptionRoutes({
             created_at: event.createdAt.toISOString(),
           })),
         });
-      } catch (err) {
-        logger.error("List seller adoption metrics error", { error: err });
-        res.status(500).json({ error: "Failed to load seller adoption metrics" });
-      }
+      
     }
-  );
+  ));
 }

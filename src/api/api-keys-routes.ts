@@ -8,12 +8,14 @@
  *   - Revoke an existing key
  */
 
-import { Router, type Request, type Response } from "express";
+import { Router, type Response } from "express";
 import crypto from "crypto";
 import { z } from "zod";
-import type { PrismaClient, UserRole } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import { requirePermission } from "../middleware/permissions.js";
 import logger from "../lib/logger.js";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import { asyncHandler } from "../lib/async-handler.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -23,12 +25,6 @@ const CreateApiKeySchema = z.object({
     .min(1, "Label is required")
     .max(100, "Label must be under 100 characters"),
 });
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -57,13 +53,12 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
   router.get(
     "/",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
         res.status(401).json({ error: "Authentication required" });
         return;
       }
 
-      try {
         const keys = await prisma.apiKey.findMany({
           where: {
             organizationId: req.organizationId,
@@ -86,12 +81,9 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
           last_used_at: k.lastUsedAt,
           created_at: k.createdAt,
         })) });
-      } catch (err) {
-        logger.error("List API keys error", { error: err });
-        res.status(500).json({ error: "Failed to load API keys" });
-      }
+      
     }
-  );
+  ));
 
   // ── Generate API Key ─────────────────────────────────────────────────
 
@@ -104,14 +96,13 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
   router.post(
     "/",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const parse = CreateApiKeySchema.safeParse(req.body);
       if (!parse.success) {
         res.status(400).json({ error: "validation_error", details: parse.error.issues });
         return;
       }
 
-      try {
         const rawKey = generateApiKey();
         const keyHash = hashApiKey(rawKey);
         const keyPrefix = rawKey.slice(0, 12) + "...";
@@ -136,12 +127,9 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
           },
           warning: "Store this key securely. It will not be shown again.",
         });
-      } catch (err) {
-        logger.error("Generate API key error", { error: err });
-        res.status(500).json({ error: "Failed to generate API key" });
-      }
+      
     }
-  );
+  ));
 
   // ── Revoke API Key ───────────────────────────────────────────────────
 
@@ -154,33 +142,30 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
   router.delete(
     "/:keyId",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const apiKey = await prisma.apiKey.findFirst({
-          where: {
-            id: req.params.keyId as string,
-            organizationId: req.organizationId,
-            revokedAt: null,
-          },
-        });
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-        if (!apiKey) {
-          res.status(404).json({ error: "API key not found" });
-          return;
-        }
+      const apiKey = await prisma.apiKey.findFirst({
+      where: {
+        id: req.params.keyId as string,
+        organizationId: req.organizationId,
+        revokedAt: null,
+      },
+      });
 
-        await prisma.apiKey.update({
-          where: { id: apiKey.id },
-          data: { revokedAt: new Date() },
-        });
-
-        res.json({ revoked: true });
-      } catch (err) {
-        logger.error("Revoke API key error", { error: err });
-        res.status(500).json({ error: "Failed to revoke API key" });
+      if (!apiKey) {
+      res.status(404).json({ error: "API key not found" });
+      return;
       }
+
+      await prisma.apiKey.update({
+      where: { id: apiKey.id },
+      data: { revokedAt: new Date() },
+      });
+
+      res.json({ revoked: true });
+      
     }
-  );
+  ));
 
   return router;
 }

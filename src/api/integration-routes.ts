@@ -31,6 +31,7 @@ import {
 } from "../services/provider-policy.js";
 import { decodeCredentials } from "../types/json-boundaries.js";
 import logger from "../lib/logger.js";
+import { sendSuccess, sendCreated, sendBadRequest, sendNotFound, sendConflict, sendError } from "./_shared/responses.js";
 
 // ─── Validation Schemas ─────────────────────────────────────────────────────
 
@@ -98,7 +99,7 @@ export function createIntegrationRoutes(
       return getOrganizationIdOrThrow(req);
     } catch (error) {
       if (error instanceof TenantGuardError) {
-        res.status(error.statusCode).json({ error: error.message });
+        sendError(res, error.statusCode, error.message);
         return null;
       }
       throw error;
@@ -110,7 +111,7 @@ export function createIntegrationRoutes(
   ): DirectIntegrationProvider | null => {
     const provider = parseDirectIntegrationProvider(rawProvider);
     if (!provider) {
-      res.status(400).json({ error: `Invalid provider: ${String(rawProvider ?? "")}` });
+      sendBadRequest(res, `Invalid provider: ${String(rawProvider ?? "")}`);
       return null;
     }
     return provider;
@@ -124,7 +125,7 @@ export function createIntegrationRoutes(
     }
     const provider = parseDirectIntegrationProvider(rawProvider);
     if (!provider) {
-      res.status(400).json({ error: `Invalid provider: ${rawProvider}` });
+      sendBadRequest(res, `Invalid provider: ${rawProvider}`);
       return null;
     }
     return provider;
@@ -164,7 +165,7 @@ export function createIntegrationRoutes(
       };
     });
 
-    res.json({ integrations: available });
+    sendSuccess(res, { integrations: available });
   });
 
   // ── Get a specific integration config ───────────────────────────────
@@ -184,7 +185,7 @@ export function createIntegrationRoutes(
     });
 
     if (!config) {
-      res.status(404).json({ error: "Integration not configured" });
+      sendNotFound(res, "Integration not configured");
       return;
     }
 
@@ -193,7 +194,7 @@ export function createIntegrationRoutes(
       decodeCredentials(config.credentials)
     );
 
-    res.json({
+    sendSuccess(res, {
       id: config.id,
       provider: config.provider,
       enabled: config.enabled,
@@ -214,7 +215,7 @@ export function createIntegrationRoutes(
 
     const parsed = createIntegrationSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
+      sendBadRequest(res, "Invalid request", parsed.error.issues);
       return;
     }
 
@@ -231,9 +232,7 @@ export function createIntegrationRoutes(
     });
 
     if (existing) {
-      res.status(409).json({
-        error: "Integration already configured. Use PATCH to update.",
-      });
+      sendConflict(res, "Integration already configured. Use PATCH to update.");
       return;
     }
 
@@ -260,7 +259,7 @@ export function createIntegrationRoutes(
       userAgent: req.get("user-agent"),
     });
 
-    res.status(201).json({
+    sendCreated(res, {
       id: config.id,
       provider: config.provider,
       status: config.status,
@@ -277,7 +276,7 @@ export function createIntegrationRoutes(
 
     const parsed = updateIntegrationSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
+      sendBadRequest(res, "Invalid request", parsed.error.issues);
       return;
     }
 
@@ -291,7 +290,7 @@ export function createIntegrationRoutes(
     });
 
     if (!config) {
-      res.status(404).json({ error: "Integration not configured" });
+      sendNotFound(res, "Integration not configured");
       return;
     }
 
@@ -336,7 +335,7 @@ export function createIntegrationRoutes(
       userAgent: req.get("user-agent"),
     });
 
-    res.json({
+    sendSuccess(res, {
       id: updated.id,
       provider: updated.provider,
       enabled: updated.enabled,
@@ -361,7 +360,7 @@ export function createIntegrationRoutes(
     });
 
     if (!config) {
-      res.status(404).json({ error: "Integration not configured" });
+      sendNotFound(res, "Integration not configured");
       return;
     }
 
@@ -386,7 +385,7 @@ export function createIntegrationRoutes(
       userAgent: req.get("user-agent"),
     });
 
-    res.json({ deleted: true, provider });
+    sendSuccess(res, { deleted: true, provider });
   });
 
   // ── Test credentials ────────────────────────────────────────────────
@@ -406,7 +405,7 @@ export function createIntegrationRoutes(
     });
 
     if (!config) {
-      res.status(404).json({ error: "Integration not configured" });
+      sendNotFound(res, "Integration not configured");
       return;
     }
 
@@ -432,10 +431,10 @@ export function createIntegrationRoutes(
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
         });
-        res.json({ valid: true, message: "Merge.dev integration activated" });
+        sendSuccess(res, { valid: true, message: "Merge.dev integration activated" });
         return;
       }
-      res.status(400).json({ error: "No provider implementation available" });
+      sendBadRequest(res, "No provider implementation available");
       return;
     }
 
@@ -461,7 +460,7 @@ export function createIntegrationRoutes(
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
         });
-        res.json({ valid: true, message: "Credentials validated successfully" });
+        sendSuccess(res, { valid: true, message: "Credentials validated successfully" });
       } else {
         await prisma.integrationConfig.update({
           where: { id: config.id },
@@ -482,7 +481,7 @@ export function createIntegrationRoutes(
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
         });
-        res.json({ valid: false, message: "Credential validation failed" });
+        sendSuccess(res, { valid: false, message: "Credential validation failed" });
       }
     } catch (err) {
       const errorMessage =
@@ -503,7 +502,7 @@ export function createIntegrationRoutes(
         ipAddress: req.ip,
         userAgent: req.get("user-agent"),
       });
-      res.json({ valid: false, message: errorMessage });
+      sendSuccess(res, { valid: false, message: errorMessage });
     }
   });
 
@@ -515,13 +514,11 @@ export function createIntegrationRoutes(
     if (!provider) return;
     const selection = resolveIntegrationProviderSelection(provider, registry);
     if (!selection.supportsManualSync && selection.kind === "webhook_only") {
-      res.status(400).json({
-        error: "Merge.dev uses webhook-based sync. No on-demand sync available.",
-      });
+      sendBadRequest(res, "Merge.dev uses webhook-based sync. No on-demand sync available.");
       return;
     }
     if (!selection.supportsManualSync) {
-      res.status(400).json({ error: "No provider implementation available" });
+      sendBadRequest(res, "No provider implementation available");
       return;
     }
 
@@ -535,14 +532,12 @@ export function createIntegrationRoutes(
     });
 
     if (!config) {
-      res.status(404).json({ error: "Integration not configured" });
+      sendNotFound(res, "Integration not configured");
       return;
     }
 
     if (config.status !== "ACTIVE") {
-      res.status(400).json({
-        error: "Integration must be in ACTIVE status. Test credentials first.",
-      });
+      sendBadRequest(res, "Integration must be in ACTIVE status. Test credentials first.");
       return;
     }
 
@@ -574,7 +569,7 @@ export function createIntegrationRoutes(
       userAgent: req.get("user-agent"),
     });
 
-    res.json({
+    sendSuccess(res, {
       message: `Sync started for ${provider}. Check status via GET /api/integrations/${provider.toLowerCase()}`,
     });
   });
@@ -602,7 +597,7 @@ export function createIntegrationRoutes(
       take: limit,
     });
 
-    res.json({
+    sendSuccess(res, {
       runs: runs.map((r) => ({
         id: r.id,
         provider: r.provider,
@@ -645,7 +640,7 @@ export function createIntegrationRoutes(
         ipAddress: req.ip,
         userAgent: req.get("user-agent"),
       });
-      res.json({
+      sendSuccess(res, {
         replaying: true,
         run_id: runId,
         replay_run_id: replay.replayRunId,
@@ -656,7 +651,7 @@ export function createIntegrationRoutes(
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to replay integration run";
-      res.status(400).json({ error: message });
+      sendBadRequest(res, message);
     }
   });
 
@@ -680,7 +675,7 @@ export function createIntegrationRoutes(
       take: limit,
     });
 
-    res.json({
+    sendSuccess(res, {
       failed_runs: failedRuns.map((r) => ({
         id: r.id,
         provider: r.provider,
@@ -723,7 +718,7 @@ export function createIntegrationRoutes(
         ipAddress: req.ip,
         userAgent: req.get("user-agent"),
       });
-      res.json({
+      sendSuccess(res, {
         replaying: true,
         run_id: runId,
         replay_run_id: replay.replayRunId,
@@ -734,7 +729,7 @@ export function createIntegrationRoutes(
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to replay dead-letter run";
-      res.status(400).json({ error: message });
+      sendBadRequest(res, message);
     }
   });
 
@@ -760,7 +755,7 @@ export function createIntegrationRoutes(
       take: limit,
     });
 
-    res.json({
+    sendSuccess(res, {
       backfills: runs.map((r) => ({
         id: r.id,
         provider: r.provider,
@@ -781,7 +776,7 @@ export function createIntegrationRoutes(
     if (!organizationId) return;
     const parsed = backfillSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "validation_error", details: parsed.error.issues });
+      sendBadRequest(res, "validation_error", parsed.error.issues);
       return;
     }
 
@@ -790,7 +785,7 @@ export function createIntegrationRoutes(
       where: { organizationId_provider: { organizationId, provider } },
     });
     if (!config) {
-      res.status(404).json({ error: "Integration not configured" });
+      sendNotFound(res, "Integration not configured");
       return;
     }
 
@@ -832,12 +827,12 @@ export function createIntegrationRoutes(
       userAgent: req.get("user-agent"),
     });
 
-    res.status(202).json({
+    sendSuccess(res, {
       started: true,
       provider,
       idempotency_key: idempotencyKey,
       message: "Backfill run started. Track via GET /api/integrations/ops/backfills",
-    });
+    }, 202);
   });
 
   return router;

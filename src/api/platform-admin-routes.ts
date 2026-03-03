@@ -14,6 +14,8 @@ import { z } from "zod";
 import { AIConfigService } from "../services/ai-config.js";
 import { PROVIDER_MODELS, type AIProviderName } from "../services/ai-client.js";
 import { parseAIProviderName } from "../services/provider-policy.js";
+import { asyncHandler } from "../lib/async-handler.js";
+import { sendSuccess, sendError, sendUnauthorized, sendBadRequest } from "./_shared/responses.js";
 import logger from "../lib/logger.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -46,12 +48,12 @@ function requirePlatformAdmin(req: Request, res: Response, next: NextFunction) {
   const expected = process.env.PLATFORM_ADMIN_API_KEY;
 
   if (!expected) {
-    res.status(500).json({ error: "PLATFORM_ADMIN_API_KEY is not configured" });
+    sendError(res, 500, "internal_error", "PLATFORM_ADMIN_API_KEY is not configured");
     return;
   }
 
   if (key !== expected) {
-    res.status(401).json({ error: "Invalid or missing platform admin key" });
+    sendUnauthorized(res, "Invalid or missing platform admin key");
     return;
   }
 
@@ -73,65 +75,50 @@ export function createPlatformAdminRoutes(
    *
    * Lists all platform AI providers with their models and pricing.
    */
-  router.get("/providers", async (_req: Request, res: Response) => {
-    try {
-      const providers = await configService.listPlatformProviders();
-      res.json({ providers });
-    } catch (err) {
-      logger.error("Platform list providers error", { error: err });
-      res.status(500).json({ error: "Failed to list platform providers" });
-    }
-  });
+  router.get("/providers", asyncHandler(async (_req: Request, res: Response) => {
+    const providers = await configService.listPlatformProviders();
+    sendSuccess(res, { providers });
+  }));
 
   /**
    * POST /api/platform/providers
    *
    * Adds or updates a platform AI provider (sets the platform's API key).
    */
-  router.post("/providers", async (req: Request, res: Response) => {
+  router.post("/providers", asyncHandler(async (req: Request, res: Response) => {
     const parse = UpsertPlatformProviderSchema.safeParse(req.body);
     if (!parse.success) {
       res.status(400).json({ error: "validation_error", details: parse.error.issues });
       return;
     }
 
-    try {
-      const id = await configService.upsertPlatformProvider({
-        provider: parse.data.provider as AIProviderName,
-        apiKey: parse.data.api_key,
-        isActive: parse.data.is_active,
-      });
+    const id = await configService.upsertPlatformProvider({
+      provider: parse.data.provider as AIProviderName,
+      apiKey: parse.data.api_key,
+      isActive: parse.data.is_active,
+    });
 
-      res.json({ id, saved: true });
-    } catch (err) {
-      logger.error("Platform upsert provider error", { error: err });
-      res.status(500).json({ error: "Failed to save platform provider" });
-    }
-  });
+    sendSuccess(res, { id, saved: true });
+  }));
 
   /**
    * POST /api/platform/providers/validate
    *
    * Validates an API key by making a minimal test call.
    */
-  router.post("/providers/validate", async (req: Request, res: Response) => {
+  router.post("/providers/validate", asyncHandler(async (req: Request, res: Response) => {
     const parse = ValidateKeySchema.safeParse(req.body);
     if (!parse.success) {
       res.status(400).json({ error: "validation_error", details: parse.error.issues });
       return;
     }
 
-    try {
-      const result = await configService.validateApiKey(
-        parse.data.provider as AIProviderName,
-        parse.data.api_key
-      );
-      res.json(result);
-    } catch (err) {
-      logger.error("Platform validate key error", { error: err });
-      res.status(500).json({ error: "Failed to validate API key" });
-    }
-  });
+    const result = await configService.validateApiKey(
+      parse.data.provider as AIProviderName,
+      parse.data.api_key
+    );
+    sendSuccess(res, result);
+  }));
 
   // ── Model Pricing ────────────────────────────────────────────────────
 
@@ -140,51 +127,41 @@ export function createPlatformAdminRoutes(
    *
    * Lists all model pricing entries across all providers.
    */
-  router.get("/models", async (_req: Request, res: Response) => {
-    try {
-      const models = await configService.listAvailablePlatformModels();
+  router.get("/models", asyncHandler(async (_req: Request, res: Response) => {
+    const models = await configService.listAvailablePlatformModels();
 
-      res.json({
-        models,
-        known_models: Object.entries(PROVIDER_MODELS).map(
-          ([provider, modelIds]) => ({ provider, model_ids: modelIds })
-        ),
-      });
-    } catch (err) {
-      logger.error("Platform list models error", { error: err });
-      res.status(500).json({ error: "Failed to list platform models" });
-    }
-  });
+    sendSuccess(res, {
+      models,
+      known_models: Object.entries(PROVIDER_MODELS).map(
+        ([provider, modelIds]) => ({ provider, model_ids: modelIds })
+      ),
+    });
+  }));
 
   /**
    * POST /api/platform/models/pricing
    *
    * Adds or updates pricing for a specific model.
    */
-  router.post("/models/pricing", async (req: Request, res: Response) => {
+  router.post("/models/pricing", asyncHandler(async (req: Request, res: Response) => {
     const parse = UpsertModelPricingSchema.safeParse(req.body);
     if (!parse.success) {
       res.status(400).json({ error: "validation_error", details: parse.error.issues });
       return;
     }
 
-    try {
-      const id = await configService.upsertModelPricing({
-        provider: parse.data.provider as AIProviderName,
-        modelId: parse.data.model_id,
-        displayName: parse.data.display_name,
-        inputCostPer1kTokens: parse.data.input_cost_per_1k_tokens,
-        outputCostPer1kTokens: parse.data.output_cost_per_1k_tokens,
-        isAvailable: parse.data.is_available,
-        sortOrder: parse.data.sort_order,
-      });
+    const id = await configService.upsertModelPricing({
+      provider: parse.data.provider as AIProviderName,
+      modelId: parse.data.model_id,
+      displayName: parse.data.display_name,
+      inputCostPer1kTokens: parse.data.input_cost_per_1k_tokens,
+      outputCostPer1kTokens: parse.data.output_cost_per_1k_tokens,
+      isAvailable: parse.data.is_available,
+      sortOrder: parse.data.sort_order,
+    });
 
-      res.json({ id, saved: true });
-    } catch (err) {
-      logger.error("Platform upsert model pricing error", { error: err });
-      res.status(500).json({ error: "Failed to save model pricing" });
-    }
-  });
+    sendSuccess(res, { id, saved: true });
+  }));
 
   /**
    * DELETE /api/platform/models/pricing/:provider/:modelId
@@ -193,21 +170,16 @@ export function createPlatformAdminRoutes(
    */
   router.delete(
     "/models/pricing/:provider/:modelId",
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
       const provider = parseAIProviderName(req.params.provider);
       if (!provider) {
-        res.status(400).json({ error: "Invalid provider" });
+        sendBadRequest(res, "Invalid provider");
         return;
       }
 
-      try {
-        await configService.deleteModelPricing(provider, req.params.modelId as string);
-        res.json({ deleted: true });
-      } catch (err) {
-        logger.error("Platform delete model pricing error", { error: err });
-        res.status(500).json({ error: "Failed to delete model pricing" });
-      }
-    }
+      await configService.deleteModelPricing(provider, req.params.modelId as string);
+      sendSuccess(res, { deleted: true });
+    })
   );
 
   return router;

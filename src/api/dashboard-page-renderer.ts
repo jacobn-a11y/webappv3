@@ -9,19 +9,15 @@
  *   - Non-admin users only see their own pages
  */
 
-import { Router, type Request, type Response } from "express";
-import type { PrismaClient, UserRole } from "@prisma/client";
+import { Router, type Response } from "express";
+import type { PrismaClient } from "@prisma/client";
 import { LandingPageEditor, type LandingPageSummary } from "../services/landing-page-editor.js";
 import { escapeHtml, escapeAttr } from "../lib/html-utils.js";
 import logger from "../lib/logger.js";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import { asyncHandler } from "../lib/async-handler.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
 
 interface DashboardStats {
   totalPages: number;
@@ -48,7 +44,7 @@ export function createDashboardPageRoutes(prisma: PrismaClient): Router {
    * Renders the full landing pages dashboard as HTML.
    * Query params: search, status, visibility, created_by, sort_by, sort_dir
    */
-  router.get("/pages", async (req: AuthReq, res: Response) => {
+  router.get("/pages", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId || !req.userId) {
       res.status(401).json({ error: "Authentication required" });
       return;
@@ -67,7 +63,6 @@ export function createDashboardPageRoutes(prisma: PrismaClient): Router {
     // Non-admin users are forced to only see their own pages
     const effectiveCreatorFilter = isAdmin ? creatorFilter : req.userId;
 
-    try {
       const [dashboardStats, pages] = await Promise.all([
         editor.getDashboardStats(req.organizationId),
         editor.listForOrg(req.organizationId, {
@@ -110,11 +105,8 @@ export function createDashboardPageRoutes(prisma: PrismaClient): Router {
 
       res.setHeader("Cache-Control", "private, no-cache");
       res.send(html);
-    } catch (err) {
-      logger.error("Dashboard page render error", { error: err });
-      res.status(500).json({ error: "Failed to render dashboard" });
-    }
-  });
+    
+  }));
 
   return router;
 }

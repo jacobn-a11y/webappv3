@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/Toast";
 import {
   getAccessUsers,
@@ -83,6 +84,7 @@ export function AdminAccountAccessPage() {
   const listSearchRef = useRef<HTMLDivElement>(null);
 
   const { showToast } = useToast();
+  const [confirmState, setConfirmState] = useState<{ action: () => void; title: string; message: string } | null>(null);
 
   // ─── Load Users ───────────────────────────────────────────────────────────
 
@@ -337,20 +339,24 @@ export function AdminAccountAccessPage() {
   // ─── Revoke Grant ─────────────────────────────────────────────────────────
 
   const handleRevoke = useCallback(
-    async (grantId: string) => {
-      if (!window.confirm("Are you sure you want to revoke this access grant? The user will lose access to the associated accounts immediately.")) return;
-
-      try {
-        await revokeAccess(grantId);
-        showToast("Access revoked.", "success");
-        await loadUsers();
-      } catch (err) {
-        showToast(
-          "Failed to revoke: " +
-            (err instanceof Error ? err.message : "Unknown error"),
-          "error"
-        );
-      }
+    (grantId: string) => {
+      setConfirmState({
+        title: "Revoke Access",
+        message: "Are you sure you want to revoke this access grant? The user will lose access to the associated accounts immediately.",
+        action: async () => {
+          try {
+            await revokeAccess(grantId);
+            showToast("Access revoked.", "success");
+            await loadUsers();
+          } catch (err) {
+            showToast(
+              "Failed to revoke: " +
+                (err instanceof Error ? err.message : "Unknown error"),
+              "error"
+            );
+          }
+        },
+      });
     },
     [showToast, loadUsers]
   );
@@ -885,6 +891,16 @@ export function AdminAccountAccessPage() {
       )}
 
       {renderModal()}
+
+      <ConfirmDialog
+        open={!!confirmState}
+        title={confirmState?.title ?? ""}
+        message={confirmState?.message ?? ""}
+        confirmLabel="Revoke"
+        destructive
+        onConfirm={() => { confirmState?.action(); setConfirmState(null); }}
+        onCancel={() => setConfirmState(null)}
+      />
     </div>
   );
 }

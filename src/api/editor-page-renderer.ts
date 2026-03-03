@@ -11,21 +11,14 @@
  *   - Shareable URL display after publish
  */
 
-import { Router, type Request, type Response } from "express";
+import { Router, type Response } from "express";
 import { LandingPageEditor } from "../services/landing-page-editor.js";
 import { escapeHtml } from "../lib/html-utils.js";
 import { requirePageOwnerOrPermission } from "../middleware/permissions.js";
 import { RoleProfileService } from "../services/role-profiles.js";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import logger from "../lib/logger.js";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: string;
-}
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 
 // ─── Route Factory ──────────────────────────────────────────────────────────
 
@@ -43,7 +36,7 @@ export function createEditorPageRoutes(prisma: PrismaClient): Router {
   router.get(
     "/:pageId",
     requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
+    async (req: AuthenticatedRequest, res: Response) => {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
 

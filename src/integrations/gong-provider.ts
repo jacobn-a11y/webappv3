@@ -358,16 +358,35 @@ export class GongProvider implements CallRecordingProvider {
 
     const transcriptMap = new Map<string, string>();
     if (callIds.length > 0) {
-      try {
-        const transcripts = await this.fetchTranscriptsBatch(creds, callIds);
-        for (const [id, text] of transcripts) {
-          transcriptMap.set(id, text);
+      const TRANSCRIPT_RETRY_ATTEMPTS = 3;
+      const TRANSCRIPT_RETRY_BASE_MS = 1000;
+      let lastTranscriptErr: unknown;
+
+      for (let attempt = 0; attempt < TRANSCRIPT_RETRY_ATTEMPTS; attempt++) {
+        try {
+          const transcripts = await this.fetchTranscriptsBatch(creds, callIds);
+          for (const [id, text] of transcripts) {
+            transcriptMap.set(id, text);
+          }
+          lastTranscriptErr = null;
+          break;
+        } catch (err) {
+          lastTranscriptErr = err;
+          if (attempt < TRANSCRIPT_RETRY_ATTEMPTS - 1) {
+            const delay =
+              TRANSCRIPT_RETRY_BASE_MS * 2 ** attempt +
+              Math.floor(Math.random() * 500);
+            await new Promise((r) => setTimeout(r, delay));
+          }
         }
-      } catch (err) {
-        logger.warn("Gong: failed to fetch transcript batch, calls will be stored without transcripts", {
-          error: err,
+      }
+
+      if (lastTranscriptErr) {
+        logger.warn("Gong: transcript fetch failed after retries, calls will be stored without transcripts", {
+          error: lastTranscriptErr,
           callIds: callIds.slice(0, 5),
           totalCalls: callIds.length,
+          attempts: TRANSCRIPT_RETRY_ATTEMPTS,
         });
       }
     }

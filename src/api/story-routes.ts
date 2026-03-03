@@ -32,6 +32,8 @@ import {
 } from "../types/story-generation.js";
 import { dispatchOutboundWebhookEvent } from "../services/outbound-webhooks.js";
 import { mapStorySummary, mapGeneratedQuote } from "../services/story-mappers.js";
+import { asyncHandler } from "../lib/async-handler.js";
+import { sendSuccess, sendBadRequest, sendUnauthorized, sendForbidden, sendNotFound, sendConflict, sendError } from "./_shared/responses.js";
 
 const BuildStorySchema = z.object({
   account_id: z.string().min(1),
@@ -153,13 +155,10 @@ export function createStoryRoutes(
     });
   };
 
-  router.post("/build", async (req: Request, res: Response) => {
+  router.post("/build", asyncHandler(async (req: Request, res: Response) => {
     const parseResult = BuildStorySchema.safeParse(req.body);
     if (!parseResult.success) {
-      res.status(400).json({
-        error: "validation_error",
-        details: parseResult.error.issues,
-      });
+      sendBadRequest(res, "validation_error", parseResult.error.issues);
       return;
     }
 
@@ -168,7 +167,7 @@ export function createStoryRoutes(
     const userId = authReq.userId;
     const userRole = authReq.userRole;
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
@@ -195,18 +194,12 @@ export function createStoryRoutes(
       ]);
 
       if (!policy.canGenerateAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot generate stories.",
-        });
+        sendForbidden(res, "Your role cannot generate stories.");
         return;
       }
 
       if (!canAccessAccount) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "You do not have access to this account.",
-        });
+        sendForbidden(res, "You do not have access to this account.");
         return;
       }
 
@@ -241,7 +234,7 @@ export function createStoryRoutes(
         },
       });
 
-      res.json({
+      sendSuccess(res, {
         story_id: result.storyId,
         title: result.title,
         markdown: result.markdownBody,
@@ -259,17 +252,14 @@ export function createStoryRoutes(
           error: errorMessage,
         },
       });
-      res.status(500).json({ error: "Failed to build story" });
+      sendError(res, 500, "internal_error", "Failed to build story");
     }
-  });
+  }));
 
-  router.post("/build/stream", async (req: Request, res: Response) => {
+  router.post("/build/stream", asyncHandler(async (req: Request, res: Response) => {
     const parseResult = BuildStorySchema.safeParse(req.body);
     if (!parseResult.success) {
-      res.status(400).json({
-        error: "validation_error",
-        details: parseResult.error.issues,
-      });
+      sendBadRequest(res, "validation_error", parseResult.error.issues);
       return;
     }
 
@@ -278,7 +268,7 @@ export function createStoryRoutes(
     const userId = authReq.userId;
     const userRole = authReq.userRole;
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
@@ -300,18 +290,12 @@ export function createStoryRoutes(
       ]);
 
       if (!policy.canGenerateAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot generate stories.",
-        });
+        sendForbidden(res, "Your role cannot generate stories.");
         return;
       }
 
       if (!canAccessAccount) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "You do not have access to this account.",
-        });
+        sendForbidden(res, "You do not have access to this account.");
         return;
       }
 
@@ -394,12 +378,12 @@ export function createStoryRoutes(
       res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
       res.end();
     }
-  });
+  }));
 
-  router.get("/library", async (req: Request, res: Response) => {
+  router.get("/library", asyncHandler(async (req: Request, res: Response) => {
     const parse = StoryLibraryQuerySchema.safeParse(req.query);
     if (!parse.success) {
-      res.status(400).json({ error: "validation_error", details: parse.error.issues });
+      sendBadRequest(res, "validation_error", parse.error.issues);
       return;
     }
 
@@ -409,17 +393,13 @@ export function createStoryRoutes(
     const userRole = authReq.userRole;
 
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
-    try {
       const policy = await roleProfiles.getEffectivePolicy(organizationId, userId, userRole);
       if (!policy.canAccessAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot access stories.",
-        });
+        sendForbidden(res, "Your role cannot access stories.");
         return;
       }
 
@@ -430,7 +410,7 @@ export function createStoryRoutes(
       );
 
       if (accessibleIds !== null && accessibleIds.length === 0) {
-        res.json({
+        sendSuccess(res, {
           stories: [],
           pagination: { page: 1, limit: 25, totalCount: 0, totalPages: 0 },
         });
@@ -530,7 +510,7 @@ export function createStoryRoutes(
 
       const totalPages = Math.ceil(totalCount / limit);
 
-      res.json({
+      sendSuccess(res, {
         stories: stories.map((s) => ({
           ...mapStorySummary(s),
           account: {
@@ -546,16 +526,13 @@ export function createStoryRoutes(
           totalPages,
         },
       });
-    } catch (err) {
-      logger.error("Story library error", { error: err });
-      res.status(500).json({ error: "Failed to load story library" });
-    }
-  });
+    
+  }));
 
-  router.get("/:storyId/export", async (req: Request, res: Response) => {
+  router.get("/:storyId/export", asyncHandler(async (req: Request, res: Response) => {
     const parse = ExportQuerySchema.safeParse(req.query);
     if (!parse.success) {
-      res.status(400).json({ error: "validation_error", details: parse.error.issues });
+      sendBadRequest(res, "validation_error", parse.error.issues);
       return;
     }
 
@@ -565,11 +542,10 @@ export function createStoryRoutes(
     const userRole = authReq.userRole;
 
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
-    try {
       const [policy, story] = await Promise.all([
         roleProfiles.getEffectivePolicy(organizationId, userId, userRole),
         prisma.story.findFirst({
@@ -587,15 +563,12 @@ export function createStoryRoutes(
       ]);
 
       if (!policy.canAccessAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot access stories.",
-        });
+        sendForbidden(res, "Your role cannot access stories.");
         return;
       }
 
       if (!story) {
-        res.status(404).json({ error: "Story not found" });
+        sendNotFound(res, "Story not found");
         return;
       }
 
@@ -607,10 +580,7 @@ export function createStoryRoutes(
       );
 
       if (!canAccessAccount) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "You do not have access to this story.",
-        });
+        sendForbidden(res, "You do not have access to this story.");
         return;
       }
 
@@ -632,24 +602,20 @@ export function createStoryRoutes(
       );
       res.setHeader("Content-Disposition", `attachment; filename="${filename}.docx"`);
       res.send(Buffer.from(docxBuffer));
-    } catch (err) {
-      logger.error("Story export error", { error: err });
-      res.status(500).json({ error: "Failed to export story" });
-    }
-  });
+    
+  }));
 
-  router.delete("/:storyId", async (req: Request, res: Response) => {
+  router.delete("/:storyId", asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthenticatedRequest;
     const organizationId = authReq.organizationId;
     const userId = authReq.userId;
     const userRole = authReq.userRole;
 
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
-    try {
       const [policy, story] = await Promise.all([
         roleProfiles.getEffectivePolicy(organizationId, userId, userRole),
         prisma.story.findFirst({
@@ -663,15 +629,12 @@ export function createStoryRoutes(
       ]);
 
       if (!policy.canGenerateAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot delete stories.",
-        });
+        sendForbidden(res, "Your role cannot delete stories.");
         return;
       }
 
       if (!story) {
-        res.status(404).json({ error: "Story not found" });
+        sendNotFound(res, "Story not found");
         return;
       }
 
@@ -683,40 +646,30 @@ export function createStoryRoutes(
       );
 
       if (!canAccessAccount) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "You do not have access to this story.",
-        });
+        sendForbidden(res, "You do not have access to this story.");
         return;
       }
 
       if (story._count.landingPages > 0) {
-        res.status(409).json({
-          error: "story_has_pages",
-          message: "Cannot delete a story that already has landing pages.",
-        });
+        sendConflict(res, "Cannot delete a story that already has landing pages.");
         return;
       }
 
       await prisma.story.delete({ where: { id: story.id } });
-      res.json({ deleted: true });
-    } catch (err) {
-      logger.error("Story delete error", { error: err });
-      res.status(500).json({ error: "Failed to delete story" });
-    }
-  });
+      sendSuccess(res, { deleted: true });
+    
+  }));
 
-  router.get("/:accountId", async (req: Request, res: Response) => {
+  router.get("/:accountId", asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthenticatedRequest;
     const organizationId = authReq.organizationId;
     const userId = authReq.userId;
     const userRole = authReq.userRole;
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
-    try {
       const [policy, canAccessAccount] = await Promise.all([
         roleProfiles.getEffectivePolicy(organizationId, userId, userRole),
         accessService.canAccessAccount(
@@ -728,18 +681,12 @@ export function createStoryRoutes(
       ]);
 
       if (!policy.canAccessAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot access stories.",
-        });
+        sendForbidden(res, "Your role cannot access stories.");
         return;
       }
 
       if (!canAccessAccount) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "You do not have access to this account.",
-        });
+        sendForbidden(res, "You do not have access to this account.");
         return;
       }
 
@@ -765,24 +712,18 @@ export function createStoryRoutes(
         orderBy: { generatedAt: "desc" },
       });
 
-      res.json({
+      sendSuccess(res, {
         stories: stories.map((s) => mapStorySummary(s)),
       });
-    } catch (err) {
-      logger.error("Story retrieval error", { error: err });
-      res.status(500).json({ error: "Failed to retrieve stories" });
-    }
-  });
+    
+  }));
 
   const merger = new TranscriptMerger(prisma);
 
-  router.post("/merge-transcripts", async (req: Request, res: Response) => {
+  router.post("/merge-transcripts", asyncHandler(async (req: Request, res: Response) => {
     const parseResult = MergeTranscriptsSchema.safeParse(req.body);
     if (!parseResult.success) {
-      res.status(400).json({
-        error: "validation_error",
-        details: parseResult.error.issues,
-      });
+      sendBadRequest(res, "validation_error", parseResult.error.issues);
       return;
     }
 
@@ -791,14 +732,13 @@ export function createStoryRoutes(
     const userId = authReq.userId;
     const userRole = authReq.userRole;
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
     const { account_id, max_words, truncation_mode, after_date, before_date } =
       parseResult.data;
 
-    try {
       const [policy, canAccessAccount] = await Promise.all([
         roleProfiles.getEffectivePolicy(organizationId, userId, userRole),
         accessService.canAccessAccount(
@@ -810,18 +750,12 @@ export function createStoryRoutes(
       ]);
 
       if (!policy.canGenerateAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot generate stories.",
-        });
+        sendForbidden(res, "Your role cannot generate stories.");
         return;
       }
 
       if (!canAccessAccount) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "You do not have access to this account.",
-        });
+        sendForbidden(res, "You do not have access to this account.");
         return;
       }
 
@@ -834,7 +768,7 @@ export function createStoryRoutes(
         beforeDate: before_date ? new Date(before_date) : undefined,
       });
 
-      res.json({
+      sendSuccess(res, {
         markdown: result.markdown,
         word_count: result.wordCount,
         total_calls: result.totalCalls,
@@ -843,11 +777,8 @@ export function createStoryRoutes(
         truncation_boundary: result.truncationBoundary?.toISOString() ?? null,
         truncation_mode: result.truncationMode,
       });
-    } catch (err) {
-      logger.error("Transcript merge error", { error: err });
-      res.status(500).json({ error: "Failed to merge transcripts" });
-    }
-  });
+    
+  }));
 
   return router;
 }

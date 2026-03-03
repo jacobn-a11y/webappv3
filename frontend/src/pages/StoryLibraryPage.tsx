@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/Toast";
 import {
   createStoryComment,
@@ -65,6 +66,7 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
   const [commentsError, setCommentsError] = useState<string | null>(null);
   const [commentDraft, setCommentDraft] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [confirmState, setConfirmState] = useState<{ action: () => void; title: string; message: string } | null>(null);
 
   const isViewer = userRole === "VIEWER";
 
@@ -279,21 +281,22 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     });
   };
 
-  const handleDelete = async (story: StoryLibraryItem) => {
-    const confirmed = window.confirm(
-      `Are you sure you want to delete the story "${story.title}"? This action cannot be undone.`
-    );
-    if (!confirmed) return;
-
-    setBusyStoryId(story.id);
-    try {
-      await deleteStory(story.id);
-      setStories((prev) => prev.filter((s) => s.id !== story.id));
-      setTotalCount((prev) => Math.max(0, prev - 1));
-      trackStoryLibraryAction(story, "library_action", "delete_story");
-    } finally {
-      setBusyStoryId(null);
-    }
+  const handleDelete = (story: StoryLibraryItem) => {
+    setConfirmState({
+      title: "Delete Story",
+      message: `Are you sure you want to delete the story "${story.title}"? This action cannot be undone.`,
+      action: async () => {
+        setBusyStoryId(story.id);
+        try {
+          await deleteStory(story.id);
+          setStories((prev) => prev.filter((s) => s.id !== story.id));
+          setTotalCount((prev) => Math.max(0, prev - 1));
+          trackStoryLibraryAction(story, "library_action", "delete_story");
+        } finally {
+          setBusyStoryId(null);
+        }
+      },
+    });
   };
 
   const buildCrmNote = (story: StoryLibraryItem): string => {
@@ -325,37 +328,37 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     trackStoryLibraryAction(story, "share_action", "copy_crm_note");
   };
 
-  const handlePushCrmNote = async (story: StoryLibraryItem) => {
-    const confirmed = window.confirm(
-      `Are you sure you want to push a CRM note for "${story.title}" to account "${story.account.name}"? This will create a new note in your CRM.`
-    );
-    if (!confirmed) {
-      return;
-    }
-    setBusyStoryId(story.id);
-    try {
-      await requestWriteback({
-        action_type: "NOTE",
-        account_id: story.account.id,
-        title: `StoryEngine: ${story.title}`,
-        body: buildCrmNote(story),
-        metadata: {
-          source: "story_library",
-          story_id: story.id,
-        },
-      });
-      showToast(`Queued CRM note writeback for "${story.title}".`, "success");
-      trackStoryLibraryAction(story, "share_action", "push_crm_note");
-    } catch (err) {
-      showToast(
-        err instanceof Error
-          ? `CRM writeback failed: ${err.message}`
-          : "CRM writeback failed.",
-        "error"
-      );
-    } finally {
-      setBusyStoryId(null);
-    }
+  const handlePushCrmNote = (story: StoryLibraryItem) => {
+    setConfirmState({
+      title: "Push CRM Note",
+      message: `Are you sure you want to push a CRM note for "${story.title}" to account "${story.account.name}"? This will create a new note in your CRM.`,
+      action: async () => {
+        setBusyStoryId(story.id);
+        try {
+          await requestWriteback({
+            action_type: "NOTE",
+            account_id: story.account.id,
+            title: `StoryEngine: ${story.title}`,
+            body: buildCrmNote(story),
+            metadata: {
+              source: "story_library",
+              story_id: story.id,
+            },
+          });
+          showToast(`Queued CRM note writeback for "${story.title}".`, "success");
+          trackStoryLibraryAction(story, "share_action", "push_crm_note");
+        } catch (err) {
+          showToast(
+            err instanceof Error
+              ? `CRM writeback failed: ${err.message}`
+              : "CRM writeback failed.",
+            "error"
+          );
+        } finally {
+          setBusyStoryId(null);
+        }
+      },
+    });
   };
 
   const toggleStorySelection = (storyId: string) => {
@@ -391,19 +394,7 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     );
   };
 
-  const handleBulkExport = async (format: "pdf" | "docx") => {
-    if (selectedStories.length === 0) {
-      return;
-    }
-    if (
-      selectedStories.length > 5 &&
-      !window.confirm(
-        `Are you sure you want to export ${selectedStories.length} files as ${format.toUpperCase()}? Your browser will download them one by one.`
-      )
-    ) {
-      return;
-    }
-
+  const doBulkExport = async (format: "pdf" | "docx") => {
     setBulkBusy(true);
     let successCount = 0;
     let failedCount = 0;
@@ -427,7 +418,22 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     );
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkExport = (format: "pdf" | "docx") => {
+    if (selectedStories.length === 0) {
+      return;
+    }
+    if (selectedStories.length > 5) {
+      setConfirmState({
+        title: "Bulk Export",
+        message: `Are you sure you want to export ${selectedStories.length} files as ${format.toUpperCase()}? Your browser will download them one by one.`,
+        action: () => void doBulkExport(format),
+      });
+      return;
+    }
+    void doBulkExport(format);
+  };
+
+  const handleBulkDelete = () => {
     if (isViewer || selectedStories.length === 0) {
       return;
     }
@@ -442,32 +448,35 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
     const confirmText = [
       `Are you sure you want to delete ${deletable.length} selected stor${deletable.length === 1 ? "y" : "ies"}? This action cannot be undone.`,
       blocked.length > 0
-        ? `\n${blocked.length} stor${blocked.length === 1 ? "y has" : "ies have"} linked pages and will be skipped.`
+        ? ` ${blocked.length} stor${blocked.length === 1 ? "y has" : "ies have"} linked pages and will be skipped.`
         : "",
     ].join("");
-    if (!window.confirm(confirmText)) {
-      return;
-    }
 
-    setBulkBusy(true);
-    const deletedIds: string[] = [];
-    for (const story of deletable) {
-      try {
-        await deleteStory(story.id);
-        deletedIds.push(story.id);
-      } catch {
-        // best-effort bulk delete
-      }
-    }
-    const deletedSet = new Set(deletedIds);
-    setStories((prev) => prev.filter((story) => !deletedSet.has(story.id)));
-    setSelectedStoryIds((prev) => prev.filter((id) => !deletedSet.has(id)));
-    setTotalCount((prev) => Math.max(0, prev - deletedIds.length));
-    setBulkBusy(false);
-    showToast(
-      `Deleted ${deletedIds.length} stor${deletedIds.length === 1 ? "y" : "ies"}${blocked.length > 0 ? `, skipped ${blocked.length}` : ""}.`,
-      "success"
-    );
+    setConfirmState({
+      title: "Delete Selected Stories",
+      message: confirmText,
+      action: async () => {
+        setBulkBusy(true);
+        const deletedIds: string[] = [];
+        for (const story of deletable) {
+          try {
+            await deleteStory(story.id);
+            deletedIds.push(story.id);
+          } catch {
+            // best-effort bulk delete
+          }
+        }
+        const deletedSet = new Set(deletedIds);
+        setStories((prev) => prev.filter((story) => !deletedSet.has(story.id)));
+        setSelectedStoryIds((prev) => prev.filter((id) => !deletedSet.has(id)));
+        setTotalCount((prev) => Math.max(0, prev - deletedIds.length));
+        setBulkBusy(false);
+        showToast(
+          `Deleted ${deletedIds.length} stor${deletedIds.length === 1 ? "y" : "ies"}${blocked.length > 0 ? `, skipped ${blocked.length}` : ""}.`,
+          "success"
+        );
+      },
+    });
   };
 
   const openCommentThread = (story: StoryLibraryItem) => {
@@ -947,6 +956,16 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
           </div>
         </>
       )}
+
+      <ConfirmDialog
+        open={!!confirmState}
+        title={confirmState?.title ?? ""}
+        message={confirmState?.message ?? ""}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => { confirmState?.action(); setConfirmState(null); }}
+        onCancel={() => setConfirmState(null)}
+      />
 
       {commentStory && (
         <div className="story-library__comments-overlay" role="dialog" aria-modal="true">

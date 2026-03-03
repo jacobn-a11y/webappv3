@@ -11,6 +11,7 @@ import {
   MvpSelectAccountsSchema,
 } from "./schemas.js";
 import type { AuthReq, SetupRouteContext } from "./types.js";
+import { asyncHandler } from "../../lib/async-handler.js";
 
 export function registerSetupQuickstartRoutes({
   deps,
@@ -93,23 +94,19 @@ export function registerSetupQuickstartRoutes({
     };
   };
 
-  router.get("/mvp/quickstart", async (req: AuthReq, res: Response) => {
+  router.get("/mvp/quickstart", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
       sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
-    try {
       const status = await buildMvpQuickstartStatus(req.organizationId);
       res.json(status);
-    } catch (err) {
-      logger.error("MVP quickstart status error", { error: err });
-      sendError(res, 500, "internal_error", "Failed to load MVP quickstart status");
-    }
-  });
+    
+  }));
 
-  router.post("/mvp/quickstart", async (req: AuthReq, res: Response) => {
+  router.post("/mvp/quickstart", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
       sendUnauthorized(res);
       return;
@@ -134,7 +131,6 @@ export function registerSetupQuickstartRoutes({
       return;
     }
 
-    try {
       const valid = await gongProvider.validateCredentials({
         accessKey: gongBundle.accessKey,
         accessKeySecret: gongBundle.accessKeySecret,
@@ -215,15 +211,12 @@ export function registerSetupQuickstartRoutes({
 
       const status = await buildMvpQuickstartStatus(req.organizationId);
       res.json({ saved: true, status });
-    } catch (err) {
-      logger.error("MVP quickstart save error", { error: err });
-      sendError(res, 500, "internal_error", "Failed to save MVP quickstart keys");
-    }
-  });
+    
+  }));
 
   router.post(
     "/mvp/quickstart/gong/accounts/index",
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
         sendUnauthorized(res);
         return;
@@ -235,7 +228,6 @@ export function registerSetupQuickstartRoutes({
         return;
       }
 
-      try {
         const config = await prisma.integrationConfig.findUnique({
           where: {
             organizationId_provider: {
@@ -301,16 +293,13 @@ export function registerSetupQuickstartRoutes({
           total_accounts: indexResult.totalAccounts,
           cached: false,
         });
-      } catch (err) {
-        logger.error("MVP Gong account index error", { error: err });
-        res.status(500).json({ error: "Failed to index Gong accounts" });
-      }
+      
     }
-  );
+  ));
 
   router.post(
     "/mvp/quickstart/gong/accounts/selection",
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
         sendUnauthorized(res);
         return;
@@ -322,7 +311,6 @@ export function registerSetupQuickstartRoutes({
         return;
       }
 
-      try {
         const config = await prisma.integrationConfig.findUnique({
           where: {
             organizationId_provider: {
@@ -385,10 +373,7 @@ export function registerSetupQuickstartRoutes({
           ingest_started: Boolean(shouldTriggerIngest && deps.syncEngine),
           idempotency_key: idempotencyKey,
         });
-      } catch (err) {
-        logger.error("MVP Gong account selection error", { error: err });
-        res.status(500).json({ error: "Failed to save Gong account selection" });
-      }
+      
     }
-  );
+  ));
 }

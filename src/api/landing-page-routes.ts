@@ -37,6 +37,8 @@ import {
   type PublishApprovalPayload,
 } from "../services/landing-page-approval.js";
 import logger from "../lib/logger.js";
+import { asyncHandler } from "../lib/async-handler.js";
+import { sendSuccess, sendCreated, sendNoContent, sendBadRequest, sendUnauthorized, sendForbidden, sendNotFound, sendConflict, sendError, sendServiceUnavailable } from "./_shared/responses.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -163,16 +165,16 @@ export function createLandingPageRoutes(
   router.post(
     "/",
     requirePermission(prisma, "create"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const parse = CreatePageSchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
       const { story_id, title, subtitle, hero_image_url, callout_boxes, include_company_name } = parse.data;
       if (!req.organizationId || !req.userId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
@@ -181,7 +183,7 @@ export function createLandingPageRoutes(
         select: { id: true, accountId: true },
       });
       if (!story) {
-        res.status(404).json({ error: "Story not found" });
+        sendNotFound(res, "Story not found");
         return;
       }
 
@@ -192,10 +194,7 @@ export function createLandingPageRoutes(
         req.userRole as UserRole | undefined
       );
       if (!canAccess) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "You do not have access to this account.",
-        });
+        sendForbidden(res, "You do not have access to this account.");
         return;
       }
 
@@ -204,7 +203,6 @@ export function createLandingPageRoutes(
         namedPageAllowed = await canGenerateNamedStories(prisma, roleProfiles, reqParams(req));
       }
 
-      try {
         const pageId = await editor.create({
           storyId: story_id,
           organizationId: req.organizationId,
@@ -232,7 +230,7 @@ export function createLandingPageRoutes(
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
         });
-        res.status(201).json({
+        sendCreated(res, {
           id: page.id,
           slug: page.slug,
           title: page.title,
@@ -241,30 +239,24 @@ export function createLandingPageRoutes(
           callout_boxes: page.calloutBoxes,
           total_call_hours: page.totalCallHours,
         });
-      } catch (err) {
-        logger.error("Create landing page error", { error: err });
-        res.status(500).json({ error: "Failed to create landing page" });
-      }
+      
     }
-  );
+  ));
 
   // ── GET (for editing — returns unscrubbed content) ──────────────────
 
   router.get(
     "/:pageId",
     requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
         if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "Your role cannot access named stories.",
-          });
+          sendForbidden(res, "Your role cannot access named stories.");
           return;
         }
 
-        res.json({
+        sendSuccess(res, {
           id: page.id,
           slug: page.slug,
           title: page.title,
@@ -295,30 +287,27 @@ export function createLandingPageRoutes(
         });
       } catch (err) {
         logger.error("Get landing page error", { error: err });
-        res.status(404).json({ error: "Landing page not found" });
+        sendNotFound(res, "Landing page not found");
       }
     }
-  );
+  ));
 
   // ── EDIT DATA (JSON for React editor page) ──────────────────────────
 
   router.get(
     "/:pageId/edit-data",
     requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
         if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "Your role cannot access named stories.",
-          });
+          sendForbidden(res, "Your role cannot access named stories.");
           return;
         }
 
         const canPublishNamed = await canGenerateNamedStories(prisma, roleProfiles, reqParams(req));
 
-        res.json({
+        sendSuccess(res, {
           pageId: page.id,
           title: page.title,
           subtitle: page.subtitle ?? "",
@@ -331,53 +320,44 @@ export function createLandingPageRoutes(
         });
       } catch (err) {
         logger.error("Get editor data error", { error: err });
-        res.status(404).json({ error: "Landing page not found" });
+        sendNotFound(res, "Landing page not found");
       }
     }
-  );
+  ));
 
   // ── PREVIEW SCRUB (compare original vs scrubbed) ───────────────────
 
   router.post(
     "/:pageId/preview-scrub",
     requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "Your role cannot access named stories.",
-          });
-          return;
-        }
-        const preview = await editor.getPreview(req.params.pageId as string);
+    asyncHandler(async (req: AuthReq, res: Response) => {
 
-        res.json({
-          original: { body: page.editableBody },
-          scrubbed: { body: preview.body },
-          replacements_made: page.editableBody !== preview.body ? 1 : 0,
-        });
-      } catch (err) {
-        logger.error("Preview scrub error", { error: err });
-        res.status(500).json({ error: "Failed to generate scrub preview" });
+      const page = await editor.getForEditing(req.params.pageId as string);
+      if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
+      sendForbidden(res, "Your role cannot access named stories.");
+      return;
       }
+      const preview = await editor.getPreview(req.params.pageId as string);
+
+      sendSuccess(res, {
+      original: { body: page.editableBody },
+      scrubbed: { body: preview.body },
+      replacements_made: page.editableBody !== preview.body ? 1 : 0,
+      });
+      
     }
-  );
+  ));
 
   // ── PREVIEW (render public page from current draft) ─────────────────
 
   router.get(
     "/:pageId/preview",
     requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
         if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "Your role cannot access named stories.",
-          });
+          sendForbidden(res, "Your role cannot access named stories.");
           return;
         }
         const preview = await editor.getPreview(req.params.pageId as string);
@@ -388,30 +368,27 @@ export function createLandingPageRoutes(
         res.send(renderLandingPageHtml(preview));
       } catch (err) {
         logger.error("Preview landing page error", { error: err });
-        res.status(404).json({ error: "Landing page not found" });
+        sendNotFound(res, "Landing page not found");
       }
     }
-  );
+  ));
 
   // ── UPDATE (save edits) ─────────────────────────────────────────────
 
   router.patch(
     "/:pageId",
     requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const parse = UpdatePageSchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
       try {
         const page = await editor.getForEditing(req.params.pageId as string);
         if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "Your role cannot access named stories.",
-          });
+          sendForbidden(res, "Your role cannot access named stories.");
           return;
         }
 
@@ -428,7 +405,7 @@ export function createLandingPageRoutes(
             : undefined,
         });
 
-        res.json({
+        sendSuccess(res, {
           updated: true,
           updated_at: updated.updatedAt.toISOString(),
         });
@@ -445,10 +422,10 @@ export function createLandingPageRoutes(
           return;
         }
         logger.error("Update landing page error", { error: err });
-        res.status(500).json({ error: "Failed to update landing page" });
+        sendError(res, 500, "internal_error", "Failed to update landing page");
       }
     }
-  );
+  ));
 
   // ── SCHEDULED PUBLISH CONTROLS ─────────────────────────────────────
 
@@ -456,181 +433,159 @@ export function createLandingPageRoutes(
     "/:pageId/scheduled-publish",
     requirePermission(prisma, "publish"),
     requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!scheduledPublishQueue) {
-        res.json({ enabled: false, scheduled: false });
+        sendSuccess(res, { enabled: false, scheduled: false });
         return;
       }
-      try {
-        const pageId = String(req.params.pageId);
-        const job = await scheduledPublishQueue.getJob(scheduledPublishJobId(pageId));
-        if (!job) {
-          res.json({ enabled: true, scheduled: false });
-          return;
-        }
-        const state = await job.getState();
-        if (state === "completed" || state === "failed") {
-          await job.remove();
-          res.json({ enabled: true, scheduled: false });
-          return;
-        }
-        if (job.data.organizationId !== req.organizationId) {
-          res.status(403).json({ error: "permission_denied" });
-          return;
-        }
-        res.json({
-          enabled: true,
-          scheduled: true,
-          job_id: job.id,
-          state,
-          publish_at: job.data.publishAt,
-          visibility: job.data.visibility,
-          expires_at: job.data.expiresAt ?? null,
-        });
-      } catch (err) {
-        logger.error("Get scheduled publish error", { error: err });
-        res.status(500).json({ error: "Failed to load scheduled publish state" });
+
+      const pageId = String(req.params.pageId);
+      const job = await scheduledPublishQueue.getJob(scheduledPublishJobId(pageId));
+      if (!job) {
+      sendSuccess(res, { enabled: true, scheduled: false });
+      return;
       }
+      const state = await job.getState();
+      if (state === "completed" || state === "failed") {
+      await job.remove();
+      sendSuccess(res, { enabled: true, scheduled: false });
+      return;
+      }
+      if (job.data.organizationId !== req.organizationId) {
+      sendForbidden(res, "permission_denied");
+      return;
+      }
+      sendSuccess(res, {
+      enabled: true,
+      scheduled: true,
+      job_id: job.id,
+      state,
+      publish_at: job.data.publishAt,
+      visibility: job.data.visibility,
+      expires_at: job.data.expiresAt ?? null,
+      });
+      
     }
-  );
+  ));
 
   router.post(
     "/:pageId/schedule-publish",
     requirePermission(prisma, "publish"),
     requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!scheduledPublishQueue) {
-        res.status(503).json({ error: "scheduling_unavailable" });
+        sendServiceUnavailable(res, "scheduling_unavailable");
         return;
       }
       const parse = SchedulePublishSchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
-      try {
-        if (!req.organizationId || !req.userId) {
-          res.status(401).json({ error: "Authentication required" });
-          return;
-        }
-        const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canGenerateNamedStories(prisma, roleProfiles, reqParams(req)))) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "Your role cannot generate named stories.",
-          });
-          return;
-        }
-        const governance = await getArtifactPublishGovernance(prisma, req.organizationId);
-        if (governance.approvalChainEnabled && governance.steps.length > 0) {
-          res.status(409).json({
-            error: "approval_chain_enabled",
-            message:
-              "Scheduled publish requires direct publish mode. Disable approval chain or publish through approvals.",
-          });
-          return;
-        }
-        const publishAt = new Date(parse.data.publish_at);
-        const now = Date.now();
-        const delayMs = publishAt.getTime() - now;
-        if (delayMs < 15_000) {
-          res.status(400).json({
-            error: "publish_time_too_soon",
-            message: "Choose a publish time at least 15 seconds in the future.",
-          });
-          return;
-        }
-        await clearScheduledPublish(page.id);
-        await scheduledPublishQueue.add(
-          "scheduled-page-publish",
-          {
-            pageId: page.id,
-            organizationId: req.organizationId,
-            userId: req.userId,
-            publishAt: publishAt.toISOString(),
-            visibility: parse.data.visibility,
-            password: parse.data.password,
-            expiresAt: parse.data.expires_at,
-            releaseNotes: parse.data.release_notes,
-          },
-          {
-            jobId: scheduledPublishJobId(page.id),
-            delay: delayMs,
-            attempts: 2,
-            backoff: { type: "exponential", delay: 30_000 },
-            removeOnComplete: 100,
-            removeOnFail: 500,
-          }
-        );
-        await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
-          category: "PUBLISH",
-          action: "PAGE_PUBLISH_SCHEDULED",
-          targetType: "landing_page",
-          targetId: page.id,
-          severity: "INFO",
-          metadata: {
-            publish_at: publishAt.toISOString(),
-            visibility: parse.data.visibility,
-          },
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        res.status(202).json({
-          scheduled: true,
-          publish_at: publishAt.toISOString(),
-        });
-      } catch (err) {
-        logger.error("Schedule publish error", { error: err });
-        res.status(500).json({ error: "Failed to schedule publish" });
+
+      if (!req.organizationId || !req.userId) {
+      sendUnauthorized(res, "Authentication required");
+      return;
       }
+      const page = await editor.getForEditing(req.params.pageId as string);
+      if (page.includeCompanyName && !(await canGenerateNamedStories(prisma, roleProfiles, reqParams(req)))) {
+      sendForbidden(res, "Your role cannot generate named stories.");
+      return;
+      }
+      const governance = await getArtifactPublishGovernance(prisma, req.organizationId);
+      if (governance.approvalChainEnabled && governance.steps.length > 0) {
+      sendConflict(res, "Scheduled publish requires direct publish mode. Disable approval chain or publish through approvals.");
+      return;
+      }
+      const publishAt = new Date(parse.data.publish_at);
+      const now = Date.now();
+      const delayMs = publishAt.getTime() - now;
+      if (delayMs < 15_000) {
+      sendBadRequest(res, "Choose a publish time at least 15 seconds in the future.");
+      return;
+      }
+      await clearScheduledPublish(page.id);
+      await scheduledPublishQueue.add(
+      "scheduled-page-publish",
+      {
+        pageId: page.id,
+        organizationId: req.organizationId,
+        userId: req.userId,
+        publishAt: publishAt.toISOString(),
+        visibility: parse.data.visibility,
+        password: parse.data.password,
+        expiresAt: parse.data.expires_at,
+        releaseNotes: parse.data.release_notes,
+      },
+      {
+        jobId: scheduledPublishJobId(page.id),
+        delay: delayMs,
+        attempts: 2,
+        backoff: { type: "exponential", delay: 30_000 },
+        removeOnComplete: 100,
+        removeOnFail: 500,
+      }
+      );
+      await auditLogs.record({
+      organizationId: req.organizationId,
+      actorUserId: req.userId,
+      category: "PUBLISH",
+      action: "PAGE_PUBLISH_SCHEDULED",
+      targetType: "landing_page",
+      targetId: page.id,
+      severity: "INFO",
+      metadata: {
+        publish_at: publishAt.toISOString(),
+        visibility: parse.data.visibility,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+      });
+      res.status(202).json({
+      scheduled: true,
+      publish_at: publishAt.toISOString(),
+      });
+      
     }
-  );
+  ));
 
   router.delete(
     "/:pageId/scheduled-publish",
     requirePermission(prisma, "publish"),
     requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!scheduledPublishQueue) {
-        res.status(204).send();
+        sendNoContent(res);
         return;
       }
-      try {
-        const pageId = String(req.params.pageId);
-        await clearScheduledPublish(pageId);
-        res.status(204).send();
-      } catch (err) {
-        logger.error("Cancel scheduled publish error", { error: err });
-        res.status(500).json({ error: "Failed to cancel scheduled publish" });
-      }
+
+      const pageId = String(req.params.pageId);
+      await clearScheduledPublish(pageId);
+      sendNoContent(res);
+      
     }
-  );
+  ));
 
   // ── PUBLISH ─────────────────────────────────────────────────────────
 
   router.post(
     "/:pageId/publish",
     requirePermission(prisma, "publish"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const parse = PublishSchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
       try {
         if (!req.organizationId || !req.userId) {
-          res.status(401).json({ error: "Authentication required" });
+          sendUnauthorized(res, "Authentication required");
           return;
         }
         const page = await editor.getForEditing(req.params.pageId as string);
         if (page.includeCompanyName && !(await canGenerateNamedStories(prisma, roleProfiles, reqParams(req)))) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "Your role cannot generate named stories.",
-          });
+          sendForbidden(res, "Your role cannot generate named stories.");
           return;
         }
 
@@ -640,10 +595,7 @@ export function createLandingPageRoutes(
           const maxDate = new Date();
           maxDate.setDate(maxDate.getDate() + governance.maxExpirationDays);
           if (expiresAt > maxDate) {
-            res.status(400).json({
-              error: "expiration_limit_exceeded",
-              message: `Max expiration is ${governance.maxExpirationDays} days from publish date.`,
-            });
+            sendBadRequest(res, `Max expiration is ${governance.maxExpirationDays} days from publish date.`);
             return;
           }
         }
@@ -767,7 +719,7 @@ export function createLandingPageRoutes(
           logger.error("Outbound webhook dispatch failed", { error: err });
         });
 
-        res.json({
+        sendSuccess(res, {
           published: true,
           slug: result.slug,
           url: result.url,
@@ -792,138 +744,129 @@ export function createLandingPageRoutes(
           return;
         }
         logger.error("Publish landing page error", { error: err });
-        res.status(500).json({ error: "Failed to publish landing page" });
+        sendError(res, 500, "internal_error", "Failed to publish landing page");
       }
     }
-  );
+  ));
 
   // ── ARTIFACT VERSION HISTORY ──────────────────────────────────────
 
   router.get(
     "/:pageId/versions",
     requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
-      try {
-        const versions = await editor.listArtifactVersions(
-          req.params.pageId as string,
-          req.organizationId
-        );
-        res.json({
-          versions: versions.map((v) => ({
-            id: v.id,
-            version_number: v.versionNumber,
-            status: v.status,
-            release_notes: v.releaseNotes,
-            visibility: v.visibility,
-            expires_at: v.expiresAt?.toISOString() ?? null,
-            published_at: v.publishedAt?.toISOString() ?? null,
-            created_at: v.createdAt.toISOString(),
-            created_by: v.createdBy,
-            provenance: v.provenance,
-          })),
-        });
-      } catch (err) {
-        logger.error("List artifact versions error", { error: err });
-        res.status(500).json({ error: "Failed to list artifact versions" });
-      }
+
+      const versions = await editor.listArtifactVersions(
+      req.params.pageId as string,
+      req.organizationId
+      );
+      sendSuccess(res, {
+      versions: versions.map((v) => ({
+        id: v.id,
+        version_number: v.versionNumber,
+        status: v.status,
+        release_notes: v.releaseNotes,
+        visibility: v.visibility,
+        expires_at: v.expiresAt?.toISOString() ?? null,
+        published_at: v.publishedAt?.toISOString() ?? null,
+        created_at: v.createdAt.toISOString(),
+        created_by: v.createdBy,
+        provenance: v.provenance,
+      })),
+      });
+      
     }
-  );
+  ));
 
   router.post(
     "/:pageId/versions/:versionId/rollback",
     requirePermission(prisma, "publish"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId || !req.userId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
-      try {
-        await editor.rollbackToVersion(
-          req.params.pageId as string,
-          req.params.versionId as string,
-          req.userId
-        );
-        await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
-          category: "PUBLISH",
-          action: "PAGE_VERSION_ROLLBACK",
-          targetType: "landing_page",
-          targetId: req.params.pageId as string,
-          severity: "WARN",
-          metadata: { version_id: req.params.versionId as string },
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        res.json({ rolled_back: true });
-      } catch (err) {
-        logger.error("Rollback artifact version error", { error: err });
-        res.status(500).json({ error: "Failed to rollback artifact version" });
-      }
+
+      await editor.rollbackToVersion(
+      req.params.pageId as string,
+      req.params.versionId as string,
+      req.userId
+      );
+      await auditLogs.record({
+      organizationId: req.organizationId,
+      actorUserId: req.userId,
+      category: "PUBLISH",
+      action: "PAGE_VERSION_ROLLBACK",
+      targetType: "landing_page",
+      targetId: req.params.pageId as string,
+      severity: "WARN",
+      metadata: { version_id: req.params.versionId as string },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+      });
+      sendSuccess(res, { rolled_back: true });
+      
     }
-  );
+  ));
 
   // ── PUBLISH APPROVAL WORKFLOW ─────────────────────────────────────
 
   router.get(
     "/approvals/publish",
     requirePermission(prisma, "publish"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
       const status = typeof req.query.status === "string" ? req.query.status : "PENDING";
-      try {
-        const rows = await prisma.approvalRequest.findMany({
-          where: {
-            organizationId: req.organizationId,
-            requestType: "LANDING_PAGE_PUBLISH",
-            status,
-          },
-          include: {
-            requestedBy: { select: { id: true, name: true, email: true } },
-            reviewer: { select: { id: true, name: true, email: true } },
-          },
-          orderBy: { createdAt: "desc" },
-          take: 100,
-        });
 
-        res.json({
-          approvals: rows.map((r) => ({
-            id: r.id,
-            status: r.status,
-            target_id: r.targetId,
-            created_at: r.createdAt.toISOString(),
-            reviewed_at: r.reviewedAt?.toISOString() ?? null,
-            requested_by: r.requestedBy,
-            reviewer: r.reviewer,
-            payload: r.requestPayload,
-          })),
-        });
-      } catch (err) {
-        logger.error("List publish approvals error", { error: err });
-        res.status(500).json({ error: "Failed to list publish approvals" });
-      }
+      const rows = await prisma.approvalRequest.findMany({
+      where: {
+        organizationId: req.organizationId,
+        requestType: "LANDING_PAGE_PUBLISH",
+        status,
+      },
+      include: {
+        requestedBy: { select: { id: true, name: true, email: true } },
+        reviewer: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      });
+
+      sendSuccess(res, {
+      approvals: rows.map((r) => ({
+        id: r.id,
+        status: r.status,
+        target_id: r.targetId,
+        created_at: r.createdAt.toISOString(),
+        reviewed_at: r.reviewedAt?.toISOString() ?? null,
+        requested_by: r.requestedBy,
+        reviewer: r.reviewer,
+        payload: r.requestPayload,
+      })),
+      });
+      
     }
-  );
+  ));
 
   router.post(
     "/approvals/publish/:requestId/review",
     requirePermission(prisma, "publish"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const parse = ReviewPublishApprovalSchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
       if (!req.organizationId || !req.userId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
@@ -936,11 +879,11 @@ export function createLandingPageRoutes(
           },
         });
         if (!request) {
-          res.status(404).json({ error: "Publish approval request not found" });
+          sendNotFound(res, "Publish approval request not found");
           return;
         }
         if (request.status !== "PENDING") {
-          res.status(409).json({ error: "Approval request is already finalized" });
+          sendConflict(res, "Approval request is already finalized");
           return;
         }
 
@@ -954,10 +897,7 @@ export function createLandingPageRoutes(
           currentStep &&
           !(await canUserApproveStep(prisma, reqParams(req), currentStep, request.requestedByUserId))
         ) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "You are not eligible to approve this workflow step.",
-          });
+          sendForbidden(res, "You are not eligible to approve this workflow step.");
           return;
         }
 
@@ -983,7 +923,7 @@ export function createLandingPageRoutes(
             ipAddress: req.ip,
             userAgent: req.get("user-agent"),
           });
-          res.json({ status: "REJECTED" });
+          sendSuccess(res, { status: "REJECTED" });
           return;
         }
 
@@ -992,7 +932,7 @@ export function createLandingPageRoutes(
           (a) => a.step_order === currentStepOrder && a.reviewer_user_id === req.userId
         );
         if (alreadyReviewedThisStep) {
-          res.status(409).json({ error: "You already approved this workflow step." });
+          sendConflict(res, "You already approved this workflow step.");
           return;
         }
 
@@ -1029,7 +969,7 @@ export function createLandingPageRoutes(
               requestPayload: updatedPayload as unknown as object,
             },
           });
-          res.json({
+          sendSuccess(res, {
             status: "PENDING",
             current_step_order: nextStepOrder,
           });
@@ -1047,18 +987,12 @@ export function createLandingPageRoutes(
           const maxDate = new Date();
           maxDate.setDate(maxDate.getDate() + governance.maxExpirationDays);
           if (expiresAt > maxDate) {
-            res.status(400).json({
-              error: "expiration_limit_exceeded",
-              message: `Max expiration is ${governance.maxExpirationDays} days from publish date.`,
-            });
+            sendBadRequest(res, `Max expiration is ${governance.maxExpirationDays} days from publish date.`);
             return;
           }
         }
         if (page.includeCompanyName && !(await canGenerateNamedStories(prisma, roleProfiles, reqParams(req)))) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "Your role cannot generate named stories.",
-          });
+          sendForbidden(res, "Your role cannot generate named stories.");
           return;
         }
 
@@ -1131,7 +1065,7 @@ export function createLandingPageRoutes(
           logger.error("Outbound webhook dispatch failed", { error: err });
         });
 
-        res.json({
+        sendSuccess(res, {
           status: "APPROVED",
           published: true,
           url: result.url,
@@ -1157,128 +1091,113 @@ export function createLandingPageRoutes(
           return;
         }
         logger.error("Review publish approval error", { error: err });
-        res.status(500).json({ error: "Failed to review publish approval" });
+        sendError(res, 500, "internal_error", "Failed to review publish approval");
       }
     }
-  );
+  ));
 
   // ── UNPUBLISH ───────────────────────────────────────────────────────
 
   router.post(
     "/:pageId/unpublish",
     requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "Your role cannot access named stories.",
-          });
-          return;
-        }
+    asyncHandler(async (req: AuthReq, res: Response) => {
 
-        await editor.unpublish(req.params.pageId as string);
-        await clearScheduledPublish(req.params.pageId as string);
-        await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
-          category: "PUBLISH",
-          action: "PAGE_UNPUBLISHED",
-          targetType: "landing_page",
-          targetId: req.params.pageId as string,
-          severity: "INFO",
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        res.json({ unpublished: true });
-      } catch (err) {
-        logger.error("Unpublish error", { error: err });
-        res.status(500).json({ error: "Failed to unpublish" });
+      const page = await editor.getForEditing(req.params.pageId as string);
+      if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
+      sendForbidden(res, "Your role cannot access named stories.");
+      return;
       }
+
+      await editor.unpublish(req.params.pageId as string);
+      await clearScheduledPublish(req.params.pageId as string);
+      await auditLogs.record({
+      organizationId: req.organizationId,
+      actorUserId: req.userId,
+      category: "PUBLISH",
+      action: "PAGE_UNPUBLISHED",
+      targetType: "landing_page",
+      targetId: req.params.pageId as string,
+      severity: "INFO",
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+      });
+      sendSuccess(res, { unpublished: true });
+      
     }
-  );
+  ));
 
   // ── ARCHIVE ─────────────────────────────────────────────────────────
 
   router.post(
     "/:pageId/archive",
     requirePageOwnerOrPermission(prisma),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "Your role cannot access named stories.",
-          });
-          return;
-        }
+    asyncHandler(async (req: AuthReq, res: Response) => {
 
-        await editor.archive(req.params.pageId as string);
-        await clearScheduledPublish(req.params.pageId as string);
-        await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
-          category: "PUBLISH",
-          action: "PAGE_ARCHIVED",
-          targetType: "landing_page",
-          targetId: req.params.pageId as string,
-          severity: "INFO",
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        res.json({ archived: true });
-      } catch (err) {
-        logger.error("Archive error", { error: err });
-        res.status(500).json({ error: "Failed to archive" });
+      const page = await editor.getForEditing(req.params.pageId as string);
+      if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
+      sendForbidden(res, "Your role cannot access named stories.");
+      return;
       }
+
+      await editor.archive(req.params.pageId as string);
+      await clearScheduledPublish(req.params.pageId as string);
+      await auditLogs.record({
+      organizationId: req.organizationId,
+      actorUserId: req.userId,
+      category: "PUBLISH",
+      action: "PAGE_ARCHIVED",
+      targetType: "landing_page",
+      targetId: req.params.pageId as string,
+      severity: "INFO",
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+      });
+      sendSuccess(res, { archived: true });
+      
     }
-  );
+  ));
 
   // ── DELETE ──────────────────────────────────────────────────────────
 
   router.delete(
     "/:pageId",
     requirePermission(prisma, "delete_any"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const page = await prisma.landingPage.findFirst({
-          where: { id: req.params.pageId as string, organizationId: req.organizationId },
-        });
-        if (!page) {
-          res.status(404).json({ error: "Landing page not found" });
-          return;
-        }
-        if (await isLegalHoldEnabled(prisma, req.organizationId)) {
-          res.status(423).json({
-            error: "legal_hold_active",
-            message:
-              "Deletion is blocked because legal hold is enabled in your data governance policy.",
-          });
-          return;
-        }
+    asyncHandler(async (req: AuthReq, res: Response) => {
 
-        await clearScheduledPublish(page.id);
-        await prisma.landingPage.delete({ where: { id: page.id } });
-        await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
-          category: "PUBLISH",
-          action: "PAGE_DELETED",
-          targetType: "landing_page",
-          targetId: page.id,
-          severity: "WARN",
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        res.json({ deleted: true });
-      } catch (err) {
-        logger.error("Delete landing page error", { error: err });
-        res.status(500).json({ error: "Failed to delete landing page" });
+      const page = await prisma.landingPage.findFirst({
+      where: { id: req.params.pageId as string, organizationId: req.organizationId },
+      });
+      if (!page) {
+      sendNotFound(res, "Landing page not found");
+      return;
       }
+      if (await isLegalHoldEnabled(prisma, req.organizationId)) {
+      res.status(423).json({
+        error: "legal_hold_active",
+        message:
+          "Deletion is blocked because legal hold is enabled in your data governance policy.",
+      });
+      return;
+      }
+
+      await clearScheduledPublish(page.id);
+      await prisma.landingPage.delete({ where: { id: page.id } });
+      await auditLogs.record({
+      organizationId: req.organizationId,
+      actorUserId: req.userId,
+      category: "PUBLISH",
+      action: "PAGE_DELETED",
+      targetType: "landing_page",
+      targetId: page.id,
+      severity: "WARN",
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+      });
+      sendSuccess(res, { deleted: true });
+      
     }
-  );
+  ));
 
   return router;
 }

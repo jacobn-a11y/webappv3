@@ -305,11 +305,11 @@ export function PlatformOwnerDashboardPage() {
       {/* Confirmation Dialog */}
       {confirmAction && (
         <div className="modal-overlay" onClick={() => setConfirmAction(null)}>
-          <div className="modal modal--sm" onClick={(e) => e.stopPropagation()} role="alertdialog">
-            <h3 className="modal__title">
+          <div className="modal modal--sm" onClick={(e) => e.stopPropagation()} role="alertdialog" aria-labelledby="platform-confirm-title" aria-describedby="platform-confirm-msg">
+            <h3 id="platform-confirm-title" className="modal__title">
               {confirmAction.action === "approve" ? "Approve Deletion" : "Reject Deletion"}
             </h3>
-            <p className="modal__message">
+            <p id="platform-confirm-msg" className="modal__message">
               {confirmAction.action === "approve"
                 ? `Approving deletion for "${confirmAction.orgName}" will schedule it for permanent removal in 30 days. The tenant can cancel during this period.`
                 : `Reject the deletion request for "${confirmAction.orgName}"? The tenant will be able to submit a new request.`
