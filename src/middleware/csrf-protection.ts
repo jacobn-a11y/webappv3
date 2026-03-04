@@ -1,7 +1,12 @@
 import type { NextFunction, Request, Response } from "express";
 import crypto from "crypto";
+import logger from "../lib/logger.js";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+if (!process.env.CSRF_SECRET) {
+  logger.warn("CSRF_SECRET not set — using random fallback. Set CSRF_SECRET in production.");
+}
 
 const CSRF_SECRET = process.env.CSRF_SECRET || crypto.randomBytes(32).toString("hex");
 

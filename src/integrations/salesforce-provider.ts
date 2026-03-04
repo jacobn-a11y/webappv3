@@ -98,7 +98,7 @@ function extractDomainFromUrl(url: string): string | null {
 
 export class SalesforceProvider implements CRMDataProvider {
   readonly name: IntegrationProvider = "SALESFORCE";
-  private rateLimiter = new OutboundRateLimiter(5, 5);
+  private rateLimiter = new OutboundRateLimiter(5, 5, "salesforce");
   private onTokenRefresh?: (newAccessToken: string) => Promise<void>;
 
   setTokenRefreshCallback(cb: (newAccessToken: string) => Promise<void>): void {

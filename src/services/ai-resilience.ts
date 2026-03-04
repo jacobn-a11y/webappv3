@@ -4,11 +4,36 @@ import type {
   ChatCompletionResult,
 } from "./ai-client.js";
 import logger from "../lib/logger.js";
+import { createClient, type RedisClientType } from "redis";
+
+// ─── Redis client (lazy singleton) ────────────────────────────────────────────
+
+let redisClient: RedisClientType | null = null;
+let redisUnavailable = false;
+
+async function getRedisClient(): Promise<RedisClientType | null> {
+  if (redisClient) return redisClient;
+  if (redisUnavailable) return null;
+  const url = process.env.REDIS_URL;
+  if (!url) return null;
+  try {
+    redisClient = createClient({ url }) as RedisClientType;
+    await redisClient.connect();
+    return redisClient;
+  } catch {
+    redisUnavailable = true;
+    return null;
+  }
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CircuitState {
   failures: number;
   openUntil: number;
 }
+
+// ─── In-memory fallback ───────────────────────────────────────────────────────
 
 const breakerState = new Map<string, CircuitState>();
 
@@ -34,7 +59,26 @@ function isTransientProviderError(message: string): boolean {
   );
 }
 
-function stateFor(key: string): CircuitState {
+// ─── Circuit state helpers (Redis + in-memory fallback) ───────────────────────
+
+async function stateFor(key: string): Promise<CircuitState> {
+  const redis = await getRedisClient();
+  if (redis) {
+    try {
+      const redisKey = `circuit:${key}`;
+      const [failures, openUntil] = await Promise.all([
+        redis.hGet(redisKey, "failures"),
+        redis.hGet(redisKey, "openUntil"),
+      ]);
+      return {
+        failures: failures ? parseInt(failures, 10) : 0,
+        openUntil: openUntil ? parseInt(openUntil, 10) : 0,
+      };
+    } catch {
+      // Fall through to in-memory
+    }
+  }
+
   const existing = breakerState.get(key);
   if (existing) return existing;
   const created: CircuitState = { failures: 0, openUntil: 0 };
@@ -42,29 +86,60 @@ function stateFor(key: string): CircuitState {
   return created;
 }
 
-function isCircuitOpen(key: string): boolean {
-  const state = stateFor(key);
+async function isCircuitOpen(key: string): Promise<boolean> {
+  const state = await stateFor(key);
   return state.openUntil > Date.now();
 }
 
-function recordSuccess(key: string): void {
-  const state = stateFor(key);
+async function recordSuccess(key: string): Promise<void> {
+  const redis = await getRedisClient();
+  if (redis) {
+    try {
+      const redisKey = `circuit:${key}`;
+      await redis.hSet(redisKey, { failures: "0", openUntil: "0" });
+      await redis.expire(redisKey, 300);
+      return;
+    } catch {
+      // Fall through to in-memory
+    }
+  }
+
+  const state = breakerState.get(key) ?? { failures: 0, openUntil: 0 };
   state.failures = 0;
   state.openUntil = 0;
+  breakerState.set(key, state);
 }
 
-function recordFailure(
+async function recordFailure(
   key: string,
   threshold: number,
   cooldownMs: number
-): number {
-  const state = stateFor(key);
+): Promise<number> {
+  const redis = await getRedisClient();
+  if (redis) {
+    try {
+      const redisKey = `circuit:${key}`;
+      const failures = await redis.hIncrBy(redisKey, "failures", 1);
+      if (failures >= threshold) {
+        await redis.hSet(redisKey, "openUntil", String(Date.now() + cooldownMs));
+      }
+      await redis.expire(redisKey, Math.max(300, Math.ceil(cooldownMs / 1000) + 60));
+      return failures;
+    } catch {
+      // Fall through to in-memory
+    }
+  }
+
+  const state = breakerState.get(key) ?? { failures: 0, openUntil: 0 };
   state.failures += 1;
   if (state.failures >= threshold) {
     state.openUntil = Date.now() + cooldownMs;
   }
+  breakerState.set(key, state);
   return state.failures;
 }
+
+// ─── Failover AI Client ──────────────────────────────────────────────────────
 
 export class FailoverAIClient implements AIClient {
   private primary: AIClient;
@@ -102,7 +177,7 @@ export class FailoverAIClient implements AIClient {
       this.options;
 
     const maxPrimaryAttempts = this.fallback ? 1 : maxAttempts;
-    const shouldSkipPrimary = isCircuitOpen(circuitKey);
+    const shouldSkipPrimary = await isCircuitOpen(circuitKey);
 
     if (shouldSkipPrimary && this.fallback) {
       logger.warn("AI circuit open; routing request to fallback provider", {
@@ -117,12 +192,12 @@ export class FailoverAIClient implements AIClient {
     for (let attempt = 1; attempt <= maxPrimaryAttempts; attempt += 1) {
       try {
         const result = await this.primary.chatCompletion(options);
-        recordSuccess(circuitKey);
+        await recordSuccess(circuitKey);
         return result;
       } catch (error) {
         lastError = error;
         const message = normalizeErrorMessage(error);
-        const failures = recordFailure(
+        const failures = await recordFailure(
           circuitKey,
           failureThreshold,
           cooldownMs

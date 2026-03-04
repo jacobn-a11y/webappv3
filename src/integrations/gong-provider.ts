@@ -276,7 +276,7 @@ function selectedAccountsFromSettings(
 export class GongProvider implements CallRecordingProvider {
   readonly name: IntegrationProvider = "GONG";
   readonly callProvider: CallProvider = "GONG";
-  private rateLimiter = new OutboundRateLimiter(3, 3);
+  private rateLimiter = new OutboundRateLimiter(3, 3, "gong");
 
   private buildAuthHeader(creds: GongCredentials): string {
     const encoded = Buffer.from(`${creds.accessKey}:${creds.accessKeySecret}`).toString("base64");
