@@ -1,5 +1,16 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { RAGEngine } from "../../src/services/rag-engine.js";
+
+const origRedisUrl = process.env.REDIS_URL;
+
+beforeEach(() => {
+  delete process.env.REDIS_URL;
+});
+
+afterEach(() => {
+  if (origRedisUrl !== undefined) process.env.REDIS_URL = origRedisUrl;
+  else delete process.env.REDIS_URL;
+});
 
 function makeEngine() {
   const prisma = {} as any;

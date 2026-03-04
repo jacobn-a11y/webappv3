@@ -16,7 +16,11 @@ function createMockReq(ip = "127.0.0.1"): Partial<Request> {
   };
 }
 
-function createMockRes(): Partial<Response> & { statusCode: number; body: unknown; headers: Record<string, string> } {
+function createMockRes(): Partial<Response> & {
+  statusCode: number;
+  body: unknown;
+  headers: Record<string, string>;
+} {
   const res = {
     statusCode: 200,
     body: null as unknown,
@@ -41,6 +45,7 @@ describe("Rate Limiter", () => {
   let limiter: ReturnType<typeof createRateLimiter>;
 
   beforeEach(() => {
+    delete process.env.REDIS_URL;
     limiter = createRateLimiter({
       maxRequests: 3,
       windowMs: 60_000,
@@ -132,9 +137,7 @@ describe("Rate Limiter", () => {
       const res = createMockRes();
       limiter(req as Request, res as unknown as Response, next as NextFunction);
       if (i === 3) {
-        expect((res.body as { message: string }).message).toBe(
-          "Too many requests"
-        );
+        expect((res.body as { message: string }).message).toBe("Too many requests");
       }
     }
   });

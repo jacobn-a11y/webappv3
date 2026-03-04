@@ -38,6 +38,7 @@ function mockNext(): NextFunction {
 
 describe("createRateLimiter", () => {
   beforeEach(() => {
+    delete process.env.REDIS_URL;
     vi.clearAllMocks();
   });
 
