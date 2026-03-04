@@ -168,7 +168,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
 
       const { query, account_id, history, top_k, funnel_stages } = parseResult.data;
 
-      if (req.userId!) {
+      if (req.userId! && account_id) {
         const canAccessAccount = await accessService.canAccessAccount(
           req.userId!,
           orgId,

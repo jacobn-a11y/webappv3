@@ -14,6 +14,9 @@ describe("support impersonation middleware", () => {
       findFirst: vi.fn(),
       update: vi.fn(),
     },
+    tenantSupportOptOut: {
+      findUnique: vi.fn(),
+    },
     orgSettings: {
       findUnique: vi.fn(),
     },
@@ -24,6 +27,7 @@ describe("support impersonation middleware", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    prisma.tenantSupportOptOut.findUnique.mockResolvedValue(null);
     prisma.orgSettings.findUnique.mockResolvedValue(null);
     prisma.auditLog.create.mockResolvedValue({ id: "audit-1" });
   });

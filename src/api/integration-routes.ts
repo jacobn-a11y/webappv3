@@ -400,8 +400,9 @@ export function createIntegrationRoutes(
     }
 
     try {
+      const rawCredentials: unknown = credentials;
       const valid = await (selection.callProvider ?? selection.crmProvider)!.validateCredentials(
-        credentials as ProviderCredentials
+        rawCredentials as ProviderCredentials
       );
 
       if (valid) {

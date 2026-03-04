@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-02-22T23:38:24.152Z",
+  "generatedAt": "2026-03-04T19:32:10.547Z",
   "entries": [
     {
       "key": "20260217000000_backfill_missing_foundation_objects:L40:\\bALTER\\s+TYPE\\b:0d6d03a47457",
@@ -49,6 +49,22 @@
       "pattern": "\\bALTER\\s+TYPE\\b",
       "hash": "4601520bb620",
       "statement": "ALTER TYPE \"PermissionType\" ADD VALUE IF NOT EXISTS 'MANAGE_AI_SETTINGS';"
+    },
+    {
+      "key": "20260304103000_add_vnext_lifecycle_policy:L35:\\bALTER\\s+TYPE\\b:4893710bea5a",
+      "migration": "20260304103000_add_vnext_lifecycle_policy",
+      "line": 35,
+      "pattern": "\\bALTER\\s+TYPE\\b",
+      "hash": "4893710bea5a",
+      "statement": "ALTER TYPE \"PermissionType\" ADD VALUE 'APPROVE_PUBLISH_REQUESTS';"
+    },
+    {
+      "key": "20260304130000_add_quote_library_ai_limits_and_transcript_permission:L23:\\bALTER\\s+TYPE\\b:3f40980bf4a6",
+      "migration": "20260304130000_add_quote_library_ai_limits_and_transcript_permission",
+      "line": 23,
+      "pattern": "\\bALTER\\s+TYPE\\b",
+      "hash": "3f40980bf4a6",
+      "statement": "ALTER TYPE \"PermissionType\" ADD VALUE 'VIEW_RAW_TRANSCRIPTS';"
     }
   ]
 }
