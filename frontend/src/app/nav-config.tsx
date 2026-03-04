@@ -205,6 +205,7 @@ export function buildNav(
         { to: "/admin/publish-approvals", label: t("nav.approvals", "Approvals"), icon: IconCheckCircle },
         { to: "/admin/data-quality", label: t("nav.data_quality", "Data Quality"), icon: IconStar },
         { to: "/admin/setup", label: t("nav.setup", "Setup"), icon: IconTool },
+        { to: "/admin/settings/integrations", label: t("nav.integrations", "Integrations"), icon: IconRefresh },
       );
       if (userRole === "OWNER") {
         adminItems.push({ to: "/admin/billing", label: t("nav.billing", "Billing"), icon: IconCreditCard });

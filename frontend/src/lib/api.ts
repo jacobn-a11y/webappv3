@@ -12,5 +12,6 @@ export * from "./api/accounts";
 export * from "./api/pages";
 export * from "./api/admin";
 export * from "./api/integrations";
+export * from "./api/integrations-settings";
 export * from "./api/ai";
 export * from "./api/analytics";

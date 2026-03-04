@@ -19,6 +19,7 @@ const AdminPublishApprovalsPage = lazy(() => import("../pages/AdminPublishApprov
 const AdminRolesPage = lazy(() => import("../pages/AdminRolesPage").then(m => ({ default: m.AdminRolesPage })));
 const AdminSecurityPolicyPage = lazy(() => import("../pages/AdminSecurityPolicyPage").then(m => ({ default: m.AdminSecurityPolicyPage })));
 const AdminSetupWizardPage = lazy(() => import("../pages/AdminSetupWizardPage").then(m => ({ default: m.AdminSetupWizardPage })));
+const IntegrationsSettingsPage = lazy(() => import("../pages/IntegrationsSettingsPage").then(m => ({ default: m.IntegrationsSettingsPage })));
 const AdminStoryContextPage = lazy(() => import("../pages/AdminStoryContextPage").then(m => ({ default: m.AdminStoryContextPage })));
 const AnalyticsDashboardPage = lazy(() => import("../pages/AnalyticsDashboardPage").then(m => ({ default: m.AnalyticsDashboardPage })));
 const AuthCallbackPage = lazy(() => import("../pages/AuthCallbackPage").then(m => ({ default: m.AuthCallbackPage })));
@@ -141,6 +142,14 @@ export function AuthenticatedRoutes({ user }: AuthenticatedRoutesProps) {
         }
       />
       <Route
+        path="/admin/settings/integrations"
+        element={
+          <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user}>
+            <IntegrationsSettingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/admin/billing"
         element={
           <ProtectedRoute requiredRole={["OWNER"]} user={user}>
@@ -174,6 +183,7 @@ export function AuthenticatedRoutes({ user }: AuthenticatedRoutesProps) {
       <Route path="/analytics" element={<AnalyticsDashboardPage />} />
       <Route path="/profile" element={<ProfileCenterPage />} />
       <Route path="/settings/billing" element={<Navigate to="/admin/billing" replace />} />
+      <Route path="/settings/integrations" element={<Navigate to="/admin/settings/integrations" replace />} />
       <Route path="/setup" element={<Navigate to="/admin/setup" replace />} />
       <Route path="/auth" element={<Navigate to="/" replace />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />

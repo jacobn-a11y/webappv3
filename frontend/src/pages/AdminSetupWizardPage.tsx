@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   applySetupRolePresets,
+  completeSetupCrmConnection,
+  completeSetupRecordingProvider,
+  completeSettingsIntegrationLink,
+  createSettingsIntegrationLinkToken,
   getFirstValueRecommendations,
   getSetupMvpQuickstartStatus,
   getSetupPlans,
@@ -12,6 +16,7 @@ import {
   saveSetupMvpQuickstartKeys,
   saveSetupOrgProfile,
   selectSetupPlan,
+  skipSetupStep,
   type FirstValueRecommendations,
   type SetupMvpAccountRow,
   type SetupMvpQuickstartStatus,
@@ -21,8 +26,15 @@ import {
 import { useToast } from "../components/Toast";
 import { formatEnumLabel } from "../lib/format";
 import { AdminErrorState } from "../components/admin/AdminErrorState";
+import { MergeLinkModal } from "../components/MergeLinkModal";
+import { mapCrmProvider, mapRecordingProvider } from "../lib/merge-provider-map";
 
 export function AdminSetupWizardPage() {
+  type MergeLinkState = {
+    category: "crm" | "filestorage";
+    linkToken: string;
+  };
+
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [plans, setPlans] = useState<SetupPlanCatalog | null>(null);
   const [firstValue, setFirstValue] = useState<FirstValueRecommendations | null>(null);
@@ -42,6 +54,8 @@ export function AdminSetupWizardPage() {
   const [indexingAccounts, setIndexingAccounts] = useState(false);
   const [savingSelection, setSavingSelection] = useState(false);
   const [showAdvancedSetup, setShowAdvancedSetup] = useState(false);
+  const [mergeLink, setMergeLink] = useState<MergeLinkState | null>(null);
+  const [connectingMerge, setConnectingMerge] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { showToast } = useToast();
@@ -214,6 +228,66 @@ export function AdminSetupWizardPage() {
     }
   };
 
+  const openMergeLink = async (category: "crm" | "filestorage") => {
+    setError(null);
+    try {
+      const token = await createSettingsIntegrationLinkToken({ category });
+      setMergeLink({ category, linkToken: token.link_token });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to initialize Merge Link");
+    }
+  };
+
+  const completeMergeSetupStep = async (publicToken: string) => {
+    if (!mergeLink) return;
+
+    setConnectingMerge(true);
+    setError(null);
+    try {
+      const response = await completeSettingsIntegrationLink({
+        public_token: publicToken,
+        category: mergeLink.category,
+      });
+      const linked = response.integration;
+
+      if (mergeLink.category === "filestorage") {
+        await completeSetupRecordingProvider({
+          provider: mapRecordingProvider(linked.integration),
+          merge_linked_account_id: linked.merge_account_id,
+        });
+        showToast("Recording provider connected via Merge", "success");
+      } else {
+        await completeSetupCrmConnection({
+          crm_provider: mapCrmProvider(linked.integration),
+          merge_linked_account_id: linked.merge_account_id,
+        });
+        showToast("CRM connected via Merge", "success");
+      }
+
+      setMergeLink(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to complete Merge setup");
+      throw err;
+    } finally {
+      setConnectingMerge(false);
+    }
+  };
+
+  const skipCrmSetup = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await skipSetupStep("CRM");
+      showToast("CRM step skipped. You can connect later in Integrations.", "success");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to skip CRM step");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const completionScore = status?.completionScore ?? 0;
   const mvpReadyForIngest = Boolean(
     (mvpStatus?.gong_configured ?? false) && (mvpStatus?.openai_configured ?? false)
@@ -302,6 +376,69 @@ export function AdminSetupWizardPage() {
           </div>
         </div>
       )}
+
+      <div className="card card--elevated">
+        <div className="card__header">
+          <div>
+            <div className="card__title">Merge.dev Connection Path (Recommended)</div>
+            <div className="card__subtitle">
+              Connect recording + CRM providers through Merge Link. You can still use MVP quickstart below.
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <button
+              className="btn btn--primary"
+              type="button"
+              onClick={() => void openMergeLink("filestorage")}
+              disabled={connectingMerge}
+            >
+              Connect Recording Provider
+            </button>
+            <button
+              className="btn btn--secondary"
+              type="button"
+              onClick={() => void openMergeLink("crm")}
+              disabled={connectingMerge}
+            >
+              Connect CRM
+            </button>
+            <button
+              className="btn btn--ghost"
+              type="button"
+              onClick={skipCrmSetup}
+              disabled={saving || status?.currentStep !== "CRM"}
+            >
+              Skip CRM for now
+            </button>
+          </div>
+
+          <div style={{ fontSize: 13, color: "var(--color-text-secondary)", display: "grid", gap: 4 }}>
+            <div>
+              Recording status:{" "}
+              <strong>
+                {status?.steps.recording_provider.complete
+                  ? status.steps.recording_provider.provider ?? "Connected"
+                  : "Not connected"}
+              </strong>
+            </div>
+            <div>
+              CRM status:{" "}
+              <strong>
+                {status?.steps.crm.complete
+                  ? status.steps.crm.provider ?? "Connected"
+                  : "Not connected"}
+              </strong>
+            </div>
+          </div>
+
+          <Link to="/admin/settings/integrations" className="btn btn--ghost btn--sm" style={{ width: "fit-content" }}>
+            Manage integrations in Settings
+          </Link>
+        </div>
+      </div>
 
       <div className="card card--elevated">
         <div className="card__header">
@@ -729,6 +866,18 @@ export function AdminSetupWizardPage() {
       )}
         </>
       )}
+
+      <MergeLinkModal
+        open={Boolean(mergeLink)}
+        title={
+          mergeLink?.category === "crm"
+            ? "Connect CRM via Merge Link"
+            : "Connect Recording Provider via Merge Link"
+        }
+        linkToken={mergeLink?.linkToken ?? null}
+        onClose={() => setMergeLink(null)}
+        onComplete={completeMergeSetupStep}
+      />
     </div>
   );
 }

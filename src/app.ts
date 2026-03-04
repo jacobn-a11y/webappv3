@@ -398,7 +398,7 @@ export function createApp(deps: AppDeps): express.Application {
     trialGate,
     strictPolicy,
     requirePermission(prisma, "manage_permissions"),
-    createIntegrationsRoutes(prisma)
+    createIntegrationsRoutes(prisma, mergeClient)
   );
   app.use(
     "/api/settings/api-keys",

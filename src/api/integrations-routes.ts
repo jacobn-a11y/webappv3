@@ -14,6 +14,7 @@ import { z } from "zod";
 import type { PrismaClient, UserRole, LinkedAccount } from "@prisma/client";
 import { requirePermission } from "../middleware/permissions.js";
 import logger from "../lib/logger.js";
+import type { MergeApiClient } from "../services/merge-api-client.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -21,8 +22,13 @@ const ToggleCrmPollingSchema = z.object({
   enabled: z.boolean(),
 });
 
+const LinkTokenSchema = z.object({
+  category: z.enum(["crm", "filestorage"]),
+});
+
 const CompleteLinkSchema = z.object({
   public_token: z.string().min(1, "Public token is required"),
+  category: z.enum(["crm", "filestorage"]).optional(),
 });
 
 interface AuthReq extends Request {
@@ -33,7 +39,10 @@ interface AuthReq extends Request {
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
-export function createIntegrationsRoutes(prisma: PrismaClient): Router {
+export function createIntegrationsRoutes(
+  prisma: PrismaClient,
+  mergeClient: Pick<MergeApiClient, "exchangeLinkToken">
+): Router {
   const router = Router();
 
   // ── List Connected Integrations ──────────────────────────────────────
@@ -60,6 +69,7 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
         });
 
         res.json({
+          merge_configured: Boolean(process.env.MERGE_API_KEY),
           integrations: linkedAccounts.map((la: LinkedAccount) => ({
             id: la.id,
             merge_account_id: la.mergeLinkedAccountId,
@@ -91,6 +101,17 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
     "/link-token",
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
+      if (!req.organizationId) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+
+      const parsed = LinkTokenSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "validation_error", details: parsed.error.issues });
+        return;
+      }
+
       const mergeApiKey = process.env.MERGE_API_KEY;
       if (!mergeApiKey) {
         res.status(500).json({ error: "Merge.dev integration not configured" });
@@ -98,6 +119,19 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
       }
 
       try {
+        const [org, user] = await Promise.all([
+          prisma.organization.findUnique({
+            where: { id: req.organizationId },
+            select: { id: true, name: true },
+          }),
+          req.userId
+            ? prisma.user.findUnique({
+              where: { id: req.userId },
+              select: { email: true },
+            })
+            : Promise.resolve(null),
+        ]);
+
         const response = await fetch("https://api.merge.dev/api/integrations/create-link-token", {
           method: "POST",
           headers: {
@@ -106,9 +140,9 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
           },
           body: JSON.stringify({
             end_user_origin_id: req.organizationId,
-            end_user_organization_name: "org",
-            end_user_email_address: "admin@org.com",
-            categories: ["crm", "ats"],
+            end_user_organization_name: org?.name ?? "StoryEngine Organization",
+            end_user_email_address: user?.email ?? "admin@storyengine.local",
+            categories: [parsed.data.category],
           }),
         });
 
@@ -120,7 +154,10 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
         }
 
         const data = await response.json() as { link_token: string };
-        res.json({ link_token: data.link_token });
+        res.json({
+          link_token: data.link_token,
+          category: parsed.data.category,
+        });
       } catch (err) {
         logger.error("Create link token error", { error: err });
         res.status(500).json({ error: "Failed to create link token" });
@@ -154,49 +191,20 @@ export function createIntegrationsRoutes(prisma: PrismaClient): Router {
       }
 
       try {
-        // Exchange public token for account token
-        const response = await fetch("https://api.merge.dev/api/integrations/create-account-token", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${mergeApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            public_token: parse.data.public_token,
-          }),
-        });
-
-        if (!response.ok) {
-          const errorBody = await response.text();
-          logger.error("Merge token exchange error", { error: errorBody });
-          res.status(502).json({ error: "Failed to exchange token" });
+        if (!req.organizationId) {
+          res.status(401).json({ error: "Authentication required" });
           return;
         }
 
-        const data = await response.json() as {
-          account_token: string;
-          integration: {
-            name: string;
-            slug: string;
-            categories: string[];
-          };
-        };
-
-        // Store the linked account
-        const linkedAccount = await prisma.linkedAccount.create({
-          data: {
-            organizationId: req.organizationId,
-            mergeLinkedAccountId: data.account_token,
-            accountToken: data.account_token,
-            integrationSlug: data.integration.slug,
-            category: (data.integration.categories[0]?.toUpperCase() === "CRM" ? "CRM" : "RECORDING") as "CRM" | "RECORDING",
-            status: "ACTIVE",
-          },
-        });
+        const linkedAccount = await mergeClient.exchangeLinkToken(
+          req.organizationId,
+          parse.data.public_token
+        );
 
         res.status(201).json({
           integration: {
             id: linkedAccount.id,
+            merge_account_id: linkedAccount.mergeLinkedAccountId,
             integration: linkedAccount.integrationSlug,
             category: linkedAccount.category,
             status: linkedAccount.status,

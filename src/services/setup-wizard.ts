@@ -243,7 +243,7 @@ export class SetupWizardService {
     // In production, this calls the Merge.dev API:
     //   POST https://api.merge.dev/api/integrations/create-link-token
     //   { end_user_origin_id: orgId, end_user_organization_name: orgName,
-    //     categories: ["ats", "file-storage"] }
+    //     categories: ["filestorage"] }
     //
     // For now, return the token structure that the frontend needs.
 
@@ -269,7 +269,7 @@ export class SetupWizardService {
           end_user_origin_id: organizationId,
           end_user_organization_name: org.name,
           end_user_email_address: "", // populated by WorkOS user in production
-          categories: ["ats"],
+          categories: ["filestorage"],
         }),
       }
     );

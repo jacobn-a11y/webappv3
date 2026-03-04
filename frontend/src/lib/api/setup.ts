@@ -134,3 +134,44 @@ export async function applySetupRolePresets(): Promise<{
 export async function getFirstValueRecommendations(): Promise<FirstValueRecommendations> {
   return request<FirstValueRecommendations>("/setup/first-value/recommendations");
 }
+
+export async function completeSetupRecordingProvider(body: {
+  provider:
+    | "GONG"
+    | "CHORUS"
+    | "ZOOM"
+    | "GOOGLE_MEET"
+    | "TEAMS"
+    | "FIREFLIES"
+    | "DIALPAD"
+    | "AIRCALL"
+    | "RINGCENTRAL"
+    | "SALESLOFT"
+    | "OUTREACH"
+    | "OTHER";
+  merge_linked_account_id: string;
+}): Promise<{ completed: boolean; status: SetupStatus }> {
+  return request<{ completed: boolean; status: SetupStatus }>("/setup/step/recording-provider/complete", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function completeSetupCrmConnection(body: {
+  crm_provider: "SALESFORCE" | "HUBSPOT";
+  merge_linked_account_id: string;
+}): Promise<{ completed: boolean; status: SetupStatus }> {
+  return request<{ completed: boolean; status: SetupStatus }>("/setup/step/crm/complete", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function skipSetupStep(
+  step: "RECORDING_PROVIDER" | "CRM" | "ACCOUNT_SYNC" | "PLAN" | "PERMISSIONS"
+): Promise<{ skipped: boolean; status: SetupStatus }> {
+  return request<{ skipped: boolean; status: SetupStatus }>("/setup/skip", {
+    method: "POST",
+    body: JSON.stringify({ step }),
+  });
+}
