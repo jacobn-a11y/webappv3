@@ -1254,7 +1254,7 @@ model OrgSettings {
   organizationId            String                   @unique
   landingPagesEnabled       Boolean                  @default(true)
   defaultPageVisibility     PageVisibility           @default(PRIVATE)
-  approvalPolicy            ApprovalPolicy           @default(ALL_REQUIRED)
+  approvalPolicy            ApprovalPolicy           @default(ALL_NO_APPROVAL)
   requireApprovalToPublish  Boolean                  @default(false)
   allowedPublishers         UserRole[]               @default([OWNER, ADMIN])
   maxPagesPerUser           Int?

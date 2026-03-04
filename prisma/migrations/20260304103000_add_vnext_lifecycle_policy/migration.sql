@@ -16,7 +16,7 @@ $$;
 
 -- Add new org-level approval policy field
 ALTER TABLE "org_settings"
-  ADD COLUMN IF NOT EXISTS "approvalPolicy" "ApprovalPolicy" NOT NULL DEFAULT 'ALL_REQUIRED';
+  ADD COLUMN IF NOT EXISTS "approvalPolicy" "ApprovalPolicy" NOT NULL DEFAULT 'ALL_NO_APPROVAL';
 
 -- Add Story lifecycle publish marker
 ALTER TABLE "stories"

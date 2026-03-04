@@ -4,7 +4,7 @@
   "files": [
     {
       "file": "prisma/schema.prisma",
-      "sha256": "7647d6cff1eb3d168fea711c562ac22e232d913c25fa1b84b4b9143092210152"
+      "sha256": "fa62dcd8839a2cfb75418df793a68a6cc610ad0d0d6bc2b3812f71059bbf1afc"
     },
     {
       "file": "src/api/dashboard-routes.ts",
