@@ -8,10 +8,14 @@ export function useTheme() {
   const [theme, setTheme] = useState<ThemePreference>(() => {
     try {
       const stored = localStorage.getItem(THEME_KEY);
-      return stored === "light" || stored === "dark" ? stored : "dark";
+      if (stored === "light" || stored === "dark") return stored;
     } catch {
-      return "dark";
+      // Ignore storage failures.
     }
+    if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: light)").matches) {
+      return "light";
+    }
+    return "dark";
   });
 
   useEffect(() => {

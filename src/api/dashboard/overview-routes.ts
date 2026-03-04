@@ -6,6 +6,7 @@ import logger from "../../lib/logger.js";
 import { Sentry } from "../../lib/sentry.js";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 import { asyncHandler } from "../../lib/async-handler.js";
+import { sendSuccess, sendUnauthorized } from "../_shared/responses.js";
 
 interface RegisterDashboardOverviewRoutesOptions {
   router: Router;
@@ -27,7 +28,7 @@ export function registerDashboardOverviewRoutes({
 
   router.get("/home", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
@@ -169,13 +170,13 @@ export function registerDashboardOverviewRoutes({
         };
       });
 
-      res.json(payload);
+      sendSuccess(res, payload);
     
   }));
 
   router.get("/customer-success/health", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
@@ -336,7 +337,7 @@ export function registerDashboardOverviewRoutes({
     riskIndicators.push(`Low active-user adoption (${adoptionRatePct}% in 30d).`);
     }
 
-    res.json({
+    sendSuccess(res, {
     overall_score: overallScore,
     onboarding_progress_pct: onboardingProgressPct,
     adoption_rate_pct: adoptionRatePct,
@@ -351,7 +352,7 @@ export function registerDashboardOverviewRoutes({
     "/customer-success/renewal-value-report",
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
@@ -440,7 +441,7 @@ export function registerDashboardOverviewRoutes({
       `Current renewal posture: ${renewalHealth}.`,
       ].join(" ");
 
-      res.json({
+      sendSuccess(res, {
       window_days: 90,
       renewal_health: renewalHealth,
       headline,
@@ -476,12 +477,12 @@ export function registerDashboardOverviewRoutes({
    */
   router.get("/stats", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
       const stats = await editor.getDashboardStats(req.organizationId);
-      res.json(stats);
+      sendSuccess(res, stats);
     
   }));
 
@@ -493,7 +494,7 @@ export function registerDashboardOverviewRoutes({
    */
   router.get("/pages", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
@@ -507,7 +508,7 @@ export function registerDashboardOverviewRoutes({
         search: req.query.search as string | undefined,
       });
 
-      res.json({ pages });
+      sendSuccess(res, { pages });
     
   }));
 
@@ -519,7 +520,7 @@ export function registerDashboardOverviewRoutes({
    */
   router.get("/pages/data", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
@@ -545,7 +546,7 @@ export function registerDashboardOverviewRoutes({
           }))
         : [];
 
-      res.json({
+      sendSuccess(res, {
         stats: {
           totalPages: dashboardStats.totalPages,
           publishedPages: dashboardStats.publishedPages,

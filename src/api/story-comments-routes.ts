@@ -2,6 +2,7 @@ import { Router, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import { sendSuccess, sendCreated, sendUnauthorized, sendBadRequest } from "./_shared/responses.js";
 
 const ListCommentsQuerySchema = z.object({
   target: z.enum(["story", "page"]).default("story"),
@@ -53,13 +54,13 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
 
   router.get("/:storyId/comments", async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
     const parse = ListCommentsQuerySchema.safeParse(req.query);
     if (!parse.success) {
-      res.status(400).json({ error: "validation_error", details: parse.error.issues });
+      sendBadRequest(res, "validation_error", parse.error.issues);
       return;
     }
 
@@ -91,7 +92,7 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
         },
       });
 
-      res.json({
+      sendSuccess(res, {
         comments: comments.map((comment) => ({
           id: comment.id,
           message: comment.notes ?? "",
@@ -111,19 +112,19 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load comment thread";
-      res.status(400).json({ error: message });
+      sendBadRequest(res, message);
     }
   });
 
   router.post("/:storyId/comments", async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
     const parse = CreateCommentSchema.safeParse(req.body);
     if (!parse.success) {
-      res.status(400).json({ error: "validation_error", details: parse.error.issues });
+      sendBadRequest(res, "validation_error", parse.error.issues);
       return;
     }
 
@@ -159,7 +160,7 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
         },
       });
 
-      res.status(201).json({
+      sendCreated(res, {
         id: comment.id,
         message: comment.notes ?? "",
         parent_id: comment.originalValue ?? null,
@@ -177,7 +178,7 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to post comment";
-      res.status(400).json({ error: message });
+      sendBadRequest(res, message);
     }
   });
 

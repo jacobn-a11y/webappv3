@@ -15,6 +15,7 @@ import { escapeHtml } from "../lib/html-utils.js";
 import logger from "../lib/logger.js";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { asyncHandler } from "../lib/async-handler.js";
+import { sendUnauthorized } from "./_shared/responses.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,7 +53,7 @@ export function createAdminPermissionsPage(prisma: PrismaClient): Router {
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 

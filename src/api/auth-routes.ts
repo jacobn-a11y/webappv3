@@ -24,6 +24,7 @@ import {
   decodeSecurityPolicy,
   type SecurityPolicyBoundary,
 } from "../types/json-boundaries.js";
+import { sendSuccess, sendCreated, sendBadRequest, sendUnauthorized, sendNotFound, sendConflict } from "./_shared/responses.js";
 
 // ─── Validation Schemas ─────────────────────────────────────────────────────
 
@@ -293,7 +294,7 @@ export function createAuthRoutes(
         req.query.screen === "sign-up" ? "sign-up" : undefined,
     });
 
-    res.json({ authorizationUrl: url });
+    sendSuccess(res, { authorizationUrl: url });
   });
 
   // GET /callback — exchange authorization code for tokens, provision user.
@@ -301,7 +302,7 @@ export function createAuthRoutes(
     const code = typeof req.query.code === "string" ? req.query.code : null;
 
     if (!code) {
-      res.status(400).json({ error: "Missing authorization code" });
+      sendBadRequest(res, "Missing authorization code");
       return;
     }
 
@@ -318,7 +319,7 @@ export function createAuthRoutes(
         userAgent: req.get("user-agent"),
       });
 
-      res.json({
+      sendSuccess(res, {
         accessToken: authResult.accessToken,
         refreshToken: authResult.refreshToken,
         user: formatUserResponse(user),
@@ -328,7 +329,7 @@ export function createAuthRoutes(
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Authentication failed";
-      res.status(401).json({ error: message });
+      sendUnauthorized(res, message);
     }
   });
 
@@ -336,10 +337,7 @@ export function createAuthRoutes(
   router.post("/signup", async (req, res) => {
     const parsed = signupSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({
-        error: "Validation failed",
-        details: parsed.error.flatten().fieldErrors,
-      });
+      sendBadRequest(res, "Validation failed", parsed.error.flatten().fieldErrors);
       return;
     }
 
@@ -372,7 +370,7 @@ export function createAuthRoutes(
         userAgent: req.get("user-agent"),
       });
 
-      res.status(201).json({
+      sendCreated(res, {
         accessToken: authResult.accessToken,
         refreshToken: authResult.refreshToken,
         user: formatUserResponse(user),
@@ -382,7 +380,7 @@ export function createAuthRoutes(
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Registration failed";
-      res.status(400).json({ error: message });
+      sendBadRequest(res, message);
     }
   });
 
@@ -390,10 +388,7 @@ export function createAuthRoutes(
   router.post("/login/password", async (req, res) => {
     const parsed = passwordLoginSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({
-        error: "Validation failed",
-        details: parsed.error.flatten().fieldErrors,
-      });
+      sendBadRequest(res, "Validation failed", parsed.error.flatten().fieldErrors);
       return;
     }
 
@@ -415,7 +410,7 @@ export function createAuthRoutes(
         userAgent: req.get("user-agent"),
       });
 
-      res.json({
+      sendSuccess(res, {
         accessToken: authResult.accessToken,
         refreshToken: authResult.refreshToken,
         user: formatUserResponse(user),
@@ -425,7 +420,7 @@ export function createAuthRoutes(
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Invalid email or password";
-      res.status(401).json({ error: message });
+      sendUnauthorized(res, message);
     }
   });
 
@@ -433,17 +428,17 @@ export function createAuthRoutes(
   router.get("/me", async (req, res) => {
     const rawToken = readSessionTokenHeader(req.headers["x-session-token"]);
     if (!rawToken) {
-      res.status(401).json({ error: "authentication_required" });
+      sendUnauthorized(res, "authentication_required");
       return;
     }
 
     const session = await findActiveSession(prisma, rawToken);
     if (!session) {
-      res.status(401).json({ error: "invalid_session" });
+      sendUnauthorized(res, "invalid_session");
       return;
     }
 
-    res.json({
+    sendSuccess(res, {
       user: formatUserResponse(session.user),
       sessionExpiresAt: session.expiresAt.toISOString(),
     });
@@ -453,27 +448,24 @@ export function createAuthRoutes(
   router.patch("/me", async (req, res) => {
     const rawToken = readSessionTokenHeader(req.headers["x-session-token"]);
     if (!rawToken) {
-      res.status(401).json({ error: "authentication_required" });
+      sendUnauthorized(res, "authentication_required");
       return;
     }
     const session = await findActiveSession(prisma, rawToken);
     if (!session) {
-      res.status(401).json({ error: "invalid_session" });
+      sendUnauthorized(res, "invalid_session");
       return;
     }
     const parsed = updateMeSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({
-        error: "validation_error",
-        details: parsed.error.flatten().fieldErrors,
-      });
+      sendBadRequest(res, "validation_error", parsed.error.flatten().fieldErrors);
       return;
     }
     const user = await prisma.user.update({
       where: { id: session.user.id },
       data: { name: parsed.data.name },
     });
-    res.json({ user: formatUserResponse(user) });
+    sendSuccess(res, { user: formatUserResponse(user) });
   });
 
   // GET /invites/:token — fetch invite details for acceptance UI.
@@ -489,12 +481,12 @@ export function createAuthRoutes(
     });
 
     if (!invite) {
-      res.status(404).json({ error: "invite_not_found" });
+      sendNotFound(res, "invite_not_found");
       return;
     }
 
     if (invite.acceptedAt) {
-      res.status(409).json({ error: "invite_already_accepted" });
+      sendConflict(res, "invite_already_accepted");
       return;
     }
 
@@ -503,7 +495,7 @@ export function createAuthRoutes(
       return;
     }
 
-    res.json({
+    sendSuccess(res, {
       invite: {
         email: invite.email,
         role: invite.role,
@@ -519,10 +511,7 @@ export function createAuthRoutes(
     const token = (req.params.token as string) || "";
     const parsed = inviteAcceptSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({
-        error: "Validation failed",
-        details: parsed.error.flatten().fieldErrors,
-      });
+      sendBadRequest(res, "Validation failed", parsed.error.flatten().fieldErrors);
       return;
     }
 
@@ -531,11 +520,11 @@ export function createAuthRoutes(
     });
 
     if (!invite) {
-      res.status(404).json({ error: "invite_not_found" });
+      sendNotFound(res, "invite_not_found");
       return;
     }
     if (invite.acceptedAt) {
-      res.status(409).json({ error: "invite_already_accepted" });
+      sendConflict(res, "invite_already_accepted");
       return;
     }
     if (invite.expiresAt <= new Date()) {
@@ -579,7 +568,7 @@ export function createAuthRoutes(
         userAgent: req.get("user-agent"),
       });
 
-      res.status(201).json({
+      sendCreated(res, {
         accessToken: authResult.accessToken,
         refreshToken: authResult.refreshToken,
         user: formatUserResponse(user),
@@ -589,7 +578,7 @@ export function createAuthRoutes(
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to accept invite";
-      res.status(400).json({ error: message });
+      sendBadRequest(res, message);
     }
   });
 
@@ -604,7 +593,7 @@ export function createAuthRoutes(
         data: { revokedAt: new Date() },
       });
     }
-    res.json({ success: true });
+    sendSuccess(res, { success: true });
   });
 
   return router;

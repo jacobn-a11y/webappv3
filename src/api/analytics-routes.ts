@@ -23,6 +23,7 @@ import { requirePermission } from "../middleware/permissions.js";
 import { ResponseCache } from "../lib/response-cache.js";
 import logger from "../lib/logger.js";
 import { asyncHandler } from "../lib/async-handler.js";
+import { sendUnauthorized, sendSuccess } from "./_shared/responses.js";
 
 // ─── Route Factory ─────────────────────────────────────────────────────────
 
@@ -39,14 +40,14 @@ export function createAnalyticsRoutes(prisma: PrismaClient): Router {
    */
   router.get("/", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
       const data = await analyticsCache.getOrSet(req.organizationId, () =>
         analytics.getDashboardData(req.organizationId as string)
       );
-      res.json(data);
+      sendSuccess(res, data);
     
   }));
 
@@ -55,7 +56,7 @@ export function createAnalyticsRoutes(prisma: PrismaClient): Router {
     requirePermission(prisma, "view_analytics"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
@@ -207,7 +208,7 @@ export function createAnalyticsRoutes(prisma: PrismaClient): Router {
         };
       }
       );
-      res.json(payload);
+      sendSuccess(res, payload);
       
     }
   ));
@@ -219,7 +220,7 @@ export function createAnalyticsRoutes(prisma: PrismaClient): Router {
    */
   router.get("/dashboard", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 

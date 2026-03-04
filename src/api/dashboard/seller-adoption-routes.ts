@@ -7,6 +7,7 @@ import { parseRequestBody } from "../_shared/validators.js";
 import logger from "../../lib/logger.js";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 import { asyncHandler } from "../../lib/async-handler.js";
+import { sendUnauthorized, sendBadRequest, sendSuccess } from "../_shared/responses.js";
 
 const SellerAdoptionEventSchema = z.object({
   event_type: z
@@ -80,7 +81,7 @@ export function registerSellerAdoptionRoutes({
     "/seller-adoption/events",
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId || !req.userId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
       const payload = parseRequestBody(SellerAdoptionEventSchema, req.body, res);
@@ -122,11 +123,11 @@ export function registerSellerAdoptionRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const query = SellerAdoptionMetricsQuerySchema.safeParse(req.query);
       if (!query.success) {
-        res.status(400).json({ error: "validation_error", details: query.error.issues });
+        sendBadRequest(res, "validation_error", query.error.issues);
         return;
       }
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
@@ -275,7 +276,7 @@ export function registerSellerAdoptionRoutes({
           events.map((event) => event.actorUserId).filter((id): id is string => !!id)
         );
 
-        res.json({
+        sendSuccess(res, {
           window_days: windowDays,
           totals: {
             event_count: events.length,

@@ -21,6 +21,7 @@ import {
   type EntityResolutionInfo,
   type SegmentTag,
 } from "./templates/transcript-viewer-template.js";
+import { sendUnauthorized, sendNotFound, sendSuccess } from "./_shared/responses.js";
 
 // ─── Route Factory ──────────────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ export function createTranscriptViewerRoutes(prisma: PrismaClient): Router {
     const authReq = req as AuthenticatedRequest;
     const organizationId = authReq.organizationId;
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
@@ -72,7 +73,7 @@ export function createTranscriptViewerRoutes(prisma: PrismaClient): Router {
     });
 
     if (!call) {
-      res.status(404).json({ error: "Call not found" });
+      sendNotFound(res, "Call not found");
       return;
     }
 
@@ -126,7 +127,7 @@ export function createTranscriptViewerRoutes(prisma: PrismaClient): Router {
 
     const acceptHeader = req.get("Accept") || "";
     if (acceptHeader.includes("application/json")) {
-      res.json({ meta, segments, participants, entity, callTags });
+      sendSuccess(res, { meta, segments, participants, entity, callTags });
       return;
     }
 

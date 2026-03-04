@@ -11,7 +11,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import type { RAGEngine } from "../services/rag-engine.js";
 import { AccountAccessService } from "../services/account-access.js";
-import { sendSuccess, sendUnauthorized, sendForbidden } from "./_shared/responses.js";
+import { sendSuccess, sendUnauthorized, sendForbidden, sendBadRequest } from "./_shared/responses.js";
 import logger from "../lib/logger.js";
 import { asyncHandler } from "../lib/async-handler.js";
 
@@ -91,10 +91,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
 
     const parseResult = QuerySchema.safeParse(req.body);
     if (!parseResult.success) {
-      res.status(400).json({
-        error: "validation_error",
-        details: parseResult.error.issues,
-      });
+      sendBadRequest(res, "validation_error", parseResult.error.issues);
       return;
     }
 
@@ -159,10 +156,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
 
     const parseResult = ChatSchema.safeParse(req.body);
     if (!parseResult.success) {
-      res.status(400).json({
-        error: "validation_error",
-        details: parseResult.error.issues,
-      });
+      sendBadRequest(res, "validation_error", parseResult.error.issues);
       return;
     }
 

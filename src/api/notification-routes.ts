@@ -10,6 +10,7 @@ import type { NotificationService } from "../services/notification-service.js";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import logger from "../lib/logger.js";
+import { sendUnauthorized, sendBadRequest, sendSuccess } from "./_shared/responses.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -38,16 +39,13 @@ export function createNotificationRoutes(
   router.get("/", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { organizationId, userId } = req;
     if (!organizationId || !userId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
     const parseResult = ListQuerySchema.safeParse(req.query);
     if (!parseResult.success) {
-      res.status(400).json({
-        error: "validation_error",
-        details: parseResult.error.issues,
-      });
+      sendBadRequest(res, "validation_error", parseResult.error.issues);
       return;
     }
 
@@ -59,7 +57,7 @@ export function createNotificationRoutes(
       { limit, offset, unreadOnly: unread_only }
     );
 
-    res.json({
+    sendSuccess(res, {
       notifications: result.notifications.map((n) => ({
         id: n.id,
         type: n.type,
@@ -84,7 +82,7 @@ export function createNotificationRoutes(
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const { organizationId, userId } = req;
       if (!organizationId || !userId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
@@ -92,7 +90,7 @@ export function createNotificationRoutes(
         organizationId,
         userId
       );
-      res.json({ unread_count: count });
+      sendSuccess(res, { unread_count: count });
     })
   );
 
@@ -106,13 +104,13 @@ export function createNotificationRoutes(
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const { userId } = req;
       if (!userId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
       const notificationId = req.params.id as string;
       await notificationService.markAsRead(notificationId, userId);
-      res.json({ success: true });
+      sendSuccess(res, { success: true });
     })
   );
 
@@ -126,7 +124,7 @@ export function createNotificationRoutes(
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const { organizationId, userId } = req;
       if (!organizationId || !userId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
@@ -134,7 +132,7 @@ export function createNotificationRoutes(
         organizationId,
         userId
       );
-      res.json({ success: true, marked_read: result.count });
+      sendSuccess(res, { success: true, marked_read: result.count });
     })
   );
 

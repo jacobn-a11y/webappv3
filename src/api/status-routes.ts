@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { asyncHandler } from "../lib/async-handler.js";
+import { sendSuccess } from "./_shared/responses.js";
 
 export function createStatusRoutes(prisma: PrismaClient): Router {
   const router = Router();
@@ -34,7 +35,7 @@ export function createStatusRoutes(prisma: PrismaClient): Router {
     take: 20,
     });
 
-    res.json({
+    sendSuccess(res, {
     incidents: incidents.map((i) => ({
       id: i.id,
       title: i.title,

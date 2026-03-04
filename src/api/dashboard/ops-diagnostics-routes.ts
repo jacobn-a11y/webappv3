@@ -7,6 +7,7 @@ import { decodeDataGovernancePolicy } from "../../types/json-boundaries.js";
 import { parsePaginationParams } from "../_shared/pagination.js";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 import { asyncHandler } from "../../lib/async-handler.js";
+import { sendSuccess } from "../_shared/responses.js";
 
 const REPLAY_AUDIT_ACTIONS = [
   "INTEGRATION_RUN_REPLAY_TRIGGERED",
@@ -152,7 +153,7 @@ export function registerOpsDiagnosticsRoutes({
       })
       );
 
-      res.json({ integrations: runAgg });
+      sendSuccess(res, { integrations: runAgg });
       
     }
   ));
@@ -230,7 +231,7 @@ export function registerOpsDiagnosticsRoutes({
       (i) => i.status === "ERROR" || !!i.lastError
       );
 
-      res.json({
+      sendSuccess(res, {
       timestamp: new Date().toISOString(),
       tenant: {
         organization_id: organizationId,
@@ -347,7 +348,7 @@ export function registerOpsDiagnosticsRoutes({
       });
       }
 
-      res.json({
+      sendSuccess(res, {
       window_hours: 24,
       total_runs: totalRuns,
       failed_runs: failedRuns,
@@ -412,7 +413,7 @@ export function registerOpsDiagnosticsRoutes({
         ];
 
         const degraded = checks.filter((c) => !c.healthy).length;
-        res.json({
+        sendSuccess(res, {
           status: degraded === 0 ? "HEALTHY" : degraded >= 2 ? "CRITICAL" : "DEGRADED",
           checked_at: new Date().toISOString(),
           checks,
@@ -476,7 +477,7 @@ export function registerOpsDiagnosticsRoutes({
       failures: items.reduce((acc, i) => acc + i.failureCount, 0),
       });
 
-      res.json({
+      sendSuccess(res, {
       window_hours: 24,
       sync: summarize(stages.sync),
       backfill: summarize(stages.backfill),
@@ -748,7 +749,7 @@ export function registerOpsDiagnosticsRoutes({
       }))
       .sort((a, b) => b.replay_triggers - a.replay_triggers);
 
-      res.json({
+      sendSuccess(res, {
       window_hours: windowHours,
       filters: {
         provider: providerFilter,
@@ -827,7 +828,7 @@ export function registerOpsDiagnosticsRoutes({
         ? "READY"
         : "AT_RISK";
 
-      res.json({
+      sendSuccess(res, {
       status,
       targets: {
         rto_minutes: rtoTargetMinutes,
@@ -880,7 +881,7 @@ export function registerOpsDiagnosticsRoutes({
       ipAddress: req.ip,
       userAgent: req.get("user-agent"),
       });
-      res.json({ verified: true });
+      sendSuccess(res, { verified: true });
       
     }
   ));
@@ -916,7 +917,7 @@ export function registerOpsDiagnosticsRoutes({
       ipAddress: req.ip,
       userAgent: req.get("user-agent"),
       });
-      res.json({ validated: passed });
+      sendSuccess(res, { validated: passed });
       
     }
   ));

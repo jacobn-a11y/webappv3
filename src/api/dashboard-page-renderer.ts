@@ -16,6 +16,7 @@ import { escapeHtml, escapeAttr } from "../lib/html-utils.js";
 import logger from "../lib/logger.js";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { asyncHandler } from "../lib/async-handler.js";
+import { sendUnauthorized } from "./_shared/responses.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ export function createDashboardPageRoutes(prisma: PrismaClient): Router {
    */
   router.get("/pages", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 

@@ -24,6 +24,7 @@ import {
 } from "../services/account-journey.js";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { asyncHandler } from "../lib/async-handler.js";
+import { sendUnauthorized, sendSuccess } from "./_shared/responses.js";
 
 // ─── Route Factory ────────────────────────────────────────────────────────────
 
@@ -41,7 +42,7 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
    */
   router.get("/:accountId/journey", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
@@ -50,7 +51,7 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
         req.organizationId
       );
 
-      res.json({
+      sendSuccess(res, {
         account: {
           id: data.account.id,
           name: data.account.name,
@@ -122,7 +123,7 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
     "/:accountId/journey/view",
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 

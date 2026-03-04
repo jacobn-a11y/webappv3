@@ -88,7 +88,7 @@ export function createPlatformAdminRoutes(
   router.post("/providers", asyncHandler(async (req: Request, res: Response) => {
     const parse = UpsertPlatformProviderSchema.safeParse(req.body);
     if (!parse.success) {
-      res.status(400).json({ error: "validation_error", details: parse.error.issues });
+      sendBadRequest(res, "validation_error", parse.error.issues);
       return;
     }
 
@@ -109,7 +109,7 @@ export function createPlatformAdminRoutes(
   router.post("/providers/validate", asyncHandler(async (req: Request, res: Response) => {
     const parse = ValidateKeySchema.safeParse(req.body);
     if (!parse.success) {
-      res.status(400).json({ error: "validation_error", details: parse.error.issues });
+      sendBadRequest(res, "validation_error", parse.error.issues);
       return;
     }
 
@@ -146,7 +146,7 @@ export function createPlatformAdminRoutes(
   router.post("/models/pricing", asyncHandler(async (req: Request, res: Response) => {
     const parse = UpsertModelPricingSchema.safeParse(req.body);
     if (!parse.success) {
-      res.status(400).json({ error: "validation_error", details: parse.error.issues });
+      sendBadRequest(res, "validation_error", parse.error.issues);
       return;
     }
 

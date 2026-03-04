@@ -9,6 +9,7 @@ import logger from "../../lib/logger.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 import { asyncHandler } from "../../lib/async-handler.js";
+import { sendSuccess, sendNotFound } from "../_shared/responses.js";
 
 const UpdateSeatLimitSchema = z.object({
   seat_limit: z.number().int().min(1).max(50000),
@@ -65,7 +66,7 @@ export function registerBillingReadinessRoutes({
       ]);
 
       if (!org) {
-      res.status(404).json({ error: "Organization not found" });
+      sendNotFound(res, "Organization not found");
       return;
       }
 
@@ -94,7 +95,7 @@ export function registerBillingReadinessRoutes({
         ? entitlementOverride.seat_limit
         : org.seatLimit;
 
-      res.json({
+      sendSuccess(res, {
       organization: {
         plan: org.plan,
         pricing_model: org.pricingModel,
@@ -170,7 +171,7 @@ export function registerBillingReadinessRoutes({
       ipAddress: req.ip,
       userAgent: req.get("user-agent"),
       });
-      res.json({ updated: true });
+      sendSuccess(res, { updated: true });
       
     }
   ));
@@ -207,7 +208,7 @@ export function registerBillingReadinessRoutes({
       computedMinutes === 0 ? 0 : Number(((delta / computedMinutes) * 100).toFixed(2));
       const status = mismatchPct <= 1 ? "OK" : mismatchPct <= 5 ? "WARN" : "CRITICAL";
 
-      res.json({
+      sendSuccess(res, {
       window_days: 30,
       metered_minutes: meteredMinutes,
       computed_minutes: computedMinutes,

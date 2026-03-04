@@ -17,6 +17,7 @@ import { AccountsListService } from "../services/accounts-list.js";
 import logger from "../lib/logger.js";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { asyncHandler } from "../lib/async-handler.js";
+import { sendUnauthorized, sendBadRequest, sendSuccess } from "./_shared/responses.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -79,15 +80,13 @@ export function createAccountsRoutes(prisma: PrismaClient): Router {
    */
   router.get("/", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
     const parse = AccountListQuerySchema.safeParse(req.query);
     if (!parse.success) {
-      res
-        .status(400)
-        .json({ error: "validation_error", details: parse.error.issues });
+      sendBadRequest(res, "validation_error", parse.error.issues);
       return;
     }
 
@@ -113,7 +112,7 @@ export function createAccountsRoutes(prisma: PrismaClient): Router {
         }
       );
 
-      res.json(result);
+      sendSuccess(res, result);
     
   }));
 
@@ -125,11 +124,11 @@ export function createAccountsRoutes(prisma: PrismaClient): Router {
    */
   router.get("/stages", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
-    res.json({
+    sendSuccess(res, {
       stages: [
         { value: "TOFU", label: "Top of Funnel" },
         { value: "MOFU", label: "Mid-Funnel" },

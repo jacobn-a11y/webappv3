@@ -5,6 +5,7 @@ import logger from "../../lib/logger.js";
 import { parseCRMReportProvider } from "../../services/provider-policy.js";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 import { asyncHandler } from "../../lib/async-handler.js";
+import { sendSuccess, sendBadRequest } from "../_shared/responses.js";
 
 interface RegisterAccountReportingRoutesOptions {
   router: Router;
@@ -44,7 +45,7 @@ export function registerAccountReportingRoutes({
       orderBy: { name: "asc" },
       take: 50,
       });
-      res.json({ accounts });
+      sendSuccess(res, { accounts });
       
     }
   ));
@@ -62,7 +63,7 @@ export function registerAccountReportingRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const provider = parseCRMReportProvider(req.query.provider);
       if (!provider) {
-        res.status(400).json({ error: "Invalid provider. Use SALESFORCE or HUBSPOT." });
+        sendBadRequest(res, "Invalid provider. Use SALESFORCE or HUBSPOT.");
         return;
       }
 
@@ -77,7 +78,7 @@ export function registerAccountReportingRoutes({
           distinct: ["crmReportId"],
           orderBy: { crmReportName: "asc" },
         });
-        res.json({
+        sendSuccess(res, {
           reports: accessRecords.map(
             (r: { crmReportId: string | null; crmReportName: string | null; crmProvider: string | null }) => ({
               id: r.crmReportId,

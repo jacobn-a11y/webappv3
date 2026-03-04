@@ -1,5 +1,5 @@
 import type { Response } from "express";
-import { sendUnauthorized } from "../_shared/responses.js";
+import { sendUnauthorized, sendSuccess, sendNotFound } from "../_shared/responses.js";
 import {
   DEFAULT_MODELS,
   PROVIDER_MODELS,
@@ -34,7 +34,7 @@ export function registerAISettingsUserRoutes({
           ? platformModels
           : platformModels.filter((m) => access.allowedProviders.includes(m.provider));
 
-      res.json({
+      sendSuccess(res, {
         org_providers: orgConfigs.map((config) => ({
           provider: config.provider,
           display_name: config.displayName,
@@ -62,7 +62,7 @@ export function registerAISettingsUserRoutes({
 
       const status = await usageTracker.getLimitStatus(req.organizationId, req.userId);
 
-      res.json({
+      sendSuccess(res, {
         allowed: status.allowed,
         reason: status.reason,
         usage: {
@@ -97,11 +97,11 @@ export function registerAISettingsUserRoutes({
 
       const balance = await usageTracker.getBalance(req.organizationId, req.userId);
       if (!balance) {
-        res.json({ balance: null });
+        sendSuccess(res, { balance: null });
         return;
       }
 
-      res.json({
+      sendSuccess(res, {
         balance: {
           balance_cents: balance.balanceCents,
           lifetime_spent_cents: balance.lifetimeSpentCents,
@@ -128,7 +128,7 @@ export function registerAISettingsUserRoutes({
         req.userId
       );
 
-      res.json({
+      sendSuccess(res, {
         notifications: notifications.map((notice) => ({
           id: notice.id,
           limit_type: notice.limitType,
@@ -154,11 +154,11 @@ export function registerAISettingsUserRoutes({
         req.params.id as string
       );
       if (!acknowledged) {
-        res.status(404).json({ error: "notification_not_found" });
+        sendNotFound(res, "notification_not_found");
         return;
       }
 
-      res.json({ acknowledged: true });
+      sendSuccess(res, { acknowledged: true });
     
   }));
 
@@ -172,7 +172,7 @@ export function registerAISettingsUserRoutes({
         req.organizationId,
         req.userId
       );
-      res.json({ acknowledged: true, count: acknowledgedCount });
+      sendSuccess(res, { acknowledged: true, count: acknowledgedCount });
     
   }));
 }

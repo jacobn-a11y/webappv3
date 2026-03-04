@@ -18,6 +18,7 @@ import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.
 import { decodeDataGovernancePolicy } from "../types/json-boundaries.js";
 import logger from "../lib/logger.js";
 import { asyncHandler } from "../lib/async-handler.js";
+import { sendBadRequest, sendSuccess } from "./_shared/responses.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -130,9 +131,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
     asyncHandler(async (req: Request, res: Response) => {
       const parse = GoogleDocExportSchema.safeParse(req.body);
       if (!parse.success) {
-        res
-          .status(400)
-          .json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
@@ -142,7 +141,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
         parse.data.access_token
       );
 
-      res.json({
+      sendSuccess(res, {
         document_id: result.documentId,
         document_url: result.documentUrl,
       });
@@ -168,9 +167,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
     asyncHandler(async (req: Request, res: Response) => {
       const parse = SlackExportSchema.safeParse(req.body);
       if (!parse.success) {
-        res
-          .status(400)
-          .json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
@@ -180,7 +177,7 @@ export function createExportRoutes(prisma: PrismaClient): Router {
         parse.data.webhook_url
       );
 
-      res.json({ sent: result.ok });
+      sendSuccess(res, { sent: result.ok });
     })
   );
 

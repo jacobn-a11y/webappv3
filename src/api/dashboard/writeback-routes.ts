@@ -9,6 +9,7 @@ import { decodeRequestPayload } from "../../types/json-boundaries.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 import { asyncHandler } from "../../lib/async-handler.js";
+import { sendSuccess, sendNotFound, sendConflict } from "../_shared/responses.js";
 
 const CreateWritebackSchema = z.object({
   provider: z.enum(["SALESFORCE", "HUBSPOT"]).default("SALESFORCE"),
@@ -53,7 +54,7 @@ export function registerWritebackRoutes({
       orderBy: { createdAt: "desc" },
       take: 200,
       });
-      res.json({
+      sendSuccess(res, {
       writebacks: requests.map((r) => ({
         id: r.id,
         status: r.status,
@@ -85,7 +86,7 @@ export function registerWritebackRoutes({
       select: { id: true },
       });
       if (!account) {
-      res.status(404).json({ error: "account_not_found" });
+      sendNotFound(res, "account_not_found");
       return;
       }
       const request = await prisma.approvalRequest.create({
@@ -142,11 +143,11 @@ export function registerWritebackRoutes({
       },
       });
       if (!request) {
-      res.status(404).json({ error: "writeback_request_not_found" });
+      sendNotFound(res, "writeback_request_not_found");
       return;
       }
       if (request.status !== "PENDING") {
-      res.status(409).json({ error: "request_not_pending" });
+      sendConflict(res, "request_not_pending");
       return;
       }
 
@@ -171,7 +172,7 @@ export function registerWritebackRoutes({
         ipAddress: req.ip,
         userAgent: req.get("user-agent"),
       });
-      res.json({ status: "REJECTED" });
+      sendSuccess(res, { status: "REJECTED" });
       return;
       }
 
@@ -229,7 +230,7 @@ export function registerWritebackRoutes({
       ipAddress: req.ip,
       userAgent: req.get("user-agent"),
       });
-      res.json({ status: "COMPLETED" });
+      sendSuccess(res, { status: "COMPLETED" });
       
     }
   ));
@@ -248,7 +249,7 @@ export function registerWritebackRoutes({
       },
       });
       if (!request) {
-      res.status(404).json({ error: "completed_writeback_not_found" });
+      sendNotFound(res, "completed_writeback_not_found");
       return;
       }
       const payload = decodeRequestPayload(request.requestPayload);
@@ -280,7 +281,7 @@ export function registerWritebackRoutes({
       ipAddress: req.ip,
       userAgent: req.get("user-agent"),
       });
-      res.json({ status: "ROLLED_BACK" });
+      sendSuccess(res, { status: "ROLLED_BACK" });
       
     }
   ));

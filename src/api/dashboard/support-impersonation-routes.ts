@@ -7,6 +7,7 @@ import logger from "../../lib/logger.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 import { asyncHandler } from "../../lib/async-handler.js";
+import { sendSuccess, sendCreated, sendUnauthorized, sendForbidden, sendNotFound, sendBadRequest } from "../_shared/responses.js";
 
 const StartSupportImpersonationSchema = z.object({
   target_user_id: z.string().min(1),
@@ -55,12 +56,12 @@ export function registerSupportImpersonationRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       if (!req.organizationId || !req.userId) {
-      res.status(401).json({ error: "authentication_required" });
+      sendUnauthorized(res, "authentication_required");
       return;
       }
       const allowed = await canManageSupportImpersonation(prisma, req);
       if (!allowed) {
-      res.status(403).json({ error: "permission_denied" });
+      sendForbidden(res, "permission_denied");
       return;
       }
 
@@ -75,7 +76,7 @@ export function registerSupportImpersonationRoutes({
       take: 100,
       });
 
-      res.json({
+      sendSuccess(res, {
       sessions: sessions.map((s) => ({
         id: s.id,
         actor_user_id: s.actorUserId,
@@ -109,7 +110,7 @@ export function registerSupportImpersonationRoutes({
       }
 
       if (!req.organizationId || !req.userId) {
-      res.status(401).json({ error: "authentication_required" });
+      sendUnauthorized(res, "authentication_required");
       return;
       }
       if (req.impersonation) {
@@ -121,7 +122,7 @@ export function registerSupportImpersonationRoutes({
       }
       const allowed = await canManageSupportImpersonation(prisma, req);
       if (!allowed) {
-      res.status(403).json({ error: "permission_denied" });
+      sendForbidden(res, "permission_denied");
       return;
       }
 
@@ -133,7 +134,7 @@ export function registerSupportImpersonationRoutes({
       select: { id: true, role: true, email: true },
       });
       if (!target) {
-      res.status(404).json({ error: "target_user_not_found" });
+      sendNotFound(res, "target_user_not_found");
       return;
       }
 
@@ -187,7 +188,7 @@ export function registerSupportImpersonationRoutes({
       userAgent: req.get("user-agent"),
       });
 
-      res.status(201).json({
+      sendCreated(res, {
       id: session.id,
       support_impersonation_token: rawToken,
       actor_user_id: session.actorUserId,
@@ -205,12 +206,12 @@ export function registerSupportImpersonationRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       if (!req.organizationId || !req.userId) {
-      res.status(401).json({ error: "authentication_required" });
+      sendUnauthorized(res, "authentication_required");
       return;
       }
       const allowed = await canManageSupportImpersonation(prisma, req);
       if (!allowed) {
-      res.status(403).json({ error: "permission_denied" });
+      sendForbidden(res, "permission_denied");
       return;
       }
       const sessionId = Array.isArray(req.params.sessionId)
@@ -228,11 +229,11 @@ export function registerSupportImpersonationRoutes({
       },
       });
       if (!existing) {
-      res.status(404).json({ error: "session_not_found" });
+      sendNotFound(res, "session_not_found");
       return;
       }
       if (existing.revokedAt) {
-      res.status(400).json({ error: "session_already_revoked" });
+      sendBadRequest(res, "session_already_revoked");
       return;
       }
 
@@ -258,7 +259,7 @@ export function registerSupportImpersonationRoutes({
       userAgent: req.get("user-agent"),
       });
 
-      res.json({ revoked: true, revoked_at: revokedAt.toISOString() });
+      sendSuccess(res, { revoked: true, revoked_at: revokedAt.toISOString() });
       
     }
   ));

@@ -12,6 +12,7 @@ import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import logger from "../lib/logger.js";
 import { asyncHandler } from "../lib/async-handler.js";
+import { sendSuccess, sendError, sendUnauthorized, sendForbidden, sendBadRequest, sendNotFound } from "./_shared/responses.js";
 
 interface PlatformOwnerRequest extends Request {
   userId?: string;
@@ -37,7 +38,7 @@ export function createPlatformRoutes(prisma: PrismaClient): Router {
 
     const platformOwnerEmail = process.env.PLATFORM_OWNER_EMAIL ?? "";
     if (!platformOwnerEmail) {
-    res.status(500).json({ error: "PLATFORM_OWNER_EMAIL is not configured" });
+    sendError(res, 500, "internal_error", "PLATFORM_OWNER_EMAIL is not configured");
     return;
     }
 
@@ -53,12 +54,12 @@ export function createPlatformRoutes(prisma: PrismaClient): Router {
     }
 
     if (!email) {
-    res.status(401).json({ error: "Authentication required" });
+    sendUnauthorized(res, "Authentication required");
     return;
     }
 
     if (email !== platformOwnerEmail) {
-    res.status(403).json({ error: "Platform owner access required" });
+    sendForbidden(res, "Platform owner access required");
     return;
     }
 
@@ -71,7 +72,7 @@ export function createPlatformRoutes(prisma: PrismaClient): Router {
   router.get("/settings", requirePlatformOwner, asyncHandler(async (_req, res) => {
 
     const settings = await prisma.platformSettings.findFirst();
-    res.json({
+    sendSuccess(res, {
     support_account_email: settings?.supportAccountEmail ?? null,
     support_account_label: settings?.supportAccountLabel ?? "Platform Support",
     });
@@ -106,7 +107,7 @@ export function createPlatformRoutes(prisma: PrismaClient): Router {
         },
       });
 
-    res.json({
+    sendSuccess(res, {
     support_account_email: settings.supportAccountEmail,
     support_account_label: settings.supportAccountLabel,
     });
@@ -191,7 +192,7 @@ export function createPlatformRoutes(prisma: PrismaClient): Router {
     })
     );
 
-    res.json({ tenants });
+    sendSuccess(res, { tenants });
     
   }));
 
@@ -204,14 +205,14 @@ export function createPlatformRoutes(prisma: PrismaClient): Router {
 
       const orgId = pickFirstString(req.params.orgId);
       if (!orgId) {
-      return res.status(400).json({ error: "Invalid organization id" });
+      return sendBadRequest(res, "Invalid organization id");
       }
       const existing = await prisma.tenantDeletionRequest.findUnique({
       where: { organizationId: orgId },
       });
 
       if (!existing || existing.status !== "PENDING_APPROVAL") {
-      return res.status(404).json({ error: "No pending deletion request found" });
+      return sendNotFound(res, "No pending deletion request found");
       }
 
       const scheduledDeleteAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -226,7 +227,7 @@ export function createPlatformRoutes(prisma: PrismaClient): Router {
       },
       });
 
-      res.json({ ok: true, scheduled_delete_at: scheduledDeleteAt.toISOString() });
+      sendSuccess(res, { ok: true, scheduled_delete_at: scheduledDeleteAt.toISOString() });
       
     }
   ));
@@ -238,14 +239,14 @@ export function createPlatformRoutes(prisma: PrismaClient): Router {
 
       const orgId = pickFirstString(req.params.orgId);
       if (!orgId) {
-      return res.status(400).json({ error: "Invalid organization id" });
+      return sendBadRequest(res, "Invalid organization id");
       }
       const existing = await prisma.tenantDeletionRequest.findUnique({
       where: { organizationId: orgId },
       });
 
       if (!existing || existing.status !== "PENDING_APPROVAL") {
-      return res.status(404).json({ error: "No pending deletion request found" });
+      return sendNotFound(res, "No pending deletion request found");
       }
 
       await prisma.tenantDeletionRequest.update({
@@ -257,7 +258,7 @@ export function createPlatformRoutes(prisma: PrismaClient): Router {
       },
       });
 
-      res.json({ ok: true });
+      sendSuccess(res, { ok: true });
       
     }
   ));

@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import type { Response } from "express";
-import { sendUnauthorized, sendError } from "../_shared/responses.js";
+import { sendUnauthorized, sendError, sendSuccess, sendBadRequest, sendNotFound } from "../_shared/responses.js";
 import logger from "../../lib/logger.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import { toProviderCredentials } from "../../integrations/types.js";
@@ -102,7 +102,7 @@ export function registerSetupQuickstartRoutes({
     if (!requireSetupAdmin(req, res)) return;
 
       const status = await buildMvpQuickstartStatus(req.organizationId);
-      res.json(status);
+      sendSuccess(res, status);
     
   }));
 
@@ -113,7 +113,7 @@ export function registerSetupQuickstartRoutes({
     }
     if (!requireSetupAdmin(req, res)) return;
     if (!deps.aiConfigService) {
-      res.status(500).json({ error: "AI config service unavailable" });
+      sendError(res, 500, "internal_error", "AI config service unavailable");
       return;
     }
 
@@ -124,10 +124,7 @@ export function registerSetupQuickstartRoutes({
 
     const gongBundle = parseGongKeyBundle(payload.gong_api_key);
     if (!gongBundle) {
-      res.status(400).json({
-        error:
-          "Invalid Gong API key format. Use `accessKey:accessKeySecret` or `Basic <base64(accessKey:accessKeySecret)>`.",
-      });
+      sendBadRequest(res, "Invalid Gong API key format. Use `accessKey:accessKeySecret` or `Basic <base64(accessKey:accessKeySecret)>`.");
       return;
     }
 
@@ -138,9 +135,7 @@ export function registerSetupQuickstartRoutes({
       });
 
       if (!valid) {
-        res.status(400).json({
-          error: "Gong credentials validation failed. Check your Gong API key.",
-        });
+        sendBadRequest(res, "Gong credentials validation failed. Check your Gong API key.");
         return;
       }
 
@@ -210,7 +205,7 @@ export function registerSetupQuickstartRoutes({
       });
 
       const status = await buildMvpQuickstartStatus(req.organizationId);
-      res.json({ saved: true, status });
+      sendSuccess(res, { saved: true, status });
     
   }));
 
@@ -237,9 +232,7 @@ export function registerSetupQuickstartRoutes({
           },
         });
         if (!config) {
-          res.status(404).json({
-            error: "Gong is not configured yet. Save your Gong key first.",
-          });
+          sendNotFound(res, "Gong is not configured yet. Save your Gong key first.");
           return;
         }
 
@@ -252,7 +245,7 @@ export function registerSetupQuickstartRoutes({
           cachedAccounts.length > 0 && typeof existingIndex.generatedAt === "string";
 
         if (!payload.refresh && hasCachedIndex) {
-          res.json({
+          sendSuccess(res, {
             generated_at: existingIndex.generatedAt,
             total_calls_indexed: Number(existingIndex.totalCallsIndexed ?? 0) || 0,
             accounts: cachedAccounts,
@@ -286,7 +279,7 @@ export function registerSetupQuickstartRoutes({
           data: { settings: nextSettings as Prisma.InputJsonValue },
         });
 
-        res.json({
+        sendSuccess(res, {
           generated_at: indexResult.generatedAt,
           total_calls_indexed: indexResult.totalCallsIndexed,
           accounts: indexResult.accounts,
@@ -320,9 +313,7 @@ export function registerSetupQuickstartRoutes({
           },
         });
         if (!config) {
-          res.status(404).json({
-            error: "Gong is not configured yet. Save your Gong key first.",
-          });
+          sendNotFound(res, "Gong is not configured yet. Save your Gong key first.");
           return;
         }
 
@@ -367,7 +358,7 @@ export function registerSetupQuickstartRoutes({
             });
         }
 
-        res.json({
+        sendSuccess(res, {
           saved: true,
           selected_account_names: selected,
           ingest_started: Boolean(shouldTriggerIngest && deps.syncEngine),

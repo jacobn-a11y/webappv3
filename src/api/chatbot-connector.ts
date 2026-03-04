@@ -13,6 +13,7 @@
 
 import { Router, type Response } from "express";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import { sendUnauthorized } from "./_shared/responses.js";
 
 // ─── Route Factory ──────────────────────────────────────────────────────────
 
@@ -27,7 +28,7 @@ export function createChatbotConnectorRoutes(): Router {
    */
   router.get("/", (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 

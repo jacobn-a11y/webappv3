@@ -7,6 +7,7 @@ import logger from "../../lib/logger.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 import { asyncHandler } from "../../lib/async-handler.js";
+import { sendSuccess, sendNotFound, sendCreated } from "../_shared/responses.js";
 
 const CreateQualityFeedbackSchema = z.object({
   story_id: z.string().min(1),
@@ -102,7 +103,7 @@ export function registerDataQualityRoutes({
 
       const failureDelta = integrationFailuresCurrent - integrationFailuresPrev;
 
-      res.json({
+      sendSuccess(res, {
       stories_total: storyCounts,
       confidence: {
         avg_30d: Math.round(avgCurrent * 1000) / 1000,
@@ -149,7 +150,7 @@ export function registerDataQualityRoutes({
       select: { id: true, title: true, confidenceScore: true, lineageSummary: true },
       });
       if (!story) {
-      res.status(404).json({ error: "Story not found" });
+      sendNotFound(res, "Story not found");
       return;
       }
       const claims = await prisma.storyClaimLineage.findMany({
@@ -160,7 +161,7 @@ export function registerDataQualityRoutes({
       orderBy: { createdAt: "desc" },
       take: 500,
       });
-      res.json({
+      sendSuccess(res, {
       story: {
         id: story.id,
         title: story.title,
@@ -200,7 +201,7 @@ export function registerDataQualityRoutes({
       select: { id: true },
       });
       if (!story) {
-      res.status(404).json({ error: "Story not found" });
+      sendNotFound(res, "Story not found");
       return;
       }
 
@@ -236,7 +237,7 @@ export function registerDataQualityRoutes({
       userAgent: req.get("user-agent"),
       });
 
-      res.status(201).json({
+      sendCreated(res, {
       id: feedback.id,
       status: feedback.status,
       created_at: feedback.createdAt.toISOString(),
@@ -263,7 +264,7 @@ export function registerDataQualityRoutes({
       orderBy: { createdAt: "desc" },
       take: 500,
       });
-      res.json({
+      sendSuccess(res, {
       feedback: rows.map((row) => ({
         id: row.id,
         status: row.status,
@@ -300,7 +301,7 @@ export function registerDataQualityRoutes({
       },
       });
       if (!feedback) {
-      res.status(404).json({ error: "Feedback not found" });
+      sendNotFound(res, "Feedback not found");
       return;
       }
       const updated = await prisma.storyQualityFeedback.update({
@@ -322,7 +323,7 @@ export function registerDataQualityRoutes({
       ipAddress: req.ip,
       userAgent: req.get("user-agent"),
       });
-      res.json({ status: updated.status, updated_at: updated.updatedAt.toISOString() });
+      sendSuccess(res, { status: updated.status, updated_at: updated.updatedAt.toISOString() });
       
     }
   ));

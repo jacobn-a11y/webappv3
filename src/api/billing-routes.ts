@@ -16,6 +16,7 @@ import { isBillingEnabled } from "../middleware/billing.js";
 import { buildPublicAppUrl } from "../lib/public-app-url.js";
 import logger from "../lib/logger.js";
 import { asyncHandler } from "../lib/async-handler.js";
+import { sendUnauthorized, sendNotFound, sendSuccess } from "./_shared/responses.js";
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ export function createBillingRoutes(
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
@@ -46,7 +47,7 @@ export function createBillingRoutes(
         });
 
         if (!org) {
-          res.status(404).json({ error: "Organization not found" });
+          sendNotFound(res, "Organization not found");
           return;
         }
 
@@ -84,7 +85,7 @@ export function createBillingRoutes(
           }
         }
 
-        res.json({ billing });
+        sendSuccess(res, { billing });
       
     }
   ));
@@ -107,7 +108,7 @@ export function createBillingRoutes(
       });
 
       if (!org) {
-      res.status(404).json({ error: "Organization not found" });
+      sendNotFound(res, "Organization not found");
       return;
       }
 
@@ -145,7 +146,7 @@ export function createBillingRoutes(
       const totalSeconds = result._sum.duration ?? 0;
       const totalMinutes = Math.ceil(totalSeconds / 60);
 
-      res.json({
+      sendSuccess(res, {
       usage: {
         period_start: periodStart.toISOString(),
         transcript_minutes: totalMinutes,
@@ -175,7 +176,7 @@ export function createBillingRoutes(
       });
 
       if (!org) {
-      res.status(404).json({ error: "Organization not found" });
+      sendNotFound(res, "Organization not found");
       return;
       }
 
@@ -200,7 +201,7 @@ export function createBillingRoutes(
       return_url: buildPublicAppUrl("/admin/billing"),
       });
 
-      res.json({ portalUrl: session.url });
+      sendSuccess(res, { portalUrl: session.url });
       
     }
   ));

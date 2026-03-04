@@ -16,6 +16,7 @@ import { requirePermission } from "../middleware/permissions.js";
 import logger from "../lib/logger.js";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { asyncHandler } from "../lib/async-handler.js";
+import { sendUnauthorized, sendSuccess, sendBadRequest, sendCreated, sendNotFound } from "./_shared/responses.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
@@ -74,7 +75,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
           orderBy: { createdAt: "desc" },
         });
 
-        res.json({ api_keys: keys.map((k) => ({
+        sendSuccess(res, { api_keys: keys.map((k) => ({
           id: k.id,
           label: k.label,
           key_prefix: k.keyPrefix,
@@ -99,7 +100,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const parse = CreateApiKeySchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
@@ -117,7 +118,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
         });
 
         // Return the full key — this is the only time it's visible
-        res.status(201).json({
+        sendCreated(res, {
           api_key: {
             id: apiKey.id,
             label: apiKey.label,
@@ -153,7 +154,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
       });
 
       if (!apiKey) {
-      res.status(404).json({ error: "API key not found" });
+      sendNotFound(res, "API key not found");
       return;
       }
 
@@ -162,7 +163,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
       data: { revokedAt: new Date() },
       });
 
-      res.json({ revoked: true });
+      sendSuccess(res, { revoked: true });
       
     }
   ));
