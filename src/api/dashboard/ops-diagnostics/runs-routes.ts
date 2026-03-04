@@ -12,6 +12,7 @@ import { parsePaginationParams } from "../../_shared/pagination.js";
 import type { AuthenticatedRequest } from "../../../types/authenticated-request.js";
 import { asyncHandler } from "../../../lib/async-handler.js";
 import { sendSuccess } from "../../_shared/responses.js";
+import type { OpsDiagnosticsService } from "../../../services/ops-diagnostics.js";
 
 // ─── Shared constants & helpers ─────────────────────────────────────────────
 
@@ -84,11 +85,13 @@ function normalizeSourceRunType(
 interface RegisterRunsRoutesOptions {
   router: Router;
   prisma: PrismaClient;
+  service: OpsDiagnosticsService;
 }
 
 export function registerRunsRoutes({
   router,
   prisma,
+  service,
 }: RegisterRunsRoutesOptions): void {
   router.get(
     "/ops/pipeline-status",
@@ -96,39 +99,9 @@ export function registerRunsRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const organizationId = req.organizationId;
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-      const [runs, pendingApprovals, failedBackfills] = await Promise.all([
-      prisma.integrationRun.findMany({
-        where: { organizationId, startedAt: { gte: since } },
-        select: {
-          runType: true,
-          status: true,
-          provider: true,
-          startedAt: true,
-          finishedAt: true,
-          processedCount: true,
-          successCount: true,
-          failureCount: true,
-        },
-        orderBy: { startedAt: "desc" },
-        take: 300,
-      }),
-      prisma.approvalRequest.count({
-        where: {
-          organizationId,
-          status: "PENDING",
-        },
-      }),
-      prisma.integrationRun.count({
-        where: {
-          organizationId,
-          runType: "BACKFILL",
-          status: "FAILED",
-          startedAt: { gte: since },
-        },
-      }),
-      ]);
+      const { runs, pendingApprovals, failedBackfills } =
+        await service.getPipelineStatusData(organizationId);
 
       const stages = {
       sync: runs.filter((r) => r.runType === "SYNC"),
@@ -219,25 +192,13 @@ export function registerRunsRoutes({
       const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
       const logTake = Math.min(limit * 8, 500);
 
-      const replayAuditLogs = await prisma.auditLog.findMany({
-      where: {
+      const replayAuditLogs = await service.getReplayAuditLogs(
         organizationId,
-        category: "INTEGRATION",
-        action: { in: [...REPLAY_AUDIT_ACTIONS] },
-        createdAt: { gte: since },
-        ...(operatorUserId ? { actorUserId: operatorUserId } : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      take: logTake,
-      select: {
-        id: true,
-        createdAt: true,
-        action: true,
-        actorUserId: true,
-        targetId: true,
-        metadata: true,
-      },
-      });
+        since,
+        REPLAY_AUDIT_ACTIONS,
+        operatorUserId,
+        logTake,
+      );
 
       const sourceRunIds = new Set<string>();
       const replayRunIds = new Set<string>();
@@ -250,22 +211,7 @@ export function registerRunsRoutes({
       }
 
       const allRunIds = [...new Set([...sourceRunIds, ...replayRunIds])];
-      const runs =
-      allRunIds.length === 0
-        ? []
-        : await prisma.integrationRun.findMany({
-            where: {
-              organizationId,
-              id: { in: allRunIds },
-            },
-            select: {
-              id: true,
-              provider: true,
-              runType: true,
-              status: true,
-              startedAt: true,
-            },
-          });
+      const runs = await service.getIntegrationRunsByIds(organizationId, allRunIds);
       const runById = new Map(runs.map((run) => [run.id, run] as const));
 
       const replayEvents = replayAuditLogs
@@ -315,21 +261,7 @@ export function registerRunsRoutes({
           .filter((value): value is string => typeof value === "string")
       ),
       ];
-      const operatorUsers =
-      operatorIds.length === 0
-        ? []
-        : await prisma.user.findMany({
-            where: {
-              organizationId,
-              id: { in: operatorIds },
-            },
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              role: true,
-            },
-          });
+      const operatorUsers = await service.getOperatorUsers(organizationId, operatorIds);
       const operatorById = new Map(
       operatorUsers.map((user) => [user.id, user] as const)
       );

@@ -121,10 +121,7 @@ export function registerCrudRoutes({
         return;
       }
 
-      const story = await prisma.story.findFirst({
-        where: { id: story_id, organizationId: req.organizationId },
-        select: { id: true, accountId: true },
-      });
+      const story = await editor.findStoryForOrg(story_id, req.organizationId);
       if (!story) {
         sendNotFound(res, "Story not found");
         return;
@@ -329,9 +326,7 @@ export function registerCrudRoutes({
     requirePermission(prisma, "delete_any"),
     asyncHandler(async (req: AuthReq, res: Response) => {
 
-      const page = await prisma.landingPage.findFirst({
-      where: { id: req.params.pageId as string, organizationId: req.organizationId },
-      });
+      const page = await editor.findPageForOrg(req.params.pageId as string, req.organizationId);
       if (!page) {
       sendNotFound(res, "Landing page not found");
       return;
@@ -346,7 +341,7 @@ export function registerCrudRoutes({
       }
 
       await clearScheduledPublish(page.id);
-      await prisma.landingPage.delete({ where: { id: page.id } });
+      await editor.deletePage(page.id);
       await auditLogs.record({
       organizationId: req.organizationId,
       actorUserId: req.userId,

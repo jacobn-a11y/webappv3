@@ -8,9 +8,9 @@
 import { type Request, type Response, type Router } from "express";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 import { z } from "zod";
-import type { PrismaClient } from "@prisma/client";
 import type { AccountAccessService } from "../../services/account-access.js";
 import type { RoleProfileService } from "../../services/role-profiles.js";
+import type { StoryQueryService } from "../../services/story-query.js";
 import { mapStorySummary } from "../../services/story-mappers.js";
 import { asyncHandler } from "../../lib/async-handler.js";
 import { sendSuccess, sendBadRequest, sendUnauthorized, sendForbidden } from "../_shared/responses.js";
@@ -38,14 +38,14 @@ const StoryLibraryQuerySchema = z.object({
 
 interface RegisterLibraryRoutesOptions {
   router: Router;
-  prisma: PrismaClient;
+  storyQuery: StoryQueryService;
   accessService: AccountAccessService;
   roleProfiles: RoleProfileService;
 }
 
 export function registerLibraryRoutes({
   router,
-  prisma,
+  storyQuery,
   accessService,
   roleProfiles,
 }: RegisterLibraryRoutesOptions): void {
@@ -86,96 +86,15 @@ export function registerLibraryRoutes({
         return;
       }
 
-      const limit = parse.data.limit ?? 25;
-      const page = parse.data.page ?? 1;
-      const where: Record<string, unknown> = {
+      const { stories, totalCount, page, limit } = await storyQuery.getLibrary({
         organizationId,
-      };
-
-      if (accessibleIds !== null) {
-        where.accountId = { in: accessibleIds };
-      }
-
-      if (parse.data.story_type) {
-        where.storyType = parse.data.story_type;
-      }
-
-      if (parse.data.status) {
-        if (parse.data.status === "DRAFT") {
-          where.landingPages = { none: {} };
-        }
-        if (parse.data.status === "PAGE_CREATED") {
-          where.landingPages = { some: { status: "DRAFT" } };
-        }
-        if (parse.data.status === "PUBLISHED") {
-          where.landingPages = { some: { status: "PUBLISHED" } };
-        }
-        if (parse.data.status === "ARCHIVED") {
-          where.landingPages = { some: { status: "ARCHIVED" } };
-        }
-      }
-
-      if (parse.data.search && parse.data.search.trim().length > 0) {
-        const needle = parse.data.search.trim();
-        where.OR = [
-          { title: { contains: needle, mode: "insensitive" } },
-          { markdownBody: { contains: needle, mode: "insensitive" } },
-          { account: { name: { contains: needle, mode: "insensitive" } } },
-          { account: { domain: { contains: needle, mode: "insensitive" } } },
-          {
-            quotes: {
-              some: {
-                quoteText: { contains: needle, mode: "insensitive" },
-              },
-            },
-          },
-          {
-            quotes: {
-              some: {
-                metricValue: { contains: needle, mode: "insensitive" },
-              },
-            },
-          },
-          {
-            quotes: {
-              some: {
-                metricType: { contains: needle, mode: "insensitive" },
-              },
-            },
-          },
-        ];
-      }
-
-      const [totalCount, stories] = await Promise.all([
-        prisma.story.count({ where }),
-        prisma.story.findMany({
-          where,
-          include: {
-            account: {
-              select: {
-                id: true,
-                name: true,
-                domain: true,
-              },
-            },
-            quotes: true,
-            landingPages: {
-              select: {
-                id: true,
-                slug: true,
-                status: true,
-                publishedAt: true,
-                createdAt: true,
-              },
-              orderBy: { createdAt: "desc" },
-              take: 1,
-            },
-          },
-          orderBy: { generatedAt: "desc" },
-          skip: (page - 1) * limit,
-          take: limit,
-        }),
-      ]);
+        accessibleAccountIds: accessibleIds,
+        storyType: parse.data.story_type,
+        status: parse.data.status,
+        search: parse.data.search,
+        page: parse.data.page,
+        limit: parse.data.limit,
+      });
 
       const totalPages = Math.ceil(totalCount / limit);
 
@@ -228,27 +147,10 @@ export function registerLibraryRoutes({
         return;
       }
 
-      const stories = await prisma.story.findMany({
-        where: {
-          accountId: req.params.accountId as string,
-          organizationId,
-        },
-        include: {
-          quotes: true,
-          landingPages: {
-            select: {
-              id: true,
-              slug: true,
-              status: true,
-              publishedAt: true,
-              createdAt: true,
-            },
-            orderBy: { createdAt: "desc" },
-            take: 1,
-          },
-        },
-        orderBy: { generatedAt: "desc" },
-      });
+      const stories = await storyQuery.getStoriesByAccount(
+        req.params.accountId as string,
+        organizationId
+      );
 
       sendSuccess(res, {
         stories: stories.map((s) => mapStorySummary(s)),

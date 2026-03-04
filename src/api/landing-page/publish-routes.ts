@@ -269,15 +269,7 @@ export function registerPublishRoutes({
         }
 
         if (governance.approvalChainEnabled && governance.steps.length > 0) {
-          const pending = await prisma.approvalRequest.findFirst({
-            where: {
-              organizationId: req.organizationId,
-              requestType: "LANDING_PAGE_PUBLISH",
-              targetType: "landing_page",
-              targetId: page.id,
-              status: "PENDING",
-            },
-          });
+          const pending = await editor.findPendingPublishApproval(req.organizationId, page.id);
           if (pending) {
             res.status(409).json({
               error: "approval_already_pending",
@@ -299,16 +291,11 @@ export function registerPublishRoutes({
             current_step_order: governance.steps[0]?.step_order ?? 1,
           };
 
-          const approval = await prisma.approvalRequest.create({
-            data: {
-              organizationId: req.organizationId,
-              requestType: "LANDING_PAGE_PUBLISH",
-              targetType: "landing_page",
-              targetId: page.id,
-              requestedByUserId: req.userId,
-              status: "PENDING",
-              requestPayload: requestPayload as unknown as object,
-            },
+          const approval = await editor.createPublishApprovalRequest({
+            organizationId: req.organizationId,
+            targetId: page.id,
+            requestedByUserId: req.userId,
+            requestPayload: requestPayload as unknown as Record<string, unknown>,
           });
 
           await auditLogs.record({
@@ -556,19 +543,7 @@ export function registerPublishRoutes({
 
       const status = typeof req.query.status === "string" ? req.query.status : "PENDING";
 
-      const rows = await prisma.approvalRequest.findMany({
-      where: {
-        organizationId: req.organizationId,
-        requestType: "LANDING_PAGE_PUBLISH",
-        status,
-      },
-      include: {
-        requestedBy: { select: { id: true, name: true, email: true } },
-        reviewer: { select: { id: true, name: true, email: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-      });
+      const rows = await editor.listPublishApprovalRequests(req.organizationId, status);
 
       sendSuccess(res, {
       approvals: rows.map((r) => ({
@@ -601,13 +576,10 @@ export function registerPublishRoutes({
       }
 
       try {
-        const request = await prisma.approvalRequest.findFirst({
-          where: {
-            id: req.params.requestId as string,
-            organizationId: req.organizationId,
-            requestType: "LANDING_PAGE_PUBLISH",
-          },
-        });
+        const request = await editor.findPublishApprovalRequest(
+          req.params.requestId as string,
+          req.organizationId
+        );
         if (!request) {
           sendNotFound(res, "Publish approval request not found");
           return;
@@ -632,14 +604,11 @@ export function registerPublishRoutes({
         }
 
         if (parse.data.decision === "REJECT") {
-          await prisma.approvalRequest.update({
-            where: { id: request.id },
-            data: {
-              status: "REJECTED",
-              reviewerUserId: req.userId,
-              reviewNotes: parse.data.notes ?? null,
-              reviewedAt: new Date(),
-            },
+          await editor.updateApprovalRequest(request.id, {
+            status: "REJECTED",
+            reviewerUserId: req.userId,
+            reviewNotes: parse.data.notes ?? null,
+            reviewedAt: new Date(),
           });
           await auditLogs.record({
             organizationId: req.organizationId,
@@ -693,11 +662,8 @@ export function registerPublishRoutes({
             approvals,
             current_step_order: nextStepOrder,
           };
-          await prisma.approvalRequest.update({
-            where: { id: request.id },
-            data: {
-              requestPayload: updatedPayload as unknown as object,
-            },
+          await editor.updateApprovalRequest(request.id, {
+            requestPayload: updatedPayload as unknown as Record<string, unknown>,
           });
           sendSuccess(res, {
             status: "PENDING",
@@ -745,18 +711,15 @@ export function registerPublishRoutes({
         });
         await clearScheduledPublish(request.targetId);
 
-        await prisma.approvalRequest.update({
-          where: { id: request.id },
-          data: {
-            status: "APPROVED",
-            reviewerUserId: req.userId,
-            reviewNotes: parse.data.notes ?? null,
-            reviewedAt: new Date(),
-            requestPayload: {
-              ...(payload as unknown as Record<string, unknown>),
-              approvals,
-              current_step_order: currentStepOrder,
-            },
+        await editor.updateApprovalRequest(request.id, {
+          status: "APPROVED",
+          reviewerUserId: req.userId,
+          reviewNotes: parse.data.notes ?? null,
+          reviewedAt: new Date(),
+          requestPayload: {
+            ...(payload as unknown as Record<string, unknown>),
+            approvals,
+            current_step_order: currentStepOrder,
           },
         });
 

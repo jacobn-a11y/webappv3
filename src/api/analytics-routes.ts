@@ -8,7 +8,7 @@
 
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
-import { AnalyticsService, type AnalyticsDashboardData } from "../services/analytics.js";
+import { AnalyticsService, type AnalyticsDashboardData, type RevOpsKpiData } from "../services/analytics.js";
 import { ResponseCache } from "../lib/response-cache.js";
 import { registerApiRoutes } from "./analytics/api-routes.js";
 import { registerDashboardRenderer } from "./analytics/dashboard-renderer.js";

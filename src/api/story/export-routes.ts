@@ -9,9 +9,9 @@ import { type Request, type Response, type Router } from "express";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 import { z } from "zod";
 import { markdownToPdfBuffer, markdownToDocxBuffer, sanitizeFileName } from "../../services/story-exports.js";
-import type { PrismaClient } from "@prisma/client";
 import type { AccountAccessService } from "../../services/account-access.js";
 import type { RoleProfileService } from "../../services/role-profiles.js";
+import type { StoryQueryService } from "../../services/story-query.js";
 import { asyncHandler } from "../../lib/async-handler.js";
 import { sendSuccess, sendBadRequest, sendUnauthorized, sendForbidden, sendNotFound, sendConflict } from "../_shared/responses.js";
 
@@ -25,14 +25,14 @@ const ExportQuerySchema = z.object({
 
 interface RegisterExportRoutesOptions {
   router: Router;
-  prisma: PrismaClient;
+  storyQuery: StoryQueryService;
   accessService: AccountAccessService;
   roleProfiles: RoleProfileService;
 }
 
 export function registerExportRoutes({
   router,
-  prisma,
+  storyQuery,
   accessService,
   roleProfiles,
 }: RegisterExportRoutesOptions): void {
@@ -55,18 +55,7 @@ export function registerExportRoutes({
 
       const [policy, story] = await Promise.all([
         roleProfiles.getEffectivePolicy(organizationId, userId, userRole),
-        prisma.story.findFirst({
-          where: {
-            id: req.params.storyId as string,
-            organizationId,
-          },
-          select: {
-            id: true,
-            accountId: true,
-            title: true,
-            markdownBody: true,
-          },
-        }),
+        storyQuery.getStoryForExport(req.params.storyId as string, organizationId),
       ]);
 
       if (!policy.canAccessAnonymousStories) {
@@ -125,14 +114,7 @@ export function registerExportRoutes({
 
       const [policy, story] = await Promise.all([
         roleProfiles.getEffectivePolicy(organizationId, userId, userRole),
-        prisma.story.findFirst({
-          where: { id: req.params.storyId as string, organizationId },
-          select: {
-            id: true,
-            accountId: true,
-            _count: { select: { landingPages: true } },
-          },
-        }),
+        storyQuery.getStoryForDeletion(req.params.storyId as string, organizationId),
       ]);
 
       if (!policy.canGenerateAnonymousStories) {
@@ -162,7 +144,7 @@ export function registerExportRoutes({
         return;
       }
 
-      await prisma.story.delete({ where: { id: story.id } });
+      await storyQuery.deleteStory(story.id);
       sendSuccess(res, { deleted: true });
 
   }));

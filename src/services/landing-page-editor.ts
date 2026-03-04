@@ -882,6 +882,147 @@ export class LandingPageEditor {
     });
   }
 
+  // ─── Story / Page lookups (used by route-level validation) ────────
+
+  /**
+   * Finds a story by ID scoped to an organization.
+   * Returns null if not found.
+   */
+  async findStoryForOrg(
+    storyId: string,
+    organizationId: string
+  ): Promise<{ id: string; accountId: string } | null> {
+    return this.prisma.story.findFirst({
+      where: { id: storyId, organizationId },
+      select: { id: true, accountId: true },
+    });
+  }
+
+  /**
+   * Finds a landing page by ID scoped to an organization.
+   * Returns null if not found.
+   */
+  async findPageForOrg(
+    pageId: string,
+    organizationId: string
+  ): Promise<{ id: string } | null> {
+    return this.prisma.landingPage.findFirst({
+      where: { id: pageId, organizationId },
+    });
+  }
+
+  /**
+   * Hard-deletes a landing page by ID.
+   */
+  async deletePage(pageId: string): Promise<void> {
+    await this.prisma.landingPage.delete({ where: { id: pageId } });
+  }
+
+  // ─── Approval workflow ──────────────────────────────────────────────
+
+  /**
+   * Finds a pending publish-approval request for a given page.
+   */
+  async findPendingPublishApproval(
+    organizationId: string,
+    pageId: string
+  ): Promise<{ id: string } | null> {
+    return this.prisma.approvalRequest.findFirst({
+      where: {
+        organizationId,
+        requestType: "LANDING_PAGE_PUBLISH",
+        targetType: "landing_page",
+        targetId: pageId,
+        status: "PENDING",
+      },
+    });
+  }
+
+  /**
+   * Creates a new approval request for publishing a landing page.
+   */
+  async createPublishApprovalRequest(data: {
+    organizationId: string;
+    targetId: string;
+    requestedByUserId: string;
+    requestPayload: Record<string, unknown>;
+  }): Promise<{ id: string }> {
+    return this.prisma.approvalRequest.create({
+      data: {
+        organizationId: data.organizationId,
+        requestType: "LANDING_PAGE_PUBLISH",
+        targetType: "landing_page",
+        targetId: data.targetId,
+        requestedByUserId: data.requestedByUserId,
+        status: "PENDING",
+        requestPayload: data.requestPayload as object,
+      },
+    });
+  }
+
+  /**
+   * Lists publish-approval requests for an organization filtered by status.
+   */
+  async listPublishApprovalRequests(
+    organizationId: string,
+    status: string
+  ) {
+    return this.prisma.approvalRequest.findMany({
+      where: {
+        organizationId,
+        requestType: "LANDING_PAGE_PUBLISH",
+        status,
+      },
+      include: {
+        requestedBy: { select: { id: true, name: true, email: true } },
+        reviewer: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+  }
+
+  /**
+   * Finds a publish-approval request by ID scoped to an organization.
+   */
+  async findPublishApprovalRequest(
+    requestId: string,
+    organizationId: string
+  ) {
+    return this.prisma.approvalRequest.findFirst({
+      where: {
+        id: requestId,
+        organizationId,
+        requestType: "LANDING_PAGE_PUBLISH",
+      },
+    });
+  }
+
+  /**
+   * Updates a publish-approval request (approve, reject, advance step).
+   */
+  async updateApprovalRequest(
+    requestId: string,
+    data: {
+      status?: string;
+      reviewerUserId?: string;
+      reviewNotes?: string | null;
+      reviewedAt?: Date;
+      requestPayload?: Record<string, unknown>;
+    }
+  ) {
+    return this.prisma.approvalRequest.update({
+      where: { id: requestId },
+      data: {
+        status: data.status,
+        reviewerUserId: data.reviewerUserId,
+        reviewNotes: data.reviewNotes,
+        reviewedAt: data.reviewedAt,
+        requestPayload: data.requestPayload as object | undefined,
+      },
+    });
+  }
+
   // ─── Private ──────────────────────────────────────────────────────
 
   private async getPagePresentationSettings(organizationId: string): Promise<{

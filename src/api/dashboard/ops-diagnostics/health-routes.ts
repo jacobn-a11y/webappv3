@@ -13,17 +13,20 @@ import { requirePermission } from "../../../middleware/permissions.js";
 import type { AuthenticatedRequest } from "../../../types/authenticated-request.js";
 import { asyncHandler } from "../../../lib/async-handler.js";
 import { sendSuccess } from "../../_shared/responses.js";
+import type { OpsDiagnosticsService } from "../../../services/ops-diagnostics.js";
 
 // ─── Route Registration ─────────────────────────────────────────────────────
 
 interface RegisterHealthRoutesOptions {
   router: Router;
   prisma: PrismaClient;
+  service: OpsDiagnosticsService;
 }
 
 export function registerHealthRoutes({
   router,
   prisma,
+  service,
 }: RegisterHealthRoutesOptions): void {
   router.get(
     "/integrations/health",
@@ -31,66 +34,7 @@ export function registerHealthRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const organizationId = req.organizationId;
-      const configs = await prisma.integrationConfig.findMany({
-      where: { organizationId },
-      select: {
-        id: true,
-        provider: true,
-        enabled: true,
-        status: true,
-        lastSyncAt: true,
-        lastError: true,
-        updatedAt: true,
-      },
-      orderBy: { provider: "asc" },
-      });
-
-      const runAgg = await Promise.all(
-      configs.map(async (c) => {
-        const [lastSuccess, lastFailure, recentRuns] = await Promise.all([
-          prisma.integrationRun.findFirst({
-            where: {
-              organizationId,
-              integrationConfigId: c.id,
-              status: "COMPLETED",
-            },
-            orderBy: { startedAt: "desc" },
-            select: { startedAt: true, finishedAt: true },
-          }),
-          prisma.integrationRun.findFirst({
-            where: {
-              organizationId,
-              integrationConfigId: c.id,
-              status: "FAILED",
-            },
-            orderBy: { startedAt: "desc" },
-            select: { startedAt: true, errorMessage: true },
-          }),
-          prisma.integrationRun.findMany({
-            where: { organizationId, integrationConfigId: c.id },
-            orderBy: { startedAt: "desc" },
-            take: 20,
-            select: { processedCount: true, successCount: true, failureCount: true },
-          }),
-        ]);
-        const throughput = recentRuns.reduce((acc, r) => acc + r.successCount, 0);
-        const failures = recentRuns.reduce((acc, r) => acc + r.failureCount, 0);
-        return {
-          id: c.id,
-          provider: c.provider,
-          enabled: c.enabled,
-          status: c.status,
-          lag_minutes: c.lastSyncAt
-            ? Math.max(0, Math.floor((Date.now() - c.lastSyncAt.getTime()) / 60000))
-            : null,
-          last_success_at: lastSuccess?.startedAt.toISOString() ?? null,
-          last_failure_at: lastFailure?.startedAt.toISOString() ?? null,
-          last_failure_error: lastFailure?.errorMessage ?? c.lastError ?? null,
-          throughput_recent: throughput,
-          failures_recent: failures,
-        };
-      })
-      );
+      const runAgg = await service.getIntegrationHealth(organizationId);
 
       sendSuccess(res, { integrations: runAgg });
 
@@ -104,69 +48,9 @@ export function registerHealthRoutes({
 
       const organizationId = req.organizationId;
 
-      const [
-      integrationConfigs,
-      recentAuditLogs,
-      unresolvedNotifications,
-      recentUsageRecords,
-      storyCount,
-      pageCount,
-      accountCount,
-      callCount,
-      ] = await Promise.all([
-      prisma.integrationConfig.findMany({
-        where: { organizationId },
-        select: {
-          id: true,
-          provider: true,
-          enabled: true,
-          status: true,
-          lastSyncAt: true,
-          lastError: true,
-          updatedAt: true,
-        },
-        orderBy: { provider: "asc" },
-      }),
-      prisma.auditLog.findMany({
-        where: { organizationId },
-        select: {
-          id: true,
-          createdAt: true,
-          category: true,
-          action: true,
-          severity: true,
-        },
-        orderBy: { createdAt: "desc" },
-        take: 25,
-      }),
-      prisma.notification.findMany({
-        where: { organizationId, read: false },
-        select: {
-          id: true,
-          type: true,
-          createdAt: true,
-        },
-        orderBy: { createdAt: "desc" },
-        take: 25,
-      }),
-      prisma.usageRecord.findMany({
-        where: { organizationId },
-        select: {
-          id: true,
-          metric: true,
-          quantity: true,
-          periodStart: true,
-        },
-        orderBy: { periodStart: "desc" },
-        take: 50,
-      }),
-      prisma.story.count({ where: { organizationId } }),
-      prisma.landingPage.count({ where: { organizationId } }),
-      prisma.account.count({ where: { organizationId } }),
-      prisma.call.count({ where: { organizationId } }),
-      ]);
+      const snapshot = await service.getDiagnosticsSnapshot(organizationId);
 
-      const failedIntegrations = integrationConfigs.filter(
+      const failedIntegrations = snapshot.integrationConfigs.filter(
       (i) => i.status === "ERROR" || !!i.lastError
       );
 
@@ -175,17 +59,17 @@ export function registerHealthRoutes({
       tenant: {
         organization_id: organizationId,
         totals: {
-          accounts: accountCount,
-          calls: callCount,
-          stories: storyCount,
-          landing_pages: pageCount,
+          accounts: snapshot.accountCount,
+          calls: snapshot.callCount,
+          stories: snapshot.storyCount,
+          landing_pages: snapshot.pageCount,
         },
       },
       integrations: {
-        total: integrationConfigs.length,
-        enabled: integrationConfigs.filter((i) => i.enabled).length,
+        total: snapshot.integrationConfigs.length,
+        enabled: snapshot.integrationConfigs.filter((i) => i.enabled).length,
         failed: failedIntegrations.length,
-        providers: integrationConfigs.map((i) => ({
+        providers: snapshot.integrationConfigs.map((i) => ({
           id: i.id,
           provider: i.provider,
           enabled: i.enabled,
@@ -196,21 +80,21 @@ export function registerHealthRoutes({
         })),
       },
       alerts: {
-        unresolved_notifications: unresolvedNotifications.map((n) => ({
+        unresolved_notifications: snapshot.unresolvedNotifications.map((n) => ({
           id: n.id,
           type: n.type,
           severity: "INFO",
           created_at: n.createdAt,
         })),
       },
-      recent_audit_events: recentAuditLogs.map((a) => ({
+      recent_audit_events: snapshot.recentAuditLogs.map((a) => ({
         id: a.id,
         created_at: a.createdAt,
         category: a.category,
         action: a.action,
         severity: a.severity,
       })),
-      recent_usage: recentUsageRecords.map((u) => ({
+      recent_usage: snapshot.recentUsageRecords.map((u) => ({
         id: u.id,
         metric: u.metric,
         quantity: u.quantity,
@@ -227,33 +111,8 @@ export function registerHealthRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const organizationId = req.organizationId;
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-      const [runs24h, failedByProvider, configs] = await Promise.all([
-      prisma.integrationRun.findMany({
-        where: { organizationId, startedAt: { gte: since } },
-        select: {
-          status: true,
-          provider: true,
-          failureCount: true,
-          successCount: true,
-        },
-      }),
-      prisma.integrationRun.groupBy({
-        by: ["provider"],
-        where: {
-          organizationId,
-          startedAt: { gte: since },
-          status: "FAILED",
-        },
-        _count: { _all: true },
-        _sum: { failureCount: true },
-      }),
-      prisma.integrationConfig.findMany({
-        where: { organizationId, enabled: true },
-        select: { provider: true, lastSyncAt: true, status: true },
-      }),
-      ]);
+      const { runs24h, failedByProvider, configs } = await service.getQueueSloData(organizationId);
 
       const totalRuns = runs24h.length;
       const failedRuns = runs24h.filter((r) => r.status === "FAILED").length;
@@ -321,15 +180,14 @@ export function registerHealthRoutes({
         }
       };
 
-        const dbCheck = await prisma.$queryRaw`SELECT 1`;
-        void dbCheck;
+        const dbHealthy = await service.checkDatabaseHealth();
         const [openaiReachable, stripeReachable] = await Promise.all([
           timeoutFetch("https://api.openai.com/v1/models", 2500),
           timeoutFetch("https://api.stripe.com/v1/charges", 2500),
         ]);
 
         const checks = [
-          { dependency: "database", healthy: true, detail: "Prisma query succeeded" },
+          { dependency: "database", healthy: dbHealthy, detail: dbHealthy ? "Prisma query succeeded" : "Prisma query failed" },
           {
             dependency: "openai_api",
             healthy: openaiReachable && Boolean(process.env.OPENAI_API_KEY),
