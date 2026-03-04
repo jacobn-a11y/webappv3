@@ -1,5 +1,6 @@
 import { BrowserRouter, useLocation } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/Toast";
 import { Shell } from "./app/Shell";
 import { ensureAccessibleFormLabels } from "./app/Sidebar";
@@ -43,7 +44,9 @@ export function PublicApp() {
         {routeAnnouncement}
       </div>
       <main id="public-main-content" ref={mainRef} tabIndex={-1}>
-        <PublicRoutes />
+        <ErrorBoundary>
+          <PublicRoutes />
+        </ErrorBoundary>
       </main>
     </>
   );

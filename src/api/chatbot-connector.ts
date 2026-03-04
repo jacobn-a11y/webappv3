@@ -13,6 +13,7 @@
 
 import { Router, type Response } from "express";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import { ESCAPE_HTML_SCRIPT } from "../lib/html-utils.js";
 import { sendUnauthorized } from "./_shared/responses.js";
 
 // ─── Route Factory ──────────────────────────────────────────────────────────
@@ -946,20 +947,8 @@ function renderChatPage(organizationId: string): string {
       return msgEl;
     }
 
-    // ─── Utilities ──────────────────────────────────────────────────────────────
-    function escapeHtml(str) {
-      if (!str) return '';
-      return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-    }
-
-    function escapeAttr(str) {
-      return escapeHtml(str);
-    }
+    // ─── Utilities (from shared html-utils) ─────────────────────────────────────
+    ${ESCAPE_HTML_SCRIPT}
 
     // ─── Init ───────────────────────────────────────────────────────────────────
     loadAccounts();

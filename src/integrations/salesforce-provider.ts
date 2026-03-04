@@ -289,10 +289,26 @@ export class SalesforceProvider implements CRMDataProvider {
     const url = `${instanceBase}${nextRecordsUrl}`;
 
     await this.rateLimiter.acquire();
-    const res = await fetchWithTimeout(url, {
+    let res = await fetchWithTimeout(url, {
       method: "GET",
       headers: this.headers(creds),
     });
+
+    if (res.status === 401) {
+      const newToken = await this.refreshAccessToken(creds);
+      if (!newToken) {
+        throw new Error("Salesforce token refresh failed during pagination");
+      }
+      creds.accessToken = newToken;
+      if (this.onTokenRefresh) {
+        await this.onTokenRefresh(newToken);
+      }
+      await this.rateLimiter.acquire();
+      res = await fetchWithTimeout(url, {
+        method: "GET",
+        headers: this.headers(creds),
+      });
+    }
 
     if (!res.ok) {
       const errText = await res.text();

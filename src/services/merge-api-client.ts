@@ -670,7 +670,7 @@ export class MergeApiClient {
 
         // Upsert to avoid dedup race; unique on (accountId, opportunityId, stageName)
         if (!opp.remote_id) return;
-        const stageName = opp.stage ?? null;
+        const stageName = opp.stage ?? "";
         const eventData = {
           accountId: account.id,
           eventType,
@@ -685,7 +685,7 @@ export class MergeApiClient {
             salesforce_event_account_opp_stage: {
               accountId: account.id,
               opportunityId: opp.remote_id,
-              stageName,
+              stageName: stageName,
             },
           },
           create: eventData,
