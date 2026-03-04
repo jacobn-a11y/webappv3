@@ -156,15 +156,15 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
             />
           )}
 
-          <div className="story-library__pagination">
-            <button type="button" className="btn btn--secondary" disabled={lib.page <= 1} onClick={() => lib.setPage((prev) => Math.max(1, prev - 1))}>
+          <nav className="story-library__pagination" aria-label="Story library pagination">
+            <button type="button" className="btn btn--secondary" disabled={lib.page <= 1} onClick={() => lib.setPage((prev) => Math.max(1, prev - 1))} aria-label="Previous page">
               Previous
             </button>
-            <span>Page {lib.page} of {Math.max(lib.totalPages, 1)}</span>
-            <button type="button" className="btn btn--secondary" disabled={lib.page >= lib.totalPages} onClick={() => lib.setPage((prev) => prev + 1)}>
+            <span aria-current="page">Page {lib.page} of {Math.max(lib.totalPages, 1)}</span>
+            <button type="button" className="btn btn--secondary" disabled={lib.page >= lib.totalPages} onClick={() => lib.setPage((prev) => prev + 1)} aria-label="Next page">
               Next
             </button>
-          </div>
+          </nav>
         </>
       )}
 
@@ -186,7 +186,7 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
                 <h2 className="story-library__comments-title">Feedback Thread</h2>
                 <p className="story-library__comments-subtitle">{lib.commentStory.title}</p>
               </div>
-              <button type="button" className="btn btn--ghost btn--sm" onClick={lib.closeCommentThread}>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={lib.closeCommentThread} aria-label="Close feedback thread">
                 Close
               </button>
             </div>

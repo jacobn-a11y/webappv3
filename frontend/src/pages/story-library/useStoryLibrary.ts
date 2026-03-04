@@ -39,9 +39,9 @@ export const STORY_STATUS_HINTS: Record<StoryLibraryItem["story_status"], string
 
 export const STORY_STATUS_BADGES: Record<StoryLibraryItem["story_status"], string> = {
   DRAFT: "badge--draft",
-  IN_REVIEW: "badge--warning",
-  APPROVED: "badge--success",
-  PUBLISHED: "badge--success",
+  IN_REVIEW: "badge--in-review",
+  APPROVED: "badge--approved",
+  PUBLISHED: "badge--published",
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

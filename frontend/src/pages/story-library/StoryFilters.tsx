@@ -61,18 +61,24 @@ export function StoryFilters({
         placeholder="Search by title, account, or content"
         aria-label="Search story library"
       />
-      <select
-        className="form-field__input"
-        value={searchMode}
-        onChange={(event) => {
-          setSearchMode(event.target.value as "keyword" | "semantic");
-          setPage(1);
-        }}
-        aria-label="Search mode"
-      >
-        <option value="keyword">Keyword Search</option>
-        <option value="semantic">Semantic Search</option>
-      </select>
+      <div className="story-library__search-mode" role="group" aria-label="Search mode">
+        <button
+          type="button"
+          className={`story-library__search-mode-btn ${searchMode === "keyword" ? "story-library__search-mode-btn--active" : ""}`}
+          onClick={() => { setSearchMode("keyword"); setPage(1); }}
+          aria-pressed={searchMode === "keyword"}
+        >
+          Keyword
+        </button>
+        <button
+          type="button"
+          className={`story-library__search-mode-btn ${searchMode === "semantic" ? "story-library__search-mode-btn--active" : ""}`}
+          onClick={() => { setSearchMode("semantic"); setPage(1); }}
+          aria-pressed={searchMode === "semantic"}
+        >
+          Semantic
+        </button>
+      </div>
       <select
         className="form-field__input"
         value={storyType}
@@ -158,6 +164,7 @@ export function StoryFilters({
           type="button"
           className={`btn btn--sm ${viewMode === "cards" ? "btn--primary" : "btn--secondary"}`}
           onClick={() => setViewMode("cards")}
+          aria-pressed={viewMode === "cards"}
         >
           Seller Cards
         </button>
@@ -165,6 +172,7 @@ export function StoryFilters({
           type="button"
           className={`btn btn--sm ${viewMode === "table" ? "btn--primary" : "btn--secondary"}`}
           onClick={() => setViewMode("table")}
+          aria-pressed={viewMode === "table"}
         >
           Bulk Table
         </button>

@@ -157,7 +157,7 @@ export function PublishModal({
     try {
       const result = await publishPage(pageId, publishBody);
       if (result.queued_for_approval) {
-        setPublishError(`Publish queued for approval${result.request_id ? ` (request ${result.request_id})` : ""}.`);
+        setPublishError(`Your publish request has been queued for approval${result.request_id ? ` (request ${result.request_id})` : ""}. You can track its status in My Queue > My Requests.`);
         onPublished();
         return;
       }
@@ -374,12 +374,12 @@ export function PublishModal({
               </div>
             </div>
 
-            {publishError && <div className="page-editor__publish-error">{publishError}</div>}
+            {publishError && <div className="page-editor__publish-error" role="alert">{publishError}</div>}
           </div>
         ) : (
-          <div className="page-editor__publish-success">
-            <h3>Published!</h3>
-            <p>Your landing page is live. Share the URL below.</p>
+          <div className="page-editor__publish-success" role="status" aria-live="polite">
+            <h3>Published Successfully</h3>
+            <p>Your landing page is now live and publicly accessible. Share the URL below.</p>
             <div className="page-editor__url-copy-group">
               <input type="text" className="page-editor__url-input" value={publishedUrl} readOnly />
               <button type="button" className="page-editor__btn page-editor__btn--primary page-editor__btn--sm" onClick={handleCopyUrl}>
@@ -391,7 +391,14 @@ export function PublishModal({
 
         {!isSuccessState && (
           <div className="page-editor__modal-footer">
-            <div className="page-editor__modal-footer-left">Review the scrub preview before publishing.</div>
+            <div className="page-editor__modal-footer-left">
+              <span>Review the scrub preview before publishing.</span>
+              <span className="page-editor__policy-hint" role="status">
+                {canPublishNamed
+                  ? "Your organization's approval policy may require approval before this page goes live."
+                  : "Based on your approval policy, this publish may be queued for review."}
+              </span>
+            </div>
             <div className="page-editor__modal-footer-right">
               <button type="button" className="page-editor__btn page-editor__btn--secondary" onClick={onClose}>Cancel</button>
               <button type="button" className="page-editor__btn page-editor__btn--secondary" onClick={() => void handleSchedulePublish()} disabled={publishing || scheduling || previewLoading}>
