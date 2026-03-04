@@ -4,17 +4,16 @@
  * Owns:
  *   - story stats (word count / reading time)
  *   - safe-to-share indicator
- *   - packaging templates (executive recap, champion forward, ROI proof)
  *   - regenerate-variant handler
- *   - copy-packaging-template handler
+ *   - delegates publish actions to useStoryPublishFlow (StoryPublishStep)
  *   - delegates rendering to StoryPreviewSection from StoryModalSections
  */
 
 import { useCallback, useMemo } from "react";
 import { StoryPreviewSection } from "./StoryModalSections";
-import { usePublishFlow } from "./usePublishFlow";
+import { useStoryPublishFlow } from "./StoryPublishStep";
 import type { Dispatch, SetStateAction } from "react";
-import type { BuildStoryResponse, StoryQuote } from "../../lib/api";
+import type { BuildStoryResponse } from "../../lib/api";
 import type { StoryVisibilityMode } from "./StoryFormStep";
 import type {
   FunnelStage,
@@ -27,13 +26,6 @@ import type {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export interface PackagingTemplate {
-  id: "executive_recap" | "champion_forward" | "roi_proof";
-  label: string;
-  description: string;
-  body: string;
-}
-
 export interface StoryPreviewStepProps {
   accountName: string;
   editMode: boolean;
@@ -42,6 +34,7 @@ export interface StoryPreviewStepProps {
   namedPermissionConfirmed: boolean;
   onClose: () => void;
   onLandingPageCreated?: (pageId: string, slug: string) => void;
+  onShareAction?: () => void;
   previewMarkdown: string;
   result: BuildStoryResponse;
   setEditMode: Dispatch<SetStateAction<boolean>>;
@@ -83,84 +76,6 @@ function countWords(markdown: string): number {
     .filter(Boolean).length;
 }
 
-function stripMarkdown(markdown: string): string {
-  return markdown
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`[^`]*`/g, " ")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/[>#*_~-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function extractSummarySentences(markdown: string, max = 4): string[] {
-  const plain = stripMarkdown(markdown);
-  return plain
-    .split(/(?<=[.!?])\s+/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 18)
-    .slice(0, max);
-}
-
-function buildPackagingTemplates(input: {
-  accountName: string;
-  markdown: string;
-  quotes: StoryQuote[];
-  stageLabel: string;
-  visibilityMode: StoryVisibilityMode;
-}): PackagingTemplate[] {
-  const subject =
-    input.visibilityMode === "NAMED" ? input.accountName : "the customer";
-  const summary = extractSummarySentences(input.markdown, 5);
-  const topQuote = input.quotes[0]?.quote_text ?? "No quote available.";
-  const metricQuote = input.quotes.find((quote) => !!quote.metric_value);
-  const metricLine = metricQuote?.metric_value
-    ? `${metricQuote.metric_value}${metricQuote.metric_type ? ` (${metricQuote.metric_type})` : ""}`
-    : "No quantified metric captured.";
-
-  return [
-    {
-      id: "executive_recap",
-      label: "Executive Recap",
-      description: "Tight readout for leadership and deal sponsors.",
-      body: [
-        `Executive Recap (${input.stageLabel})`,
-        `Account: ${subject}`,
-        "",
-        ...summary.slice(0, 3).map((line) => `- ${line}`),
-      ].join("\n"),
-    },
-    {
-      id: "champion_forward",
-      label: "Champion Forward",
-      description: "Forwardable package for your internal champion.",
-      body: [
-        `Champion Forward (${input.stageLabel})`,
-        `Account: ${subject}`,
-        "",
-        "Proof quote:",
-        `"${topQuote}"`,
-        "",
-        "Recommended next step:",
-        summary[3] ?? summary[0] ?? "Align this evidence to current stakeholder objections.",
-      ].join("\n"),
-    },
-    {
-      id: "roi_proof",
-      label: "ROI Proof",
-      description: "Metric-first package for procurement and finance.",
-      body: [
-        `ROI Proof (${input.stageLabel})`,
-        `Account: ${subject}`,
-        "",
-        `Primary KPI: ${metricLine}`,
-        "",
-        ...summary.slice(0, 2).map((line) => `- ${line}`),
-      ].join("\n"),
-    },
-  ];
-}
-
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function StoryPreviewStep(props: StoryPreviewStepProps) {
@@ -171,6 +86,7 @@ export function StoryPreviewStep(props: StoryPreviewStepProps) {
     handleBackToForm,
     namedPermissionConfirmed,
     onLandingPageCreated,
+    onShareAction,
     previewMarkdown,
     result,
     setEditMode,
@@ -235,48 +151,33 @@ export function StoryPreviewStep(props: StoryPreviewStepProps) {
     };
   }, [namedPermissionConfirmed, result, visibilityMode]);
 
-  const packagingTemplates = useMemo(
-    () =>
-      buildPackagingTemplates({
-        accountName,
-        markdown: previewMarkdown,
-        quotes: result.quotes,
-        stageLabel,
-        visibilityMode,
-      }),
-    [accountName, previewMarkdown, result, stageLabel, visibilityMode],
-  );
-
   // ── Publish flow ─────────────────────────────────────────────────────────
 
   const {
     copyFeedback,
     creatingPage,
     exportingFormat,
+    handleCopyPackagingTemplate,
     handleCopyToClipboard,
     handleCreateLandingPage,
     handleDownloadExport,
     handleDownloadMarkdown,
-  } = usePublishFlow({
+    packagingTemplates,
+  } = useStoryPublishFlow({
     accountName,
-    includeCompanyName: visibilityMode === "NAMED",
-    namedModeConfirmed: namedPermissionConfirmed,
+    flowOpenedAt,
+    namedPermissionConfirmed,
     onError: (message) => {
       setError(message);
       setPhase("error");
     },
-    onPackagingAction: (actionName, metadata) => {
-      trackSellerEvent("share_action", {
-        action_name: actionName,
-        step: "preview_package",
-        story_id: result.story_id ?? undefined,
-        duration_ms: Date.now() - flowOpenedAt,
-        metadata,
-      });
-    },
     onLandingPageCreated,
+    onShareAction,
     previewMarkdown,
     result,
+    stageLabel,
+    trackSellerEvent,
+    visibilityMode,
   });
 
   // ── Handlers ─────────────────────────────────────────────────────────────
@@ -314,36 +215,6 @@ export function StoryPreviewStep(props: StoryPreviewStepProps) {
       });
     },
     [trackSellerEvent, triggerGeneration],
-  );
-
-  const handleCopyPackagingTemplate = useCallback(
-    async (templateId: PackagingTemplate["id"]) => {
-      const template = packagingTemplates.find(
-        (entry) => entry.id === templateId,
-      );
-      if (!template) {
-        return;
-      }
-      try {
-        await navigator.clipboard.writeText(template.body);
-      } catch {
-        const textarea = document.createElement("textarea");
-        textarea.value = template.body;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
-      trackSellerEvent("share_action", {
-        action_name: `copy_package_${templateId}`,
-        step: "preview_package_templates",
-        story_id: result.story_id ?? undefined,
-        duration_ms: Date.now() - flowOpenedAt,
-      });
-    },
-    [flowOpenedAt, packagingTemplates, result.story_id, trackSellerEvent],
   );
 
   // ── Render ───────────────────────────────────────────────────────────────

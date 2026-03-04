@@ -1,38 +1,45 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Chart, registerables } from "chart.js";
+/**
+ * AnalyticsDashboardPage — Layout shell, filter state, data fetching.
+ * Sub-components decomposed into ./analytics/
+ */
+
+import { useState, useEffect } from "react";
 import {
   getAnalyticsData,
   getRevOpsKpis,
   type AnalyticsData,
   type RevOpsKpiData,
 } from "../lib/api";
+import { SummaryCards } from "./analytics/SummaryCards";
+import { RevOpsKPIs } from "./analytics/RevOpsKPIs";
+import {
+  CallsPerWeekChart,
+  FunnelDonutChart,
+  TopAccountsChart,
+  ResolutionChart,
+  PageViewsChart,
+  TaxonomyTreemap,
+  QuoteLeaderboardTable,
+  TopPagesTable,
+} from "./analytics/AnalyticsCharts";
 
-Chart.register(...registerables);
+// Re-export sub-components for backward compatibility
+export { SummaryCards, SummaryCard } from "./analytics/SummaryCards";
+export type { SummaryCardsProps } from "./analytics/SummaryCards";
+export { RevOpsKPIs } from "./analytics/RevOpsKPIs";
+export type { RevOpsKPIsProps } from "./analytics/RevOpsKPIs";
+export {
+  CallsPerWeekChart,
+  FunnelDonutChart,
+  TopAccountsChart,
+  ResolutionChart,
+  PageViewsChart,
+  TaxonomyTreemap,
+  QuoteLeaderboardTable,
+  TopPagesTable,
+} from "./analytics/AnalyticsCharts";
 
-// ─── Color Palette ──────────────────────────────────────────────────────────
-
-const PALETTE = [
-  "#336FE6",
-  "#8B5CF6",
-  "#3B82F6",
-  "#10B981",
-  "#F59E0B",
-  "#EF4444",
-  "#06B6D4",
-  "#336FE6",
-  "#EA580C",
-  "#14B8A6",
-  "#A78BFA",
-  "#F87171",
-];
-
-const FUNNEL_COLORS: Record<string, string> = {
-  "Top of Funnel": "#3B82F6",
-  "Mid-Funnel": "#8B5CF6",
-  "Bottom of Funnel": "#10B981",
-  "Post-Sale": "#F59E0B",
-  Internal: "#8A888E",
-};
+// ─── Filter Options ─────────────────────────────────────────────────────────
 
 const SEGMENT_OPTIONS = [
   { value: "ALL", label: "All Segments" },
@@ -61,80 +68,19 @@ interface SavedAnalyticsView {
 
 const SAVED_ANALYTICS_VIEWS_KEY = "storyengine.analytics.savedViews.v1";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function formatNumber(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toLocaleString();
-}
-
-function formatHours(h: number): string {
-  return `${h.toFixed(1)}h`;
-}
-
-function formatPercent(p: number): string {
-  return `${(p * 100).toFixed(1)}%`;
-}
-
-function formatShortDate(dateStr: string): string {
-  const d = new Date(dateStr);
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${months[d.getMonth()]} ${d.getDate()}`;
-}
-
-// ─── Chart Hook ─────────────────────────────────────────────────────────────
-
-function useChart(
-  builder: (ctx: CanvasRenderingContext2D) => Chart
-) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const chartRef = useRef<Chart | null>(null);
-
-  useEffect(() => {
-    if (!canvasRef.current) return;
-    const ctx = canvasRef.current.getContext("2d");
-    if (!ctx) return;
-
-    // Destroy previous instance
-    if (chartRef.current) {
-      chartRef.current.destroy();
-      chartRef.current = null;
-    }
-
-    chartRef.current = builder(ctx);
-
-    return () => {
-      if (chartRef.current) {
-        chartRef.current.destroy();
-        chartRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [builder]);
-
-  return canvasRef;
-}
-
 function loadSavedAnalyticsViews(): SavedAnalyticsView[] {
-  if (typeof window === "undefined") {
-    return [];
-  }
+  if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(SAVED_ANALYTICS_VIEWS_KEY);
-    if (!raw) {
-      return [];
-    }
+    if (!raw) return [];
     const parsed = JSON.parse(raw) as SavedAnalyticsView[];
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
+    if (!Array.isArray(parsed)) return [];
     return parsed.filter(
       (view) =>
         typeof view.id === "string" &&
         typeof view.name === "string" &&
-        SEGMENT_OPTIONS.some((segment) => segment.value === view.segment) &&
-        FOCUS_OPTIONS.some((focus) => focus.value === view.focus)
+        SEGMENT_OPTIONS.some((s) => s.value === view.segment) &&
+        FOCUS_OPTIONS.some((f) => f.value === view.focus)
     );
   } catch {
     return [];
@@ -142,9 +88,7 @@ function loadSavedAnalyticsViews(): SavedAnalyticsView[] {
 }
 
 function persistSavedAnalyticsViews(views: SavedAnalyticsView[]): void {
-  if (typeof window === "undefined") {
-    return;
-  }
+  if (typeof window === "undefined") return;
   window.localStorage.setItem(SAVED_ANALYTICS_VIEWS_KEY, JSON.stringify(views));
 }
 
@@ -177,6 +121,8 @@ export function AnalyticsDashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  // ── Derived state ───────────────────────────────────────────────────────
+
   const segmentTopics =
     data && segment !== "ALL"
       ? data.topTopics.filter((topic) => topic.funnelStage === segment)
@@ -192,18 +138,13 @@ export function AnalyticsDashboardPage() {
   const showContentSections = focus === "ALL" || focus === "CONTENT";
   const showAdoptionSections = focus === "ALL" || focus === "ADOPTION";
 
+  // ── Saved view handlers ─────────────────────────────────────────────────
+
   const saveCurrentView = () => {
     const name = window.prompt("Saved view name");
-    if (!name || !name.trim()) {
-      return;
-    }
+    if (!name || !name.trim()) return;
     const next: SavedAnalyticsView[] = [
-      {
-        id: `${Date.now()}`,
-        name: name.trim(),
-        segment,
-        focus,
-      },
+      { id: `${Date.now()}`, name: name.trim(), segment, focus },
       ...savedViews,
     ].slice(0, 10);
     setSavedViews(next);
@@ -212,9 +153,7 @@ export function AnalyticsDashboardPage() {
 
   const applySavedView = (viewId: string) => {
     const view = savedViews.find((item) => item.id === viewId);
-    if (!view) {
-      return;
-    }
+    if (!view) return;
     setSegment(view.segment);
     setFocus(view.focus);
   };
@@ -224,6 +163,8 @@ export function AnalyticsDashboardPage() {
     setSavedViews(next);
     persistSavedAnalyticsViews(next);
   };
+
+  // ── Loading / Error ─────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -241,6 +182,8 @@ export function AnalyticsDashboardPage() {
       </div>
     );
   }
+
+  // ── Render ──────────────────────────────────────────────────────────────
 
   return (
     <div className="analytics__container">
@@ -285,9 +228,7 @@ export function AnalyticsDashboardPage() {
             className="form-input"
             value=""
             onChange={(event) => {
-              if (event.target.value) {
-                applySavedView(event.target.value);
-              }
+              if (event.target.value) applySavedView(event.target.value);
             }}
             aria-label="Load saved analytics view"
           >
@@ -327,583 +268,75 @@ export function AnalyticsDashboardPage() {
       )}
 
       {/* Summary Cards */}
-      <div className="analytics__summary-grid">
-        <SummaryCard
-          title="Total Calls"
-          value={formatNumber(data.summary.totalCalls)}
-          icon={
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#336FE6" strokeWidth="2" aria-hidden="true">
-              <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" />
-            </svg>
-          }
-        />
-        <SummaryCard
-          title="Accounts"
-          value={formatNumber(data.summary.totalAccounts)}
-          icon={
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" strokeWidth="2" aria-hidden="true">
-              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
-            </svg>
-          }
-        />
-        <SummaryCard
-          title="Transcript Hours"
-          value={formatHours(data.summary.totalTranscriptHours)}
-          icon={
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2" aria-hidden="true">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M12 6v6l4 2" />
-            </svg>
-          }
-        />
-        <SummaryCard
-          title="Resolution Rate"
-          value={formatPercent(data.summary.overallResolutionRate)}
-          icon={
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2" aria-hidden="true">
-              <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-              <path d="M22 4L12 14.01l-3-3" />
-            </svg>
-          }
-        />
-        <SummaryCard
-          title="Quantified Quotes"
-          value={formatNumber(data.summary.totalQuotes)}
-          icon={
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2" aria-hidden="true">
-              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-            </svg>
-          }
-        />
-        <SummaryCard
-          title="Page Views"
-          value={formatNumber(data.summary.totalPageViews)}
-          icon={
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" aria-hidden="true">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-          }
-        />
-        {segment !== "ALL" && (
-          <SummaryCard
-            title={`${segment} Calls`}
-            value={`${formatNumber(segmentVolume)}${segmentSharePct != null ? ` (${segmentSharePct}%)` : ""}`}
-            icon={
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#14B8A6" strokeWidth="2" aria-hidden="true">
-                <path d="M3 12h18" />
-                <path d="M3 6h18" />
-                <path d="M3 18h18" />
-              </svg>
-            }
-          />
-        )}
-      </div>
+      <SummaryCards
+        data={data}
+        segment={segment}
+        segmentVolume={segmentVolume}
+        segmentSharePct={segmentSharePct}
+      />
 
-      {kpis && showPipelineSections && (
-        <div className="analytics__section">
-          <h3 className="analytics__section-title">RevOps KPI Package (Last {kpis.window_days} Days)</h3>
-          <div className="analytics__summary-grid">
-            <SummaryCard
-              title="Pipeline Influence"
-              value={`${kpis.pipeline_influence.influence_rate_percent}%`}
-              icon={<span />}
-            />
-            <SummaryCard
-              title="Win Rate"
-              value={`${kpis.win_loss.win_rate_percent}%`}
-              icon={<span />}
-            />
-            <SummaryCard
-              title="Competitor Mentions"
-              value={formatNumber(kpis.competitor_mentions.transcript_level_competitor_mentions)}
-              icon={<span />}
-            />
-            <SummaryCard
-              title="Objection Mentions"
-              value={formatNumber(kpis.persona_objections.transcript_level_objection_mentions)}
-              icon={<span />}
-            />
-          </div>
-          <div className="analytics__tables-row">
-            <div className="analytics__table-card">
-              <h3 className="analytics__table-title">Attribution Links</h3>
-              <table className="pages-table">
-                <tbody>
-                  <tr><td>Linked Calls</td><td className="views">{kpis.attribution_links.linked_calls}</td></tr>
-                  <tr><td>Linked Stories</td><td className="views">{kpis.attribution_links.linked_stories}</td></tr>
-                  <tr><td>Opportunity Events</td><td className="views">{kpis.attribution_links.linked_opportunity_events}</td></tr>
-                  <tr><td>Campaign Links</td><td className="views">{kpis.attribution_links.linked_campaigns}</td></tr>
-                </tbody>
-              </table>
-              <p className="analytics__note">{kpis.attribution_links.note}</p>
-            </div>
-            <div className="analytics__table-card">
-              <h3 className="analytics__table-title">Executive Summary</h3>
-              <ul>
-                {kpis.executive_summary.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* RevOps KPIs */}
+      {kpis && showPipelineSections && <RevOpsKPIs kpis={kpis} />}
 
       {/* Charts Row 1 */}
       {showPipelineSections && (
-      <div className="analytics__charts-row">
-        <div className="analytics__chart-card">
-          <h3 className="analytics__chart-title">Calls Per Week</h3>
-          <CallsPerWeekChart data={data} />
+        <div className="analytics__charts-row">
+          <div className="analytics__chart-card">
+            <h3 className="analytics__chart-title">Calls Per Week</h3>
+            <CallsPerWeekChart data={data} />
+          </div>
+          <div className="analytics__chart-card">
+            <h3 className="analytics__chart-title">Funnel Stage Distribution</h3>
+            <FunnelDonutChart data={data} />
+          </div>
         </div>
-        <div className="analytics__chart-card">
-          <h3 className="analytics__chart-title">Funnel Stage Distribution</h3>
-          <FunnelDonutChart data={data} />
-        </div>
-      </div>
       )}
 
       {/* Charts Row 2 */}
       {showPipelineSections && (
-      <div className="analytics__charts-row">
-        <div className="analytics__chart-card">
-          <h3 className="analytics__chart-title">
-            Top 10 Accounts by Call Volume
-          </h3>
-          <TopAccountsChart data={data} />
+        <div className="analytics__charts-row">
+          <div className="analytics__chart-card">
+            <h3 className="analytics__chart-title">Top 10 Accounts by Call Volume</h3>
+            <TopAccountsChart data={data} />
+          </div>
+          <div className="analytics__chart-card">
+            <h3 className="analytics__chart-title">Entity Resolution Success Rate</h3>
+            <ResolutionChart data={data} />
+          </div>
         </div>
-        <div className="analytics__chart-card">
-          <h3 className="analytics__chart-title">
-            Entity Resolution Success Rate
-          </h3>
-          <ResolutionChart data={data} />
-        </div>
-      </div>
       )}
 
       {/* Charts Row 3 */}
       {showAdoptionSections && (
-      <div className="analytics__charts-row analytics__charts-row--full">
-        <div className="analytics__chart-card">
-          <h3 className="analytics__chart-title">
-            Landing Page Views Over Time
-          </h3>
-          <PageViewsChart data={data} />
+        <div className="analytics__charts-row analytics__charts-row--full">
+          <div className="analytics__chart-card">
+            <h3 className="analytics__chart-title">Landing Page Views Over Time</h3>
+            <PageViewsChart data={data} />
+          </div>
         </div>
-      </div>
       )}
 
       {/* Taxonomy Topics Treemap */}
       {showContentSections && (
-      <div className="analytics__section">
-        <h3 className="analytics__section-title">Taxonomy Topics</h3>
-        <TaxonomyTreemap topics={segmentTopics} />
-      </div>
+        <div className="analytics__section">
+          <h3 className="analytics__section-title">Taxonomy Topics</h3>
+          <TaxonomyTreemap topics={segmentTopics} />
+        </div>
       )}
 
       {/* Tables Row */}
       {showContentSections && (
-      <div className="analytics__tables-row">
-        <div className="analytics__table-card">
-          <h3 className="analytics__table-title">Quote Leaderboard</h3>
-          <QuoteLeaderboardTable entries={data.quoteLeaderboard} />
-        </div>
-        <div className="analytics__table-card">
-          <h3 className="analytics__table-title">Top Pages by Views</h3>
-          <TopPagesTable pages={data.topPagesByViews} />
-        </div>
-      </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Summary Card ───────────────────────────────────────────────────────────
-
-function SummaryCard({
-  title,
-  value,
-  icon,
-}: {
-  title: string;
-  value: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div className="analytics__summary-card">
-      <div className="analytics__summary-icon">{icon}</div>
-      <div className="analytics__summary-content">
-        <span className="analytics__summary-value">{value}</span>
-        <span className="analytics__summary-label">{title}</span>
-      </div>
-    </div>
-  );
-}
-
-// ─── Calls Per Week (Bar Chart) ─────────────────────────────────────────────
-
-function CallsPerWeekChart({ data }: { data: AnalyticsData }) {
-  const builder = useCallback(
-    (ctx: CanvasRenderingContext2D) =>
-      new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels: data.callsPerWeek.map((d) => formatShortDate(d.weekStart)),
-          datasets: [
-            {
-              label: "Calls",
-              data: data.callsPerWeek.map((d) => d.count),
-              backgroundColor: PALETTE[0],
-              borderRadius: 4,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              backgroundColor: "#121213",
-            },
-          },
-          scales: {
-            x: {
-              grid: { display: false },
-              ticks: { color: "#8A888E" },
-            },
-            y: {
-              beginAtZero: true,
-              grid: { color: "rgba(46,45,47,0.4)", lineWidth: 0.5 },
-              ticks: { color: "#8A888E" },
-            },
-          },
-        },
-      }),
-    [data.callsPerWeek]
-  );
-
-  const canvasRef = useChart(builder);
-  return (
-    <div className="analytics__chart-wrapper">
-      <canvas ref={canvasRef} role="img" aria-label="Bar chart showing the number of calls per week" />
-    </div>
-  );
-}
-
-// ─── Funnel Stage Distribution (Donut Chart) ───────────────────────────────
-
-function FunnelDonutChart({ data }: { data: AnalyticsData }) {
-  const builder = useCallback(
-    (ctx: CanvasRenderingContext2D) =>
-      new Chart(ctx, {
-        type: "doughnut",
-        data: {
-          labels: data.funnelDistribution.map((d) => d.stage),
-          datasets: [
-            {
-              data: data.funnelDistribution.map((d) => d.count),
-              backgroundColor: data.funnelDistribution.map(
-                (d) => FUNNEL_COLORS[d.stage] ?? "#8A888E"
-              ),
-              borderWidth: 2,
-              borderColor: "#121213",
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          cutout: "60%",
-          plugins: {
-            legend: {
-              position: "bottom",
-              labels: { padding: 16, usePointStyle: true, color: "#B8B6BD" },
-            },
-            tooltip: {
-              backgroundColor: "#121213",
-            },
-          },
-        },
-      }),
-    [data.funnelDistribution]
-  );
-
-  const canvasRef = useChart(builder);
-  return (
-    <div className="analytics__chart-wrapper">
-      <canvas ref={canvasRef} role="img" aria-label="Donut chart showing funnel stage distribution" />
-    </div>
-  );
-}
-
-// ─── Top 10 Accounts (Horizontal Bar) ──────────────────────────────────────
-
-function TopAccountsChart({ data }: { data: AnalyticsData }) {
-  const builder = useCallback(
-    (ctx: CanvasRenderingContext2D) =>
-      new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels: data.topAccounts.map((d) => d.accountName),
-          datasets: [
-            {
-              label: "Calls",
-              data: data.topAccounts.map((d) => d.callCount),
-              backgroundColor: PALETTE.slice(0, data.topAccounts.length),
-              borderRadius: 4,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          indexAxis: "y",
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              backgroundColor: "#121213",
-            },
-          },
-          scales: {
-            x: {
-              beginAtZero: true,
-              grid: { color: "rgba(46,45,47,0.4)", lineWidth: 0.5 },
-              ticks: { color: "#8A888E" },
-            },
-            y: {
-              grid: { display: false },
-              ticks: { color: "#8A888E" },
-            },
-          },
-        },
-      }),
-    [data.topAccounts]
-  );
-
-  const canvasRef = useChart(builder);
-  return (
-    <div className="analytics__chart-wrapper analytics__chart-wrapper--tall">
-      <canvas ref={canvasRef} role="img" aria-label="Horizontal bar chart showing top 10 accounts by call volume" />
-    </div>
-  );
-}
-
-// ─── Entity Resolution Over Time (Line Chart) ──────────────────────────────
-
-function ResolutionChart({ data }: { data: AnalyticsData }) {
-  const builder = useCallback(
-    (ctx: CanvasRenderingContext2D) =>
-      new Chart(ctx, {
-        type: "line",
-        data: {
-          labels: data.entityResolutionOverTime.map((d) => formatShortDate(d.weekStart)),
-          datasets: [
-            {
-              label: "Resolution Rate",
-              data: data.entityResolutionOverTime.map((d) => d.rate * 100),
-              borderColor: PALETTE[3],
-              backgroundColor: `${PALETTE[3]}20`,
-              fill: true,
-              tension: 0.4,
-              pointRadius: 3,
-              pointHoverRadius: 6,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              backgroundColor: "#121213",
-              callbacks: {
-                label: (ctx) => `${(ctx.parsed?.y ?? 0).toFixed(1)}%`,
-              },
-            },
-          },
-          scales: {
-            x: {
-              grid: { display: false },
-              ticks: { color: "#8A888E" },
-            },
-            y: {
-              beginAtZero: true,
-              max: 100,
-              grid: { color: "rgba(46,45,47,0.4)", lineWidth: 0.5 },
-              ticks: { color: "#8A888E", callback: (v) => `${v}%` },
-            },
-          },
-        },
-      }),
-    [data.entityResolutionOverTime]
-  );
-
-  const canvasRef = useChart(builder);
-  return (
-    <div className="analytics__chart-wrapper">
-      <canvas ref={canvasRef} role="img" aria-label="Line chart showing entity resolution success rate over time" />
-    </div>
-  );
-}
-
-// ─── Landing Page Views Over Time (Bar + Line Combo) ────────────────────────
-
-function PageViewsChart({ data }: { data: AnalyticsData }) {
-  const builder = useCallback(
-    (ctx: CanvasRenderingContext2D) =>
-      new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels: data.viewsOverTime.map((d) => formatShortDate(d.weekStart)),
-          datasets: [
-            {
-              type: "bar" as const,
-              label: "Total Views",
-              data: data.viewsOverTime.map((d) => d.totalViews),
-              backgroundColor: `${PALETTE[2]}80`,
-              borderRadius: 4,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              backgroundColor: "#121213",
-            },
-          },
-          scales: {
-            x: {
-              grid: { display: false },
-              ticks: { color: "#8A888E" },
-            },
-            y: {
-              beginAtZero: true,
-              grid: { color: "rgba(46,45,47,0.4)", lineWidth: 0.5 },
-              ticks: { color: "#8A888E" },
-            },
-          },
-        },
-      }),
-    [data.viewsOverTime]
-  );
-
-  const canvasRef = useChart(builder);
-  return (
-    <div className="analytics__chart-wrapper">
-      <canvas ref={canvasRef} role="img" aria-label="Bar chart showing landing page views over time" />
-    </div>
-  );
-}
-
-// ─── Taxonomy Topics Treemap (CSS Grid) ─────────────────────────────────────
-
-function TaxonomyTreemap({
-  topics,
-}: {
-  topics: AnalyticsData["topTopics"];
-}) {
-  const maxCount = Math.max(...topics.map((t) => t.count), 1);
-
-  return (
-    <div className="analytics__treemap">
-      {topics.map((topic, i) => {
-        const shade = Math.max(0.2, topic.count / maxCount);
-        const bgColor = FUNNEL_COLORS[topic.funnelStage] ?? PALETTE[i % PALETTE.length];
-        return (
-          <div
-            key={topic.label}
-            className="analytics__treemap-cell"
-            style={{
-              backgroundColor: bgColor,
-              opacity: shade,
-              gridColumn: topic.count > maxCount * 0.5 ? "span 2" : undefined,
-            }}
-            title={`${topic.label}: ${topic.count} (${topic.funnelStage})`}
-          >
-            <span className="analytics__treemap-label">{topic.label}</span>
-            <span className="analytics__treemap-count">{topic.count}</span>
+        <div className="analytics__tables-row">
+          <div className="analytics__table-card">
+            <h3 className="analytics__table-title">Quote Leaderboard</h3>
+            <QuoteLeaderboardTable entries={data.quoteLeaderboard} />
           </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── Quote Leaderboard Table ────────────────────────────────────────────────
-
-function QuoteLeaderboardTable({
-  entries,
-}: {
-  entries: AnalyticsData["quoteLeaderboard"];
-}) {
-  return (
-    <div className="analytics__table-wrapper">
-      <table className="analytics__table">
-        <thead>
-          <tr>
-            <th className="analytics__th">#</th>
-            <th className="analytics__th">Account</th>
-            <th className="analytics__th">Quotes</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((entry, i) => (
-            <tr key={`${entry.accountName}-${i}`} className="analytics__tr">
-              <td className="analytics__td analytics__td--rank">{i + 1}</td>
-              <td className="analytics__td">{entry.accountName}</td>
-              <td className="analytics__td analytics__td--count">
-                {entry.quoteCount}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ─── Top Pages Table ────────────────────────────────────────────────────────
-
-function TopPagesTable({
-  pages,
-}: {
-  pages: AnalyticsData["topPagesByViews"];
-}) {
-  return (
-    <div className="analytics__table-wrapper">
-      <table className="analytics__table">
-        <thead>
-          <tr>
-            <th className="analytics__th">#</th>
-            <th className="analytics__th">Page</th>
-            <th className="analytics__th">Views</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pages.map((page, i) => (
-            <tr key={page.slug} className="analytics__tr">
-              <td className="analytics__td analytics__td--rank">{i + 1}</td>
-              <td className="analytics__td">
-                <div className="analytics__page-info">
-                  <span className="analytics__page-title">{page.title}</span>
-                  <span className="analytics__page-path">{page.slug}</span>
-                </div>
-              </td>
-              <td className="analytics__td analytics__td--count">
-                {formatNumber(page.viewCount)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          <div className="analytics__table-card">
+            <h3 className="analytics__table-title">Top Pages by Views</h3>
+            <TopPagesTable pages={data.topPagesByViews} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
