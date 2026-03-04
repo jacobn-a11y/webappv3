@@ -77,7 +77,7 @@ export function createGongWebhookHandler(deps: { prisma: PrismaClient; processin
     const validConfigs = gongConfigs.filter(
       (c: { webhookSecret: string | null }) => c.webhookSecret
     );
-    if (validConfigs.length === 0) {
+    if (validConfigs.length !== gongConfigs.length) {
       res.status(500).json({
         error: "All active Gong integrations must configure webhookSecret",
       });

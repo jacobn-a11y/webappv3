@@ -19,7 +19,14 @@ import { AccountMergeService } from "../services/account-merge.js";
 import { requirePermission } from "../middleware/permissions.js";
 import logger from "../lib/logger.js";
 import { asyncHandler } from "../lib/async-handler.js";
-import { sendSuccess, sendBadRequest, sendUnauthorized, sendNotFound, sendConflict, sendError } from "./_shared/responses.js";
+import {
+  sendSuccess,
+  sendBadRequest,
+  sendUnauthorized,
+  sendNotFound,
+  sendConflict,
+  sendError,
+} from "./_shared/responses.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -62,22 +69,19 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
         return;
       }
 
-        const candidates = await mergeService.findDuplicates(
-          req.organizationId!
-        );
+      const candidates = await mergeService.findDuplicates(req.organizationId!);
 
-        sendSuccess(res, {
-          duplicates: candidates.map((c) => ({
-            account_a: c.accountA,
-            account_b: c.accountB,
-            similarity: c.similarity,
-            match_reason: c.matchReason,
-          })),
-          total: candidates.length,
-        });
-      
-    }
-  ));
+      sendSuccess(res, {
+        duplicates: candidates.map((c) => ({
+          account_a: c.accountA,
+          account_b: c.accountB,
+          similarity: c.similarity,
+          match_reason: c.matchReason,
+        })),
+        total: candidates.length,
+      });
+    })
+  );
 
   /**
    * GET /api/accounts/merge/preview?primary_account_id=...&secondary_account_id=...
@@ -103,7 +107,11 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
       });
 
       if (!parse.success) {
-        sendBadRequest(res, "Both primary_account_id and secondary_account_id query params are required", parse.error.issues);
+        sendBadRequest(
+          res,
+          "Both primary_account_id and secondary_account_id query params are required",
+          parse.error.issues
+        );
         return;
       }
 
@@ -132,8 +140,8 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
         logger.error("Merge preview error", { error: err });
         sendError(res, 500, "internal_error", "Failed to load merge preview");
       }
-    }
-  ));
+    })
+  );
 
   /**
    * POST /api/accounts/merge
@@ -194,8 +202,8 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
         logger.error("Merge request error", { error: err });
         sendError(res, 500, "internal_error", "Failed to create merge approval request");
       }
-    }
-  ));
+    })
+  );
 
   router.get(
     "/merge/requests",
@@ -207,25 +215,21 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
       }
       const status = typeof req.query.status === "string" ? req.query.status : "PENDING";
 
-      const rows = await mergeService.listMergeRequests(
-      req.organizationId!,
-      status
-      );
+      const rows = await mergeService.listMergeRequests(req.organizationId!, status);
       sendSuccess(res, {
-      requests: rows.map((r) => ({
-        id: r.id,
-        status: r.status,
-        target_id: r.targetId,
-        request_payload: r.requestPayload,
-        requested_by: r.requestedBy,
-        reviewer: r.reviewer,
-        created_at: r.createdAt.toISOString(),
-        reviewed_at: r.reviewedAt?.toISOString() ?? null,
-      })),
+        requests: rows.map((r) => ({
+          id: r.id,
+          status: r.status,
+          target_id: r.targetId,
+          request_payload: r.requestPayload,
+          requested_by: r.requestedBy,
+          reviewer: r.reviewer,
+          created_at: r.createdAt.toISOString(),
+          reviewed_at: r.reviewedAt?.toISOString() ?? null,
+        })),
       });
-      
-    }
-  ));
+    })
+  );
 
   router.post(
     "/merge/requests/:requestId/review",
@@ -257,18 +261,15 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
         }
 
         if (parse.data.decision === "REJECT") {
-          await mergeService.rejectMergeRequest(
-            request.id,
-            req.userId!,
-            parse.data.notes ?? null
-          );
+          await mergeService.rejectMergeRequest(request.id, req.userId!, parse.data.notes ?? null);
           sendSuccess(res, { status: "REJECTED" });
           return;
         }
 
+        const rawPayload: unknown = request.requestPayload;
         const payload =
-          request.requestPayload && typeof request.requestPayload === "object"
-            ? (request.requestPayload as unknown as {
+          rawPayload && typeof rawPayload === "object"
+            ? (rawPayload as {
                 primary_account_id: string;
                 secondary_account_id: string;
                 notes?: string | null;
@@ -287,11 +288,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
           payload.notes ?? undefined
         );
 
-        await mergeService.approveMergeRequest(
-          request.id,
-          req.userId!,
-          parse.data.notes ?? null
-        );
+        await mergeService.approveMergeRequest(request.id, req.userId!, parse.data.notes ?? null);
 
         sendSuccess(res, {
           status: "APPROVED",
@@ -309,8 +306,8 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
         logger.error("Review merge request error", { error: err });
         sendError(res, 500, "internal_error", "Failed to review merge request");
       }
-    }
-  ));
+    })
+  );
 
   router.post(
     "/merge",
@@ -363,8 +360,8 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
         logger.error("Merge execution error", { error: err });
         sendError(res, 500, "internal_error", "Failed to merge accounts");
       }
-    }
-  ));
+    })
+  );
 
   router.get(
     "/merge/runs",
@@ -377,24 +374,23 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
 
       const runs = await mergeService.listMergeRuns(req.organizationId!);
       sendSuccess(res, {
-      runs: runs.map((run) => ({
-        id: run.id,
-        primary_account_id: run.primaryAccountId,
-        secondary_account_id: run.secondaryAccountId,
-        status: run.status,
-        created_at: run.createdAt.toISOString(),
-        undone_at: run.undoneAt?.toISOString() ?? null,
-        moved_counts: {
-          contacts: run.movedCounts.contacts,
-          calls: run.movedCounts.calls,
-          stories: run.movedCounts.stories,
-          landing_pages: run.movedCounts.landingPages,
-        },
-      })),
+        runs: runs.map((run) => ({
+          id: run.id,
+          primary_account_id: run.primaryAccountId,
+          secondary_account_id: run.secondaryAccountId,
+          status: run.status,
+          created_at: run.createdAt.toISOString(),
+          undone_at: run.undoneAt?.toISOString() ?? null,
+          moved_counts: {
+            contacts: run.movedCounts.contacts,
+            calls: run.movedCounts.calls,
+            stories: run.movedCounts.stories,
+            landing_pages: run.movedCounts.landingPages,
+          },
+        })),
       });
-      
-    }
-  ));
+    })
+  );
 
   router.post(
     "/merge/runs/:runId/undo",
@@ -429,8 +425,8 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
         logger.error("Undo merge run error", { error: err });
         sendError(res, 500, "internal_error", "Failed to undo merge run");
       }
-    }
-  ));
+    })
+  );
 
   return router;
 }
@@ -450,7 +446,13 @@ function formatAccountPreview(preview: {
   storyCount: number;
   landingPageCount: number;
   contacts: Array<{ id: string; name: string | null; email: string; title: string | null }>;
-  calls: Array<{ id: string; title: string | null; provider: string; occurredAt: Date; duration: number | null }>;
+  calls: Array<{
+    id: string;
+    title: string | null;
+    provider: string;
+    occurredAt: Date;
+    duration: number | null;
+  }>;
   stories: Array<{ id: string; title: string; storyType: string; generatedAt: Date }>;
   landingPages: Array<{ id: string; title: string; slug: string; status: string }>;
 }) {

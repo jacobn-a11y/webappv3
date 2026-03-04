@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   compareApprovalRecency,
   pickLatestApproval,
@@ -62,7 +62,7 @@ export class LifecycleStageService {
     }
 
     const approvals = await this.prisma.approvalRequest.findMany({
-      where: approvalWhere as any,
+      where: approvalWhere as Prisma.ApprovalRequestWhereInput,
       select: {
         id: true,
         status: true,
@@ -73,23 +73,15 @@ export class LifecycleStageService {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
 
-    const latestByStory = new Map<
-      string,
-      { id: string; status: string; createdAt: Date }
-    >();
+    const latestByStory = new Map<string, { id: string; status: string; createdAt: Date }>();
     for (const approval of approvals) {
       const storyId =
-        approval.targetType === "story"
-          ? approval.targetId
-          : pageToStory.get(approval.targetId);
+        approval.targetType === "story" ? approval.targetId : pageToStory.get(approval.targetId);
       if (!storyId) {
         continue;
       }
       const existing = latestByStory.get(storyId);
-      if (
-        !existing ||
-        compareApprovalRecency(approval, existing) < 0
-      ) {
+      if (!existing || compareApprovalRecency(approval, existing) < 0) {
         latestByStory.set(storyId, {
           id: approval.id,
           status: approval.status,
@@ -137,10 +129,7 @@ export class LifecycleStageService {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
 
-    const grouped = new Map<
-      string,
-      Array<{ id: string; status: string; createdAt: Date }>
-    >();
+    const grouped = new Map<string, Array<{ id: string; status: string; createdAt: Date }>>();
     for (const approval of approvals) {
       const arr = grouped.get(approval.targetId) ?? [];
       arr.push({
