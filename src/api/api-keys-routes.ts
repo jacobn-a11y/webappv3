@@ -55,14 +55,14 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
     "/",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
         const keys = await prisma.apiKey.findMany({
           where: {
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
             revokedAt: null,
           },
           select: {
@@ -110,7 +110,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
 
         const apiKey = await prisma.apiKey.create({
           data: {
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
             label: parse.data.label,
             keyHash,
             keyPrefix,
@@ -148,7 +148,7 @@ export function createApiKeysRoutes(prisma: PrismaClient): Router {
       const apiKey = await prisma.apiKey.findFirst({
       where: {
         id: req.params.keyId as string,
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         revokedAt: null,
       },
       });

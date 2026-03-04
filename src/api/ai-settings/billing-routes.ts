@@ -16,13 +16,13 @@ export function registerAISettingsBillingRoutes({
     "/admin/balances",
     requirePermission(prisma, "manage_ai_settings"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
         const balances = await prisma.userAIBalance.findMany({
-          where: { organizationId: req.organizationId },
+          where: { organizationId: req.organizationId! },
           include: {
             user: { select: { id: true, name: true, email: true } },
           },
@@ -52,13 +52,13 @@ export function registerAISettingsBillingRoutes({
         return;
       }
 
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
         await usageTracker.addBalance(
-          req.organizationId,
+          req.organizationId!,
           payload.user_id,
           payload.amount_cents,
           payload.description
@@ -73,13 +73,13 @@ export function registerAISettingsBillingRoutes({
     "/admin/balances/:userId",
     requirePermission(prisma, "manage_ai_settings"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
         const balance = await usageTracker.getBalance(
-          req.organizationId,
+          req.organizationId!,
           req.params.userId as string
         );
 

@@ -19,7 +19,7 @@ export function createAnalyticsRoutes(prisma: PrismaClient): Router {
   const router = Router();
   const analytics = new AnalyticsService(prisma);
   const analyticsCache = new ResponseCache<AnalyticsDashboardData>(30_000);
-  const revopsKpiCache = new ResponseCache<Record<string, unknown>>(30_000);
+  const revopsKpiCache = new ResponseCache<RevOpsKpiData>(30_000);
 
   registerApiRoutes({ router, prisma, analytics, analyticsCache, revopsKpiCache });
   registerDashboardRenderer({ router, analytics, analyticsCache });

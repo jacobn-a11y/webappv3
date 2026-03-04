@@ -20,7 +20,7 @@ export function registerTenantSupportRoutes({
 
     const platformSettings = await prisma.platformSettings.findFirst();
     const optOut = await prisma.tenantSupportOptOut.findUnique({
-    where: { organizationId: req.organizationId },
+    where: { organizationId: req.organizationId! },
     });
     sendSuccess(res, {
     email: platformSettings?.supportAccountEmail ?? null,
@@ -36,13 +36,13 @@ export function registerTenantSupportRoutes({
     return sendForbidden(res, "Only account owner or admin can manage support access");
     }
     await prisma.tenantSupportOptOut.upsert({
-    where: { organizationId: req.organizationId },
+    where: { organizationId: req.organizationId! },
     create: {
-      organizationId: req.organizationId,
-      optedOutById: req.userId,
+      organizationId: req.organizationId!,
+      optedOutById: req.userId!,
     },
     update: {
-      optedOutById: req.userId,
+      optedOutById: req.userId!,
       optedOutAt: new Date(),
     },
     });
@@ -56,7 +56,7 @@ export function registerTenantSupportRoutes({
     return sendForbidden(res, "Only account owner or admin can manage support access");
     }
     await prisma.tenantSupportOptOut.deleteMany({
-    where: { organizationId: req.organizationId },
+    where: { organizationId: req.organizationId! },
     });
     sendSuccess(res, { ok: true });
     
@@ -70,7 +70,7 @@ export function registerTenantSupportRoutes({
     return sendForbidden(res, "Only the account owner can request account deletion");
     }
     const existing = await prisma.tenantDeletionRequest.findUnique({
-    where: { organizationId: req.organizationId },
+    where: { organizationId: req.organizationId! },
     });
     if (existing && (existing.status === "PENDING_APPROVAL" || existing.status === "APPROVED")) {
     return sendConflict(res, "A deletion request is already pending");
@@ -85,8 +85,8 @@ export function registerTenantSupportRoutes({
     const scheduledDeleteAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     await prisma.tenantDeletionRequest.create({
     data: {
-      organizationId: req.organizationId,
-      requestedById: req.userId,
+      organizationId: req.organizationId!,
+      requestedById: req.userId!,
       reason,
       status: "PENDING_APPROVAL",
       scheduledDeleteAt,
@@ -104,7 +104,7 @@ export function registerTenantSupportRoutes({
     return sendForbidden(res, "Only the account owner can cancel deletion");
     }
     const existing = await prisma.tenantDeletionRequest.findUnique({
-    where: { organizationId: req.organizationId },
+    where: { organizationId: req.organizationId! },
     });
     if (!existing || (existing.status !== "PENDING_APPROVAL" && existing.status !== "APPROVED")) {
     return sendNotFound(res, "No active deletion request found");
@@ -114,7 +114,7 @@ export function registerTenantSupportRoutes({
     data: {
       status: "CANCELLED",
       cancelledAt: new Date(),
-      cancelledById: req.userId,
+      cancelledById: req.userId!,
     },
     });
     sendSuccess(res, { ok: true });
@@ -124,7 +124,7 @@ export function registerTenantSupportRoutes({
   router.get("/account/deletion-status", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
     const existing = await prisma.tenantDeletionRequest.findUnique({
-    where: { organizationId: req.organizationId },
+    where: { organizationId: req.organizationId! },
     });
     if (!existing || existing.status === "CANCELLED" || existing.status === "COMPLETED") {
     return sendSuccess(res, { has_request: false, status: null, scheduled_delete_at: null, created_at: null });

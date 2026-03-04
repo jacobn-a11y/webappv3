@@ -95,19 +95,19 @@ export function registerSetupQuickstartRoutes({
   };
 
   router.get("/mvp/quickstart", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
-      const status = await buildMvpQuickstartStatus(req.organizationId);
+      const status = await buildMvpQuickstartStatus(req.organizationId!);
       sendSuccess(res, status);
     
   }));
 
   router.post("/mvp/quickstart", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
@@ -142,7 +142,7 @@ export function registerSetupQuickstartRoutes({
       const existing = await prisma.integrationConfig.findUnique({
         where: {
           organizationId_provider: {
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
             provider: "GONG",
           },
         },
@@ -153,12 +153,12 @@ export function registerSetupQuickstartRoutes({
       await prisma.integrationConfig.upsert({
         where: {
           organizationId_provider: {
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
             provider: "GONG",
           },
         },
         create: {
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           provider: "GONG",
           enabled: true,
           status: "ACTIVE",
@@ -183,7 +183,7 @@ export function registerSetupQuickstartRoutes({
         },
       });
 
-      await deps.aiConfigService.upsertOrgConfig(req.organizationId, {
+      await deps.aiConfigService.upsertOrgConfig(req.organizationId!, {
         provider: "openai",
         apiKey: payload.openai_api_key,
         displayName: "OpenAI",
@@ -192,9 +192,9 @@ export function registerSetupQuickstartRoutes({
       });
 
       await prisma.orgAISettings.upsert({
-        where: { organizationId: req.organizationId },
+        where: { organizationId: req.organizationId! },
         create: {
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           defaultProvider: "openai",
           defaultModel: "gpt-4o",
         },
@@ -204,7 +204,7 @@ export function registerSetupQuickstartRoutes({
         },
       });
 
-      const status = await buildMvpQuickstartStatus(req.organizationId);
+      const status = await buildMvpQuickstartStatus(req.organizationId!);
       sendSuccess(res, { saved: true, status });
     
   }));
@@ -212,7 +212,7 @@ export function registerSetupQuickstartRoutes({
   router.post(
     "/mvp/quickstart/gong/accounts/index",
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
@@ -226,7 +226,7 @@ export function registerSetupQuickstartRoutes({
         const config = await prisma.integrationConfig.findUnique({
           where: {
             organizationId_provider: {
-              organizationId: req.organizationId,
+              organizationId: req.organizationId!,
               provider: "GONG",
             },
           },
@@ -293,7 +293,7 @@ export function registerSetupQuickstartRoutes({
   router.post(
     "/mvp/quickstart/gong/accounts/selection",
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
@@ -307,7 +307,7 @@ export function registerSetupQuickstartRoutes({
         const config = await prisma.integrationConfig.findUnique({
           where: {
             organizationId_provider: {
-              organizationId: req.organizationId,
+              organizationId: req.organizationId!,
               provider: "GONG",
             },
           },

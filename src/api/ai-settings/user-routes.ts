@@ -15,18 +15,18 @@ export function registerAISettingsUserRoutes({
   usageTracker,
 }: Pick<AISettingsRouteContext, "configService" | "router" | "usageTracker">): void {
   router.get("/providers", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId || !req.userId || !req.userRole) {
+    if (!req.organizationId! || !req.userId! || !req.userRole) {
       sendUnauthorized(res);
       return;
     }
 
       const access = await configService.resolveUserAccess(
-        req.organizationId,
-        req.userId,
+        req.organizationId!,
+        req.userId!,
         req.userRole
       );
 
-      const orgConfigs = await configService.listOrgConfigs(req.organizationId);
+      const orgConfigs = await configService.listOrgConfigs(req.organizationId!);
       const platformModels = await configService.listAvailablePlatformModels();
 
       const filteredPlatformModels =
@@ -55,12 +55,12 @@ export function registerAISettingsUserRoutes({
   }));
 
   router.get("/usage/me", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res);
       return;
     }
 
-      const status = await usageTracker.getLimitStatus(req.organizationId, req.userId);
+      const status = await usageTracker.getLimitStatus(req.organizationId!, req.userId!);
 
       sendSuccess(res, {
         allowed: status.allowed,
@@ -90,12 +90,12 @@ export function registerAISettingsUserRoutes({
   }));
 
   router.get("/balance/me", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res);
       return;
     }
 
-      const balance = await usageTracker.getBalance(req.organizationId, req.userId);
+      const balance = await usageTracker.getBalance(req.organizationId!, req.userId!);
       if (!balance) {
         sendSuccess(res, { balance: null });
         return;
@@ -118,14 +118,14 @@ export function registerAISettingsUserRoutes({
   }));
 
   router.get("/notifications", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res);
       return;
     }
 
       const notifications = await usageTracker.getPendingNotifications(
-        req.organizationId,
-        req.userId
+        req.organizationId!,
+        req.userId!
       );
 
       sendSuccess(res, {
@@ -143,14 +143,14 @@ export function registerAISettingsUserRoutes({
   }));
 
   router.post("/notifications/:id/acknowledge", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res);
       return;
     }
 
       const acknowledged = await usageTracker.acknowledgeNotification(
-        req.organizationId,
-        req.userId,
+        req.organizationId!,
+        req.userId!,
         req.params.id as string
       );
       if (!acknowledged) {
@@ -163,14 +163,14 @@ export function registerAISettingsUserRoutes({
   }));
 
   router.post("/notifications/acknowledge-all", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res);
       return;
     }
 
       const acknowledgedCount = await usageTracker.acknowledgeAllNotifications(
-        req.organizationId,
-        req.userId
+        req.organizationId!,
+        req.userId!
       );
       sendSuccess(res, { acknowledged: true, count: acknowledgedCount });
     

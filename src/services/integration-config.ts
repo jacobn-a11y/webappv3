@@ -1,4 +1,4 @@
-import type { PrismaClient, IntegrationProvider } from "@prisma/client";
+import type { PrismaClient, IntegrationProvider, IntegrationStatus } from "@prisma/client";
 import { decodeCredentials } from "../types/json-boundaries.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ export class IntegrationConfigService {
 
   async setConfigStatus(
     configId: string,
-    status: string,
+    status: IntegrationStatus,
     lastError: string | null
   ): Promise<void> {
     await this.prisma.integrationConfig.update({

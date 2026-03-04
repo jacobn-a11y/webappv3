@@ -12,7 +12,7 @@
 
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
-import type { OrgRequest } from "../types/authenticated-request.js";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import type { Queue } from "bullmq";
 import { LandingPageEditor } from "../services/landing-page-editor.js";
 import type { PostPublishValidationJobData } from "../services/post-publish-validation.js";
@@ -78,10 +78,10 @@ export function createLandingPageRoutes(
     }
   }
 
-  const reqParams = (req: OrgRequest) => ({
-    organizationId: req.organizationId,
-    userId: req.userId,
-    userRole: req.userRole,
+  const reqParams = (req: AuthenticatedRequest) => ({
+    organizationId: req.organizationId! ?? "",
+    userId: req.userId! ?? "",
+    userRole: req.userRole ?? "MEMBER",
   });
 
   router.use(requireLandingPagesEnabled(prisma));

@@ -22,6 +22,7 @@ import {
   encodeJsonValue,
 } from "../types/json-boundaries.js";
 import { collectLinkCandidates, validateLinkSyntax } from "./publish-link-utils.js";
+import { LifecycleStageService } from "./lifecycle-stage-service.js";
 import type {
   PublishedBrandingSettings,
   StoryContextSettings,
@@ -89,6 +90,7 @@ export interface LandingPageSummary {
   title: string;
   subtitle: string | null;
   status: PageStatus;
+  lifecycleStage: "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED";
   visibility: PageVisibility;
   viewCount: number;
   createdByName: string | null;
@@ -330,7 +332,7 @@ export class LandingPageEditor {
   ): Promise<{ slug: string; url: string }> {
     const page = await this.prisma.landingPage.findUniqueOrThrow({
       where: { id: pageId },
-      include: { story: { select: { accountId: true } } },
+      include: { story: { select: { id: true, accountId: true } } },
     });
 
     let scrubbedBody: string;
@@ -447,6 +449,7 @@ export class LandingPageEditor {
         noIndex: true,
       },
     });
+    await this.syncStoryPublishedAtFromLandingPages(page.story.id);
 
     await this.createArtifactVersion(page.id, {
       releaseNotes: options.releaseNotes,
@@ -467,20 +470,24 @@ export class LandingPageEditor {
    * Unpublishes (archives) a landing page.
    */
   async archive(pageId: string): Promise<void> {
-    await this.prisma.landingPage.update({
+    const page = await this.prisma.landingPage.update({
       where: { id: pageId },
       data: { status: "ARCHIVED" },
+      select: { storyId: true },
     });
+    await this.syncStoryPublishedAtFromLandingPages(page.storyId);
   }
 
   /**
    * Reverts to draft status (unpublishes without archiving).
    */
   async unpublish(pageId: string): Promise<void> {
-    await this.prisma.landingPage.update({
+    const page = await this.prisma.landingPage.update({
       where: { id: pageId },
       data: { status: "DRAFT", publishedAt: null },
+      select: { storyId: true },
     });
+    await this.syncStoryPublishedAtFromLandingPages(page.storyId);
   }
 
   /**
@@ -675,13 +682,13 @@ export class LandingPageEditor {
   async listForOrg(
     organizationId: string,
     filters?: {
-      status?: PageStatus;
+      status?: "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED";
+      includeArchived?: boolean;
       createdById?: string;
       search?: string;
     }
   ): Promise<LandingPageSummary[]> {
     const where: Record<string, unknown> = { organizationId };
-    if (filters?.status) where.status = filters.status;
     if (filters?.createdById) where.createdById = filters.createdById;
     if (filters?.search) {
       where.title = { contains: filters.search, mode: "insensitive" };
@@ -698,12 +705,21 @@ export class LandingPageEditor {
       orderBy: { updatedAt: "desc" },
     });
 
-    return pages.map((p) => ({
+    const lifecycle = await new LifecycleStageService(
+      this.prisma
+    ).resolveLandingPageLifecycle(
+      organizationId,
+      pages.map((p) => ({ id: p.id, publishedAt: p.publishedAt }))
+    );
+
+    return pages
+      .map((p) => ({
       id: p.id,
       slug: p.slug,
       title: p.title,
       subtitle: p.subtitle,
       status: p.status,
+      lifecycleStage: lifecycle.get(p.id)?.stage ?? "DRAFT",
       visibility: p.visibility,
       viewCount: p.viewCount,
       createdByName: p.createdBy.name,
@@ -712,7 +728,9 @@ export class LandingPageEditor {
       publishedAt: p.publishedAt,
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
-    }));
+      }))
+      .filter((p) => (filters?.includeArchived ? true : p.status !== "ARCHIVED"))
+      .filter((p) => (filters?.status ? p.lifecycleStage === filters.status : true));
   }
 
   /**
@@ -915,7 +933,11 @@ export class LandingPageEditor {
    * Hard-deletes a landing page by ID.
    */
   async deletePage(pageId: string): Promise<void> {
-    await this.prisma.landingPage.delete({ where: { id: pageId } });
+    const page = await this.prisma.landingPage.delete({
+      where: { id: pageId },
+      select: { storyId: true },
+    });
+    await this.syncStoryPublishedAtFromLandingPages(page.storyId);
   }
 
   // ─── Approval workflow ──────────────────────────────────────────────
@@ -945,13 +967,15 @@ export class LandingPageEditor {
     organizationId: string;
     targetId: string;
     requestedByUserId: string;
+    targetType?: string;
+    requestType?: string;
     requestPayload: Record<string, unknown>;
   }): Promise<{ id: string }> {
     return this.prisma.approvalRequest.create({
       data: {
         organizationId: data.organizationId,
-        requestType: "LANDING_PAGE_PUBLISH",
-        targetType: "landing_page",
+        requestType: data.requestType ?? "LANDING_PAGE_PUBLISH",
+        targetType: data.targetType ?? "landing_page",
         targetId: data.targetId,
         requestedByUserId: data.requestedByUserId,
         status: "PENDING",
@@ -965,12 +989,23 @@ export class LandingPageEditor {
    */
   async listPublishApprovalRequests(
     organizationId: string,
-    status: string
+    status: string,
+    options?: {
+      requestTypes?: string[];
+      targetTypes?: string[];
+    }
   ) {
     return this.prisma.approvalRequest.findMany({
       where: {
         organizationId,
-        requestType: "LANDING_PAGE_PUBLISH",
+        requestType:
+          options?.requestTypes && options.requestTypes.length > 0
+            ? { in: options.requestTypes }
+            : "LANDING_PAGE_PUBLISH",
+        targetType:
+          options?.targetTypes && options.targetTypes.length > 0
+            ? { in: options.targetTypes }
+            : undefined,
         status,
       },
       include: {
@@ -987,13 +1022,19 @@ export class LandingPageEditor {
    */
   async findPublishApprovalRequest(
     requestId: string,
-    organizationId: string
+    organizationId: string,
+    options?: {
+      requestTypes?: string[];
+    }
   ) {
     return this.prisma.approvalRequest.findFirst({
       where: {
         id: requestId,
         organizationId,
-        requestType: "LANDING_PAGE_PUBLISH",
+        requestType:
+          options?.requestTypes && options.requestTypes.length > 0
+            ? { in: options.requestTypes }
+            : "LANDING_PAGE_PUBLISH",
       },
     });
   }
@@ -1038,6 +1079,23 @@ export class LandingPageEditor {
       anonymizationEnabled: settings?.anonymizationEnabled ?? true,
       publishedBranding: storyContext.publishedBranding ?? null,
     };
+  }
+
+  private async syncStoryPublishedAtFromLandingPages(storyId: string): Promise<void> {
+    const latestPublished = await this.prisma.landingPage.findFirst({
+      where: {
+        storyId,
+        status: "PUBLISHED",
+        publishedAt: { not: null },
+      },
+      select: { publishedAt: true },
+      orderBy: [{ publishedAt: "desc" }, { id: "desc" }],
+    });
+
+    await this.prisma.story.update({
+      where: { id: storyId },
+      data: { publishedAt: latestPublished?.publishedAt ?? null },
+    });
   }
 
   private async generateUniqueSlug(title: string): Promise<string> {

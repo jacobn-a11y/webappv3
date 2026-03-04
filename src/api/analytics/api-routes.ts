@@ -37,13 +37,13 @@ export function registerApiRoutes({
    * Returns all analytics data as JSON.
    */
   router.get("/", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
 
-      const data = await analyticsCache.getOrSet(req.organizationId, () =>
-        analytics.getDashboardData(req.organizationId as string)
+      const data = await analyticsCache.getOrSet(req.organizationId!, () =>
+        analytics.getDashboardData(req.organizationId! as string)
       );
       sendSuccess(res, data);
 
@@ -53,12 +53,12 @@ export function registerApiRoutes({
     "/revops-kpis",
     requirePermission(prisma, "view_analytics"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      const organizationId = req.organizationId;
+      const organizationId = req.organizationId!;
       const payload = await revopsKpiCache.getOrSet(
         `${organizationId}:revops-kpis`,
         () => analytics.getRevOpsKpis(organizationId)

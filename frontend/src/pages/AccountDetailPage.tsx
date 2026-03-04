@@ -17,9 +17,9 @@ import { STORY_TYPE_LABELS } from "../types/taxonomy";
 
 const STORY_STATUS_LABELS: Record<StorySummary["story_status"], string> = {
   DRAFT: "Draft",
-  PAGE_CREATED: "Page Created",
+  IN_REVIEW: "In Review",
+  APPROVED: "Approved",
   PUBLISHED: "Published",
-  ARCHIVED: "Archived",
 };
 
 function saveBlob(blob: Blob, filename: string): void {
@@ -217,9 +217,9 @@ export function AccountDetailPage({ userRole }: { userRole?: string }) {
               >
                 <option value="ALL">All Statuses</option>
                 <option value="DRAFT">Draft</option>
-                <option value="PAGE_CREATED">Page Created</option>
+                <option value="IN_REVIEW">In Review</option>
+                <option value="APPROVED">Approved</option>
                 <option value="PUBLISHED">Published</option>
-                <option value="ARCHIVED">Archived</option>
               </select>
             </div>
 
@@ -304,6 +304,11 @@ function StoryCard({
   };
 
   const handleDownloadExport = async (format: "pdf" | "docx") => {
+    const proceed = window.confirm(
+      "This export may contain PII or named customer data. Confirm you have permission to share externally."
+    );
+    if (!proceed) return;
+
     const safeTitle = story.title
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")

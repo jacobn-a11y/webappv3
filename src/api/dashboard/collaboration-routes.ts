@@ -48,18 +48,18 @@ export function registerCollaborationRoutes({
   // ── Team Workspaces ────────────────────────────────────────────────
 
   router.get("/workspaces", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res);
       return;
     }
 
     const [assignment, user] = await Promise.all([
     prisma.userRoleAssignment.findUnique({
-      where: { userId: req.userId },
+      where: { userId: req.userId! },
       include: { roleProfile: true },
     }),
     prisma.user.findUnique({
-      where: { id: req.userId },
+      where: { id: req.userId! },
       select: { role: true },
     }),
     ]);
@@ -77,9 +77,9 @@ export function registerCollaborationRoutes({
 
     const workspaces = await prisma.teamWorkspace.findMany({
     where: {
-      organizationId: req.organizationId,
+      organizationId: req.organizationId!,
       OR: [
-        { ownerUserId: req.userId },
+        { ownerUserId: req.userId! },
         { visibility: "ORG" },
         { visibility: "TEAM", team: team as "REVOPS" | "MARKETING" | "SALES" | "CS" },
         ...(roleKey ? [{ allowedRoleProfileKeys: { has: roleKey } }] : []),
@@ -105,7 +105,7 @@ export function registerCollaborationRoutes({
   }));
 
   router.post("/workspaces", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res);
       return;
     }
@@ -117,8 +117,8 @@ export function registerCollaborationRoutes({
     const d = payload;
     const workspace = await prisma.teamWorkspace.create({
     data: {
-      organizationId: req.organizationId,
-      ownerUserId: req.userId,
+      organizationId: req.organizationId!,
+      ownerUserId: req.userId!,
       name: d.name,
       description: d.description,
       team: d.team,
@@ -130,8 +130,8 @@ export function registerCollaborationRoutes({
     },
     });
     await auditLogs.record({
-    organizationId: req.organizationId,
-    actorUserId: req.userId,
+    organizationId: req.organizationId!,
+    actorUserId: req.userId!,
     category: "WORKSPACE",
     action: "WORKSPACE_CREATED",
     targetType: "workspace",
@@ -145,7 +145,7 @@ export function registerCollaborationRoutes({
   }));
 
   router.patch("/workspaces/:workspaceId", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res);
       return;
     }
@@ -156,13 +156,13 @@ export function registerCollaborationRoutes({
 
     const workspaceId = String(req.params.workspaceId);
     const existing = await prisma.teamWorkspace.findFirst({
-    where: { id: workspaceId, organizationId: req.organizationId },
+    where: { id: workspaceId, organizationId: req.organizationId! },
     });
     if (!existing) {
     sendNotFound(res, "Workspace not found");
     return;
     }
-    const isOwner = existing.ownerUserId === req.userId;
+    const isOwner = existing.ownerUserId === req.userId!;
     const isAdmin = req.userRole === "OWNER" || req.userRole === "ADMIN";
     if (!isOwner && !isAdmin) {
     sendForbidden(res, "permission_denied");
@@ -184,8 +184,8 @@ export function registerCollaborationRoutes({
     },
     });
     await auditLogs.record({
-    organizationId: req.organizationId,
-    actorUserId: req.userId,
+    organizationId: req.organizationId!,
+    actorUserId: req.userId!,
     category: "WORKSPACE",
     action: "WORKSPACE_UPDATED",
     targetType: "workspace",
@@ -199,20 +199,20 @@ export function registerCollaborationRoutes({
   }));
 
   router.delete("/workspaces/:workspaceId", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res);
       return;
     }
 
     const workspaceId = String(req.params.workspaceId);
     const existing = await prisma.teamWorkspace.findFirst({
-    where: { id: workspaceId, organizationId: req.organizationId },
+    where: { id: workspaceId, organizationId: req.organizationId! },
     });
     if (!existing) {
     sendNotFound(res, "Workspace not found");
     return;
     }
-    const isOwner = existing.ownerUserId === req.userId;
+    const isOwner = existing.ownerUserId === req.userId!;
     const isAdmin = req.userRole === "OWNER" || req.userRole === "ADMIN";
     if (!isOwner && !isAdmin) {
     sendForbidden(res, "permission_denied");
@@ -220,8 +220,8 @@ export function registerCollaborationRoutes({
     }
     await prisma.teamWorkspace.delete({ where: { id: existing.id } });
     await auditLogs.record({
-    organizationId: req.organizationId,
-    actorUserId: req.userId,
+    organizationId: req.organizationId!,
+    actorUserId: req.userId!,
     category: "WORKSPACE",
     action: "WORKSPACE_DELETED",
     targetType: "workspace",
@@ -237,24 +237,24 @@ export function registerCollaborationRoutes({
   // ── Shared Asset Library ───────────────────────────────────────────
 
   router.get("/assets", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res);
       return;
     }
 
     const workspaceId = (req.query.workspace_id as string | undefined)?.trim();
     const assignment = await prisma.userRoleAssignment.findUnique({
-    where: { userId: req.userId },
+    where: { userId: req.userId! },
     include: { roleProfile: true },
     });
     const roleKey = assignment?.roleProfile?.key ?? null;
 
     const assets = await prisma.sharedAsset.findMany({
     where: {
-      organizationId: req.organizationId,
+      organizationId: req.organizationId!,
       ...(workspaceId ? { workspaceId } : {}),
       OR: [
-        { ownerUserId: req.userId },
+        { ownerUserId: req.userId! },
         { visibility: "ORG" },
         ...(roleKey ? [{ allowedRoleProfileKeys: { has: roleKey } }] : []),
       ],
@@ -283,7 +283,7 @@ export function registerCollaborationRoutes({
   }));
 
   router.post("/assets", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res);
       return;
     }
@@ -295,7 +295,7 @@ export function registerCollaborationRoutes({
     const d = payload;
     if (d.workspace_id) {
     const workspace = await prisma.teamWorkspace.findFirst({
-      where: { id: d.workspace_id, organizationId: req.organizationId },
+      where: { id: d.workspace_id, organizationId: req.organizationId! },
     });
     if (!workspace) {
       sendBadRequest(res, "workspace_not_found");
@@ -304,9 +304,9 @@ export function registerCollaborationRoutes({
     }
     const asset = await prisma.sharedAsset.create({
     data: {
-      organizationId: req.organizationId,
+      organizationId: req.organizationId!,
       workspaceId: d.workspace_id ?? null,
-      ownerUserId: req.userId,
+      ownerUserId: req.userId!,
       assetType: d.asset_type,
       title: d.title,
       description: d.description,
@@ -319,8 +319,8 @@ export function registerCollaborationRoutes({
     },
     });
     await auditLogs.record({
-    organizationId: req.organizationId,
-    actorUserId: req.userId,
+    organizationId: req.organizationId!,
+    actorUserId: req.userId!,
     category: "WORKSPACE",
     action: "SHARED_ASSET_CREATED",
     targetType: "shared_asset",
@@ -334,7 +334,7 @@ export function registerCollaborationRoutes({
   }));
 
   router.patch("/assets/:assetId", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res);
       return;
     }
@@ -345,13 +345,13 @@ export function registerCollaborationRoutes({
 
     const assetId = String(req.params.assetId);
     const existing = await prisma.sharedAsset.findFirst({
-    where: { id: assetId, organizationId: req.organizationId },
+    where: { id: assetId, organizationId: req.organizationId! },
     });
     if (!existing) {
     sendNotFound(res, "Asset not found");
     return;
     }
-    const isOwner = existing.ownerUserId === req.userId;
+    const isOwner = existing.ownerUserId === req.userId!;
     const isAdmin = req.userRole === "OWNER" || req.userRole === "ADMIN";
     if (!isOwner && !isAdmin) {
     sendForbidden(res, "permission_denied");
@@ -378,20 +378,20 @@ export function registerCollaborationRoutes({
   }));
 
   router.delete("/assets/:assetId", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res);
       return;
     }
 
     const assetId = String(req.params.assetId);
     const existing = await prisma.sharedAsset.findFirst({
-    where: { id: assetId, organizationId: req.organizationId },
+    where: { id: assetId, organizationId: req.organizationId! },
     });
     if (!existing) {
     sendNotFound(res, "Asset not found");
     return;
     }
-    const isOwner = existing.ownerUserId === req.userId;
+    const isOwner = existing.ownerUserId === req.userId!;
     const isAdmin = req.userRole === "OWNER" || req.userRole === "ADMIN";
     if (!isOwner && !isAdmin) {
     sendForbidden(res, "permission_denied");

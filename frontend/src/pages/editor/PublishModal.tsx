@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   getPreviewScrub,
+  getPublishPiiScan,
   getScheduledPagePublish,
   publishPage,
   schedulePagePublish,
   cancelScheduledPagePublish,
+  type PublishPiiScanResult,
 } from "../../lib/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -45,6 +47,9 @@ export function PublishModal({
   const [scrubbedBody, setScrubbedBody] = useState("");
   const [replacementCount, setReplacementCount] = useState(0);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [piiScan, setPiiScan] = useState<PublishPiiScanResult | null>(null);
+  const [piiLoading, setPiiLoading] = useState(true);
+  const [piiAcknowledged, setPiiAcknowledged] = useState(false);
 
   const [publishing, setPublishing] = useState(false);
   const [scheduling, setScheduling] = useState(false);
@@ -73,6 +78,21 @@ export function PublishModal({
     }
   }, [pageId]);
 
+  const loadPiiScan = useCallback(async () => {
+    setPiiLoading(true);
+    try {
+      const result = await getPublishPiiScan(pageId);
+      setPiiScan(result);
+      if (result.total_detections === 0) {
+        setPiiAcknowledged(false);
+      }
+    } catch {
+      setPiiScan(null);
+    } finally {
+      setPiiLoading(false);
+    }
+  }, [pageId]);
+
   const loadScheduledState = useCallback(async () => {
     try {
       const data = await getScheduledPagePublish(pageId);
@@ -88,8 +108,9 @@ export function PublishModal({
 
   useEffect(() => {
     loadPreview();
+    void loadPiiScan();
     void loadScheduledState();
-  }, [loadPreview, loadScheduledState]);
+  }, [loadPreview, loadPiiScan, loadScheduledState]);
 
   useEffect(() => {
     previousFocusRef.current = document.activeElement as HTMLElement;
@@ -118,6 +139,14 @@ export function PublishModal({
   const handlePublish = async () => {
     setPublishError(null);
     if (password && password.length < 4) { setPublishError("Password must be at least 4 characters."); return; }
+    if ((piiScan?.total_detections ?? 0) > 0 && !piiAcknowledged) {
+      setPublishError(
+        piiScan?.blocking
+          ? "Potential PII detected. Review and resolve before publishing."
+          : "Potential PII detected. Confirm review before publishing."
+      );
+      return;
+    }
     setPublishing(true);
     const publishBody: { visibility: string; password?: string; expires_at?: string; include_company_name?: boolean; release_notes?: string; } = { visibility };
     if (password) publishBody.password = password;
@@ -145,6 +174,14 @@ export function PublishModal({
     setPublishError(null);
     if (!scheduleAt) { setPublishError("Select a future schedule time."); return; }
     if (password && password.length < 4) { setPublishError("Password must be at least 4 characters."); return; }
+    if ((piiScan?.total_detections ?? 0) > 0 && !piiAcknowledged) {
+      setPublishError(
+        piiScan?.blocking
+          ? "Potential PII detected. Review and resolve before scheduling."
+          : "Potential PII detected. Confirm review before scheduling."
+      );
+      return;
+    }
     const scheduleDate = new Date(scheduleAt);
     if (Number.isNaN(scheduleDate.getTime()) || scheduleDate.getTime() <= Date.now()) { setPublishError("Schedule time must be in the future."); return; }
     setScheduling(true);
@@ -186,6 +223,7 @@ export function PublishModal({
   const handleCompanyNameToggle = () => {
     setIncludeCompanyName(!includeCompanyName);
     loadPreview();
+    void loadPiiScan();
   };
 
   const truncatePreview = (text: string, maxLen: number): string => {
@@ -261,6 +299,52 @@ export function PublishModal({
                   </div>
                 </div>
               )}
+
+              <div className="page-editor__field page-editor__field--full">
+                <label className="page-editor__field-label">Pre-publish PII scan</label>
+                {piiLoading ? (
+                  <div className="page-editor__preview-loading">Scanning...</div>
+                ) : piiScan ? (
+                  <>
+                    <div className="page-editor__toggle-row">
+                      <div>
+                        <div className="page-editor__toggle-row-label">
+                          {piiScan.total_detections > 0
+                            ? `${piiScan.total_detections} potential PII item(s) found`
+                            : "No potential PII detected"}
+                        </div>
+                        {piiScan.total_detections > 0 && (
+                          <div className="page-editor__toggle-row-desc">
+                            {Object.entries(piiScan.by_type)
+                              .sort((a, b) => b[1] - a[1])
+                              .map(([type, count]) => `${count} ${type.replace(/_/g, " ")}`)
+                              .join(", ")}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="page-editor__btn page-editor__btn--secondary page-editor__btn--sm"
+                        onClick={() => void loadPiiScan()}
+                      >
+                        Rescan
+                      </button>
+                    </div>
+                    {piiScan.total_detections > 0 && (
+                      <label className="form-row" style={{ marginTop: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={piiAcknowledged}
+                          onChange={(e) => setPiiAcknowledged(e.target.checked)}
+                        />
+                        I reviewed potential PII and accept responsibility before publishing.
+                      </label>
+                    )}
+                  </>
+                ) : (
+                  <div className="page-editor__preview-loading">PII scan unavailable.</div>
+                )}
+              </div>
             </div>
 
             <div className="page-editor__preview-section">

@@ -64,7 +64,7 @@ export function registerArtifactGovernanceRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const policy = await prisma.artifactGovernancePolicy.findUnique({
-      where: { organizationId: req.organizationId },
+      where: { organizationId: req.organizationId! },
       include: {
         approvalSteps: {
           orderBy: { stepOrder: "asc" },
@@ -113,9 +113,9 @@ export function registerArtifactGovernanceRoutes({
 
         const d = payload;
         const policy = await prisma.artifactGovernancePolicy.upsert({
-          where: { organizationId: req.organizationId },
+          where: { organizationId: req.organizationId! },
           create: {
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
             artifactType: "LANDING_PAGE",
             approvalChainEnabled: d.approval_chain_enabled ?? false,
             maxExpirationDays: d.max_expiration_days ?? null,
@@ -129,8 +129,8 @@ export function registerArtifactGovernanceRoutes({
         });
 
         await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
+          organizationId: req.organizationId!,
+          actorUserId: req.userId!,
           category: "POLICY",
           action: "ARTIFACT_GOVERNANCE_POLICY_UPDATED",
           targetType: "artifact_governance_policy",
@@ -159,7 +159,7 @@ export function registerArtifactGovernanceRoutes({
         return;
       }
 
-      const orgId = req.organizationId;
+      const orgId = req.organizationId!;
 
         const duplicateOrders = new Set<number>();
         const seenOrders = new Set<number>();
@@ -210,7 +210,7 @@ export function registerArtifactGovernanceRoutes({
 
         await auditLogs.record({
           organizationId: orgId,
-          actorUserId: req.userId,
+          actorUserId: req.userId!,
           category: "POLICY",
           action: "ARTIFACT_APPROVAL_STEPS_UPDATED",
           targetType: "artifact_governance_policy",
@@ -232,7 +232,7 @@ export function registerArtifactGovernanceRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const groups = await prisma.approvalGroup.findMany({
-      where: { organizationId: req.organizationId },
+      where: { organizationId: req.organizationId! },
       include: {
         members: {
           include: {
@@ -275,10 +275,10 @@ export function registerArtifactGovernanceRoutes({
 
       const group = await prisma.approvalGroup.create({
       data: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         name: payload.name.trim(),
         description: payload.description?.trim() || null,
-        ownerUserId: req.userId ?? null,
+        ownerUserId: req.userId! ?? null,
       },
       });
       sendCreated(res, {
@@ -300,14 +300,14 @@ export function registerArtifactGovernanceRoutes({
       }
 
       const group = await prisma.approvalGroup.findFirst({
-      where: { id: req.params.groupId as string, organizationId: req.organizationId },
+      where: { id: req.params.groupId as string, organizationId: req.organizationId! },
       });
       if (!group) {
       sendNotFound(res, "Approval group not found");
       return;
       }
       const user = await prisma.user.findFirst({
-      where: { id: payload.user_id, organizationId: req.organizationId },
+      where: { id: payload.user_id, organizationId: req.organizationId! },
       });
       if (!user) {
       sendNotFound(res, "User not found");
@@ -322,7 +322,7 @@ export function registerArtifactGovernanceRoutes({
         },
       },
       create: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         groupId: group.id,
         userId: user.id,
       },
@@ -341,7 +341,7 @@ export function registerArtifactGovernanceRoutes({
 
       const deleted = await prisma.approvalGroupMember.deleteMany({
       where: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         groupId: req.params.groupId as string,
         userId: req.params.userId as string,
       },
@@ -357,7 +357,7 @@ export function registerArtifactGovernanceRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const rows = await prisma.teamApprovalAdminScope.findMany({
-      where: { organizationId: req.organizationId },
+      where: { organizationId: req.organizationId! },
       include: { user: { select: { id: true, name: true, email: true } } },
       orderBy: [{ userId: "asc" }, { teamKey: "asc" }],
       });
@@ -392,7 +392,7 @@ export function registerArtifactGovernanceRoutes({
 
       const userId = req.params.userId as string;
       const user = await prisma.user.findFirst({
-      where: { id: userId, organizationId: req.organizationId },
+      where: { id: userId, organizationId: req.organizationId! },
       });
       if (!user) {
       sendNotFound(res, "User not found");
@@ -400,12 +400,12 @@ export function registerArtifactGovernanceRoutes({
       }
       await prisma.$transaction(async (tx) => {
       await tx.teamApprovalAdminScope.deleteMany({
-        where: { organizationId: req.organizationId, userId },
+        where: { organizationId: req.organizationId!, userId },
       });
       if (payload.team_keys.length > 0) {
         await tx.teamApprovalAdminScope.createMany({
           data: payload.team_keys.map((teamKey) => ({
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
             userId,
             teamKey,
           })),

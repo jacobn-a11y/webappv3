@@ -47,8 +47,8 @@ export function registerExportRoutes({
     }
 
     const authReq = req as AuthenticatedRequest;
-    const organizationId = authReq.organizationId;
-    const userId = authReq.userId;
+    const organizationId = authReq.organizationId!;
+    const userId = authReq.userId!;
     const userRole = authReq.userRole;
 
     if (!organizationId) {
@@ -106,8 +106,8 @@ export function registerExportRoutes({
 
   router.delete("/:storyId", asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthenticatedRequest;
-    const organizationId = authReq.organizationId;
-    const userId = authReq.userId;
+    const organizationId = authReq.organizationId!;
+    const userId = authReq.userId!;
     const userRole = authReq.userRole;
 
     if (!organizationId) {

@@ -28,13 +28,13 @@ export function createChatbotConnectorRoutes(): Router {
    * Requires authentication (organizationId set by auth middleware).
    */
   router.get("/", (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
 
     res.setHeader("Cache-Control", "private, no-store");
-    res.send(renderChatPage(req.organizationId));
+    res.send(renderChatPage(req.organizationId!));
   });
 
   return router;

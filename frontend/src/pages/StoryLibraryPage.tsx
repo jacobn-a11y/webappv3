@@ -32,10 +32,20 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
       <StoryFilters
         searchDraft={lib.searchDraft}
         setSearchDraft={lib.setSearchDraft}
+        searchMode={lib.searchMode}
+        setSearchMode={lib.setSearchMode}
         storyType={lib.storyType}
         setStoryType={lib.setStoryType}
         status={lib.status}
         setStatus={lib.setStatus}
+        funnelStage={lib.funnelStage}
+        setFunnelStage={lib.setFunnelStage}
+        topic={lib.topic}
+        setTopic={lib.setTopic}
+        availableFunnelStages={lib.availableFunnelStages}
+        availableTopics={lib.availableTopics}
+        funnelStageCounts={lib.funnelStageCounts}
+        topicCounts={lib.topicCounts}
         pageSize={lib.pageSize}
         setPageSize={lib.setPageSize}
         viewMode={lib.viewMode}

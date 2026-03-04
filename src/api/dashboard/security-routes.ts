@@ -76,7 +76,7 @@ export function registerSecurityRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const settings = await prisma.orgSettings.findUnique({
-      where: { organizationId: req.organizationId },
+      where: { organizationId: req.organizationId! },
       select: { securityPolicy: true },
       });
       const policy = decodeSecurityPolicy(settings?.securityPolicy);
@@ -108,9 +108,9 @@ export function registerSecurityRoutes({
       const d = payload;
 
       await prisma.orgSettings.upsert({
-      where: { organizationId: req.organizationId },
+      where: { organizationId: req.organizationId! },
       create: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         securityPolicy: {
           enforce_mfa_for_admin_actions:
             d.enforce_mfa_for_admin_actions ?? false,
@@ -144,12 +144,12 @@ export function registerSecurityRoutes({
       },
       });
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "POLICY",
       action: "SECURITY_POLICY_UPDATED",
       targetType: "org_settings",
-      targetId: req.organizationId,
+      targetId: req.organizationId!,
       severity: "CRITICAL",
       metadata: {
         enforce_mfa_for_admin_actions:
@@ -182,7 +182,7 @@ export function registerSecurityRoutes({
 
       const subscriptions = await listOutboundWebhookSubscriptions(
       prisma,
-      req.organizationId
+      req.organizationId!
       );
       sendSuccess(res, {
       subscriptions,
@@ -203,7 +203,7 @@ export function registerSecurityRoutes({
 
       const current = await listOutboundWebhookSubscriptions(
       prisma,
-      req.organizationId
+      req.organizationId!
       );
       try {
         await assertSafeOutboundUrl(payload.url, {
@@ -230,13 +230,13 @@ export function registerSecurityRoutes({
       created_at: now,
       updated_at: now,
       };
-      await saveOutboundWebhookSubscriptions(prisma, req.organizationId, [
+      await saveOutboundWebhookSubscriptions(prisma, req.organizationId!, [
       ...current,
       next,
       ]);
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "POLICY",
       action: "OUTBOUND_WEBHOOK_CREATED",
       targetType: "outbound_webhook",
@@ -263,17 +263,17 @@ export function registerSecurityRoutes({
       const subscriptionId = String(req.params.subscriptionId);
       const current = await listOutboundWebhookSubscriptions(
       prisma,
-      req.organizationId
+      req.organizationId!
       );
       const next = current.filter((subscription) => subscription.id !== subscriptionId);
       if (next.length === current.length) {
       sendNotFound(res, "outbound_webhook_not_found");
       return;
       }
-      await saveOutboundWebhookSubscriptions(prisma, req.organizationId, next);
+      await saveOutboundWebhookSubscriptions(prisma, req.organizationId!, next);
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "POLICY",
       action: "OUTBOUND_WEBHOOK_DELETED",
       targetType: "outbound_webhook",
@@ -295,7 +295,7 @@ export function registerSecurityRoutes({
       const subscriptionId = String(req.params.subscriptionId);
       const current = await listOutboundWebhookSubscriptions(
       prisma,
-      req.organizationId
+      req.organizationId!
       );
       const target = current.find((subscription) => subscription.id === subscriptionId);
       if (!target) {
@@ -307,7 +307,7 @@ export function registerSecurityRoutes({
       event_type: "webhook.test",
       occurred_at: new Date().toISOString(),
       payload: {
-        organization_id: req.organizationId,
+        organization_id: req.organizationId!,
         message: "StoryEngine outbound webhook test event",
       },
       });
@@ -324,7 +324,7 @@ export function registerSecurityRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const entries = await prisma.orgIpAllowlistEntry.findMany({
-      where: { organizationId: req.organizationId },
+      where: { organizationId: req.organizationId! },
       orderBy: [{ enabled: "desc" }, { createdAt: "desc" }],
       });
       sendSuccess(res, {
@@ -352,15 +352,15 @@ export function registerSecurityRoutes({
 
       const entry = await prisma.orgIpAllowlistEntry.create({
       data: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         cidr: payload.cidr.trim(),
         label: payload.label?.trim() || null,
         enabled: payload.enabled ?? true,
       },
       });
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "POLICY",
       action: "IP_ALLOWLIST_ENTRY_CREATED",
       targetType: "org_ip_allowlist_entry",
@@ -395,7 +395,7 @@ export function registerSecurityRoutes({
       const updated = await prisma.orgIpAllowlistEntry.updateMany({
       where: {
         id: entryId,
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
       },
       data: {
         ...(payload.cidr !== undefined ? { cidr: payload.cidr.trim() } : {}),
@@ -410,8 +410,8 @@ export function registerSecurityRoutes({
       return;
       }
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "POLICY",
       action: "IP_ALLOWLIST_ENTRY_UPDATED",
       targetType: "org_ip_allowlist_entry",
@@ -437,7 +437,7 @@ export function registerSecurityRoutes({
       const deleted = await prisma.orgIpAllowlistEntry.deleteMany({
       where: {
         id: entryId,
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
       },
       });
       if (deleted.count === 0) {
@@ -445,8 +445,8 @@ export function registerSecurityRoutes({
       return;
       }
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "POLICY",
       action: "IP_ALLOWLIST_ENTRY_DELETED",
       targetType: "org_ip_allowlist_entry",

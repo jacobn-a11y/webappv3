@@ -104,7 +104,12 @@ const PRESETS: Record<RolePresetKey, RoleProfileInput> = {
     description:
       "Manages seats, billing readiness, and all approval workflows.",
     isPreset: true,
-    permissions: ["MANAGE_PERMISSIONS", "VIEW_ANALYTICS", "PUBLISH_LANDING_PAGE"],
+    permissions: [
+      "MANAGE_PERMISSIONS",
+      "VIEW_ANALYTICS",
+      "PUBLISH_LANDING_PAGE",
+      "APPROVE_PUBLISH_REQUESTS",
+    ],
     canAccessAnonymousStories: true,
     canGenerateAnonymousStories: false,
     canAccessNamedStories: true,
@@ -117,7 +122,11 @@ const PRESETS: Record<RolePresetKey, RoleProfileInput> = {
     name: "Approval Admin",
     description: "Can perform organization-wide review and approval actions.",
     isPreset: true,
-    permissions: ["PUBLISH_LANDING_PAGE", "VIEW_ANALYTICS"],
+    permissions: [
+      "PUBLISH_LANDING_PAGE",
+      "VIEW_ANALYTICS",
+      "APPROVE_PUBLISH_REQUESTS",
+    ],
     canAccessAnonymousStories: true,
     canGenerateAnonymousStories: false,
     canAccessNamedStories: true,
@@ -131,7 +140,11 @@ const PRESETS: Record<RolePresetKey, RoleProfileInput> = {
     description:
       "Can review approvals for assigned teams configured by billing admins.",
     isPreset: true,
-    permissions: ["PUBLISH_LANDING_PAGE", "VIEW_ANALYTICS"],
+    permissions: [
+      "PUBLISH_LANDING_PAGE",
+      "VIEW_ANALYTICS",
+      "APPROVE_PUBLISH_REQUESTS",
+    ],
     canAccessAnonymousStories: true,
     canGenerateAnonymousStories: false,
     canAccessNamedStories: true,
@@ -148,6 +161,8 @@ function fallbackPolicy(userRole?: UserRole): EffectiveRolePolicy {
         "CREATE_LANDING_PAGE",
         "PUBLISH_LANDING_PAGE",
         "PUBLISH_NAMED_LANDING_PAGE",
+        "APPROVE_PUBLISH_REQUESTS",
+        "VIEW_RAW_TRANSCRIPTS",
         "EDIT_ANY_LANDING_PAGE",
         "DELETE_ANY_LANDING_PAGE",
         "MANAGE_PERMISSIONS",

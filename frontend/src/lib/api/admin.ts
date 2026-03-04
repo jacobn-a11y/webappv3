@@ -12,7 +12,9 @@ import type {
   BillingReconciliation,
   CrmReport,
   CustomerSuccessHealth,
+  DataGovernanceOverview,
   DataGovernanceSettings,
+  DashboardPublishSettings,
   DeletionRequest,
   DrReadiness,
   IncidentRow,
@@ -531,10 +533,28 @@ export async function getDataGovernanceSettings(): Promise<DataGovernanceSetting
   return request<DataGovernanceSettings>("/dashboard/data-governance");
 }
 
+export async function getDataGovernanceOverview(): Promise<DataGovernanceOverview> {
+  return request<DataGovernanceOverview>("/dashboard/data-governance/overview");
+}
+
 export async function updateDataGovernanceSettings(
   body: Partial<DataGovernanceSettings>
 ): Promise<void> {
   return request<void>("/dashboard/data-governance", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getDashboardPublishSettings(): Promise<DashboardPublishSettings> {
+  const res = await request<{ settings: DashboardPublishSettings }>("/dashboard/settings");
+  return res.settings;
+}
+
+export async function updateDashboardPublishSettings(
+  body: Partial<DashboardPublishSettings>
+): Promise<void> {
+  await request<void>("/dashboard/settings", {
     method: "PATCH",
     body: JSON.stringify(body),
   });

@@ -57,13 +57,13 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
     "/duplicates",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
         const candidates = await mergeService.findDuplicates(
-          req.organizationId
+          req.organizationId!
         );
 
         sendSuccess(res, {
@@ -92,7 +92,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
     "/merge/preview",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -114,7 +114,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
 
       try {
         const preview = await mergeService.previewMerge(
-          req.organizationId,
+          req.organizationId!,
           parse.data.primary_account_id,
           parse.data.secondary_account_id
         );
@@ -150,7 +150,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
     "/merge/request",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId || !req.userId) {
+      if (!req.organizationId! || !req.userId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -167,16 +167,16 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
 
       try {
         const preview = await mergeService.previewMerge(
-          req.organizationId,
+          req.organizationId!,
           parse.data.primary_account_id,
           parse.data.secondary_account_id
         );
 
         const request = await mergeService.createMergeRequest(
-          req.organizationId,
+          req.organizationId!,
           parse.data.primary_account_id,
           parse.data.secondary_account_id,
-          req.userId,
+          req.userId!,
           parse.data.notes ?? null,
           preview
         );
@@ -201,14 +201,14 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
     "/merge/requests",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
       const status = typeof req.query.status === "string" ? req.query.status : "PENDING";
 
       const rows = await mergeService.listMergeRequests(
-      req.organizationId,
+      req.organizationId!,
       status
       );
       sendSuccess(res, {
@@ -231,7 +231,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
     "/merge/requests/:requestId/review",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId || !req.userId) {
+      if (!req.organizationId! || !req.userId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -245,7 +245,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
       try {
         const request = await mergeService.findMergeRequest(
           req.params.requestId as string,
-          req.organizationId
+          req.organizationId!
         );
         if (!request) {
           sendNotFound(res, "Merge request not found");
@@ -259,7 +259,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
         if (parse.data.decision === "REJECT") {
           await mergeService.rejectMergeRequest(
             request.id,
-            req.userId,
+            req.userId!,
             parse.data.notes ?? null
           );
           sendSuccess(res, { status: "REJECTED" });
@@ -280,7 +280,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
         }
 
         const result = await mergeService.executeMerge(
-          req.organizationId,
+          req.organizationId!,
           payload.primary_account_id,
           payload.secondary_account_id,
           request.requestedByUserId,
@@ -289,7 +289,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
 
         await mergeService.approveMergeRequest(
           request.id,
-          req.userId,
+          req.userId!,
           parse.data.notes ?? null
         );
 
@@ -316,7 +316,7 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
     "/merge",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -334,10 +334,10 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
 
       try {
         const result = await mergeService.executeMerge(
-          req.organizationId,
+          req.organizationId!,
           parse.data.primary_account_id,
           parse.data.secondary_account_id,
-          req.userId,
+          req.userId!,
           parse.data.notes
         );
 
@@ -370,12 +370,12 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
     "/merge/runs",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      const runs = await mergeService.listMergeRuns(req.organizationId);
+      const runs = await mergeService.listMergeRuns(req.organizationId!);
       sendSuccess(res, {
       runs: runs.map((run) => ({
         id: run.id,
@@ -400,15 +400,15 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
     "/merge/runs/:runId/undo",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
       try {
         const result = await mergeService.undoMerge(
-          req.organizationId,
+          req.organizationId!,
           req.params.runId as string,
-          req.userId
+          req.userId!
         );
         sendSuccess(res, {
           undone: true,

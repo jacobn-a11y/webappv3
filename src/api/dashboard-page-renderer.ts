@@ -45,7 +45,7 @@ export function createDashboardPageRoutes(prisma: PrismaClient): Router {
    * Query params: search, status, visibility, created_by, sort_by, sort_dir
    */
   router.get("/pages", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
@@ -59,14 +59,20 @@ export function createDashboardPageRoutes(prisma: PrismaClient): Router {
     const creatorFilter = req.query.created_by as string | undefined;
     const sortBy = (req.query.sort_by as string) || "updatedAt";
     const sortDir = (req.query.sort_dir as "asc" | "desc") || "desc";
+    const lifecycleStatusFilter =
+      statusFilter === "ARCHIVED"
+        ? undefined
+        : (statusFilter as "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED" | undefined);
+    const includeArchived = statusFilter === "ARCHIVED";
 
     // Non-admin users are forced to only see their own pages
-    const effectiveCreatorFilter = isAdmin ? creatorFilter : req.userId;
+    const effectiveCreatorFilter = isAdmin ? creatorFilter : req.userId!;
 
       const [dashboardStats, pages] = await Promise.all([
-        editor.getDashboardStats(req.organizationId),
-        editor.listForOrg(req.organizationId, {
-          status: statusFilter as "DRAFT" | "PUBLISHED" | "ARCHIVED" | undefined,
+        editor.getDashboardStats(req.organizationId!),
+        editor.listForOrg(req.organizationId!, {
+          status: lifecycleStatusFilter,
+          includeArchived,
           createdById: effectiveCreatorFilter,
           search: search || undefined,
         }),
@@ -92,7 +98,7 @@ export function createDashboardPageRoutes(prisma: PrismaClient): Router {
         pages,
         creators,
         isAdmin: !!isAdmin,
-        currentUserId: req.userId,
+        currentUserId: req.userId!,
         filters: {
           search,
           status: statusFilter,

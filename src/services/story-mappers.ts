@@ -11,6 +11,7 @@ export function mapStorySummary(s: {
   id: string;
   title: string;
   storyType: string;
+  lifecycleStage?: "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED";
   funnelStages: string[];
   filterTags: string[];
   generatedAt: Date;
@@ -23,15 +24,16 @@ export function mapStorySummary(s: {
     publishedAt: Date | null;
   }>;
 }) {
+  const derivedStatus =
+    s.lifecycleStage ??
+    (s.landingPages.length === 0
+      ? "DRAFT"
+      : s.landingPages[0]?.status === "PUBLISHED"
+        ? "PUBLISHED"
+        : "DRAFT");
+
   return {
-    story_status:
-      s.landingPages.length === 0
-        ? "DRAFT"
-        : s.landingPages[0]?.status === "PUBLISHED"
-          ? "PUBLISHED"
-          : s.landingPages[0]?.status === "ARCHIVED"
-            ? "ARCHIVED"
-            : "PAGE_CREATED",
+    story_status: derivedStatus,
     id: s.id,
     title: s.title,
     story_type: s.storyType,

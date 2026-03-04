@@ -16,7 +16,7 @@
 import { type Response, type Router } from "express";
 import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
-import type { OrgRequest } from "../../types/authenticated-request.js";
+import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 import type { Queue } from "bullmq";
 import {
   type LandingPageEditor,
@@ -28,6 +28,7 @@ import type { ScheduledPagePublishJobData } from "../../services/scheduled-page-
 import type { RoleProfileService } from "../../services/role-profiles.js";
 import type { AuditLogService } from "../../services/audit-log.js";
 import { dispatchOutboundWebhookEvent } from "../../services/outbound-webhooks.js";
+import { PublishApprovalPolicyService } from "../../services/publish-approval-policy.js";
 import {
   requirePermission,
   requirePageOwnerOrPermission,
@@ -39,6 +40,7 @@ import {
   getArtifactPublishGovernance,
   type PublishApprovalPayload,
 } from "../../services/landing-page-approval.js";
+import { SlackApprovalNotifier } from "../../services/slack-approval-notifier.js";
 import logger from "../../lib/logger.js";
 import { asyncHandler } from "../../lib/async-handler.js";
 import { sendSuccess, sendNoContent, sendBadRequest, sendUnauthorized, sendForbidden, sendNotFound, sendConflict, sendError, sendServiceUnavailable } from "../_shared/responses.js";
@@ -61,7 +63,7 @@ const ReviewPublishApprovalSchema = z.object({
   notes: z.string().max(1000).optional(),
 });
 
-type AuthReq = OrgRequest;
+type AuthReq = AuthenticatedRequest;
 
 // ─── Route Registration ─────────────────────────────────────────────────────
 
@@ -95,6 +97,34 @@ export function registerPublishRoutes({
   scheduledPublishJobId,
   reqParams,
 }: RegisterPublishRoutesOptions): void {
+  const approvalPolicy = new PublishApprovalPolicyService(prisma);
+  const slackNotifier = new SlackApprovalNotifier(prisma);
+  const canReviewPublishApprovals = async (req: AuthReq): Promise<boolean> => {
+    if (!req.organizationId! || !req.userId!) {
+      return false;
+    }
+    if (req.userRole && ["OWNER", "ADMIN"].includes(req.userRole)) {
+      return true;
+    }
+    const rolePolicy = await roleProfiles.getEffectivePolicy(
+      req.organizationId!,
+      req.userId!,
+      req.userRole
+    );
+    if (rolePolicy.permissions.includes("APPROVE_PUBLISH_REQUESTS")) {
+      return true;
+    }
+    const granted = await prisma.userPermission.findUnique({
+      where: {
+        userId_permission: {
+          userId: req.userId!,
+          permission: "APPROVE_PUBLISH_REQUESTS",
+        },
+      },
+    });
+    return !!granted;
+  };
+
   // ── SCHEDULED PUBLISH CONTROLS ─────────────────────────────────────
 
   router.get(
@@ -119,7 +149,7 @@ export function registerPublishRoutes({
       sendSuccess(res, { enabled: true, scheduled: false });
       return;
       }
-      if (job.data.organizationId !== req.organizationId) {
+      if (job.data.organizationId !== req.organizationId!) {
       sendForbidden(res, "permission_denied");
       return;
       }
@@ -151,7 +181,7 @@ export function registerPublishRoutes({
         return;
       }
 
-      if (!req.organizationId || !req.userId) {
+      if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res, "Authentication required");
       return;
       }
@@ -160,9 +190,12 @@ export function registerPublishRoutes({
       sendForbidden(res, "Your role cannot generate named stories.");
       return;
       }
-      const governance = await getArtifactPublishGovernance(prisma, req.organizationId);
-      if (governance.approvalChainEnabled && governance.steps.length > 0) {
-      sendConflict(res, "Scheduled publish requires direct publish mode. Disable approval chain or publish through approvals.");
+      const publishPolicyDecision = await approvalPolicy.requiresApproval(
+        req.organizationId!,
+        page.includeCompanyName
+      );
+      if (publishPolicyDecision.required) {
+      sendConflict(res, "Scheduled publish is unavailable when the current approval policy requires approval.");
       return;
       }
       const publishAt = new Date(parse.data.publish_at);
@@ -177,8 +210,8 @@ export function registerPublishRoutes({
       "scheduled-page-publish",
       {
         pageId: page.id,
-        organizationId: req.organizationId,
-        userId: req.userId,
+        organizationId: req.organizationId!,
+        userId: req.userId!,
         publishAt: publishAt.toISOString(),
         visibility: parse.data.visibility,
         password: parse.data.password,
@@ -195,8 +228,8 @@ export function registerPublishRoutes({
       }
       );
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "PUBLISH",
       action: "PAGE_PUBLISH_SCHEDULED",
       targetType: "landing_page",
@@ -238,7 +271,7 @@ export function registerPublishRoutes({
 
   router.post(
     "/:pageId/publish",
-    requirePermission(prisma, "publish"),
+    requirePageOwnerOrPermission(prisma),
     asyncHandler(async (req: AuthReq, res: Response) => {
       const parse = PublishSchema.safeParse(req.body);
       if (!parse.success) {
@@ -247,17 +280,30 @@ export function registerPublishRoutes({
       }
 
       try {
-        if (!req.organizationId || !req.userId) {
+        if (!req.organizationId! || !req.userId!) {
           sendUnauthorized(res, "Authentication required");
           return;
         }
         const page = await editor.getForEditing(req.params.pageId as string);
-        if (page.includeCompanyName && !(await canGenerateNamedStories(prisma, roleProfiles, reqParams(req)))) {
-          sendForbidden(res, "Your role cannot generate named stories.");
+        const rolePolicy = await roleProfiles.getEffectivePolicy(
+          req.organizationId!,
+          req.userId!,
+          req.userRole
+        );
+        const canGenerateForMode = page.includeCompanyName
+          ? rolePolicy.canGenerateNamedStories
+          : rolePolicy.canGenerateAnonymousStories;
+        if (!canGenerateForMode) {
+          sendForbidden(
+            res,
+            page.includeCompanyName
+              ? "Your role cannot generate named stories."
+              : "Your role cannot generate anonymous stories."
+          );
           return;
         }
 
-        const governance = await getArtifactPublishGovernance(prisma, req.organizationId);
+        const governance = await getArtifactPublishGovernance(prisma, req.organizationId!);
         if (parse.data.expires_at && governance.maxExpirationDays) {
           const expiresAt = new Date(parse.data.expires_at);
           const maxDate = new Date();
@@ -268,8 +314,13 @@ export function registerPublishRoutes({
           }
         }
 
-        if (governance.approvalChainEnabled && governance.steps.length > 0) {
-          const pending = await editor.findPendingPublishApproval(req.organizationId, page.id);
+        const publishPolicyDecision = await approvalPolicy.requiresApproval(
+          req.organizationId!,
+          page.includeCompanyName
+        );
+
+        if (publishPolicyDecision.required) {
+          const pending = await editor.findPendingPublishApproval(req.organizationId!, page.id);
           if (pending) {
             res.status(409).json({
               error: "approval_already_pending",
@@ -278,7 +329,11 @@ export function registerPublishRoutes({
             return;
           }
 
-          const requestPayload: PublishApprovalPayload = {
+          const requestPayload: PublishApprovalPayload & {
+            asset_type: "landing_page";
+            approval_policy: string;
+          } = {
+            asset_type: "landing_page",
             page_id: page.id,
             options: {
               visibility: parse.data.visibility,
@@ -286,21 +341,34 @@ export function registerPublishRoutes({
               expires_at: parse.data.expires_at,
               release_notes: parse.data.release_notes,
             },
-            steps: governance.steps,
+            steps: [],
             approvals: [],
-            current_step_order: governance.steps[0]?.step_order ?? 1,
+            current_step_order: 1,
+            approval_policy: publishPolicyDecision.approvalPolicy,
           };
 
           const approval = await editor.createPublishApprovalRequest({
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
             targetId: page.id,
-            requestedByUserId: req.userId,
+            requestedByUserId: req.userId!,
+            targetType: "landing_page",
+            requestType: "LANDING_PAGE_PUBLISH",
             requestPayload: requestPayload as unknown as Record<string, unknown>,
           });
 
+          await slackNotifier.notifyApprovalRequested({
+            organizationId: req.organizationId!,
+            requestId: approval.id,
+            title: page.title,
+            accountName: page.story.account.name,
+            requestedByLabel: req.userId!,
+            reviewUrl: `${process.env.APP_URL ?? process.env.FRONTEND_URL ?? ""}/admin/publish-approvals`,
+            assetType: "landing_page",
+          }).catch(() => {});
+
           await auditLogs.record({
-            organizationId: req.organizationId,
-            actorUserId: req.userId,
+            organizationId: req.organizationId!,
+            actorUserId: req.userId!,
             category: "PUBLISH",
             action: "PAGE_PUBLISH_APPROVAL_REQUESTED",
             targetType: "landing_page",
@@ -308,7 +376,8 @@ export function registerPublishRoutes({
             severity: "INFO",
             metadata: {
               approval_request_id: approval.id,
-              approval_steps: governance.steps.length,
+              approval_steps: 1,
+              approval_policy: publishPolicyDecision.approvalPolicy,
               release_notes_present: !!parse.data.release_notes,
             },
             ipAddress: req.ip,
@@ -318,7 +387,8 @@ export function registerPublishRoutes({
           res.status(202).json({
             queued_for_approval: true,
             request_id: approval.id,
-            current_step_order: requestPayload.current_step_order,
+            current_step_order: 1,
+            approval_policy: publishPolicyDecision.approvalPolicy,
           });
           return;
         }
@@ -329,20 +399,21 @@ export function registerPublishRoutes({
           expiresAt: parse.data.expires_at
             ? new Date(parse.data.expires_at)
             : undefined,
-          publishedByUserId: req.userId,
+          publishedByUserId: req.userId!,
           releaseNotes: parse.data.release_notes,
           provenance: {
             publish_mode: "direct",
-            actor_user_id: req.userId,
+            actor_user_id: req.userId!,
             actor_user_role: req.userRole ?? null,
+            approval_policy: publishPolicyDecision.approvalPolicy,
             governance_required_provenance: governance.requireProvenance,
             request_ip: req.ip ?? null,
           },
         });
         await clearScheduledPublish(req.params.pageId as string);
         await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
+          organizationId: req.organizationId!,
+          actorUserId: req.userId!,
           category: "PUBLISH",
           action: "PAGE_PUBLISHED",
           targetType: "landing_page",
@@ -357,18 +428,18 @@ export function registerPublishRoutes({
           userAgent: req.get("user-agent"),
         });
         await enqueuePostPublishValidation({
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           pageId: req.params.pageId as string,
-          publishedByUserId: req.userId,
+          publishedByUserId: req.userId!,
         });
         await dispatchOutboundWebhookEvent(prisma, {
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           eventType: "landing_page_published",
           payload: {
             page_id: req.params.pageId as string,
             slug: result.slug,
             url: result.url,
-            published_by_user_id: req.userId,
+            published_by_user_id: req.userId!,
           },
         }).catch((err) => {
           logger.error("Outbound webhook dispatch failed", { error: err });
@@ -410,14 +481,14 @@ export function registerPublishRoutes({
     "/:pageId/versions",
     requirePageOwnerOrPermission(prisma),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
       const versions = await editor.listArtifactVersions(
       req.params.pageId as string,
-      req.organizationId
+      req.organizationId!
       );
       sendSuccess(res, {
       versions: versions.map((v) => ({
@@ -441,7 +512,7 @@ export function registerPublishRoutes({
     "/:pageId/versions/:versionId/rollback",
     requirePermission(prisma, "publish"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId || !req.userId) {
+      if (!req.organizationId! || !req.userId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -449,11 +520,11 @@ export function registerPublishRoutes({
       await editor.rollbackToVersion(
       req.params.pageId as string,
       req.params.versionId as string,
-      req.userId
+      req.userId!
       );
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "PUBLISH",
       action: "PAGE_VERSION_ROLLBACK",
       targetType: "landing_page",
@@ -474,6 +545,10 @@ export function registerPublishRoutes({
     "/:pageId/unpublish",
     requirePageOwnerOrPermission(prisma),
     asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
 
       const page = await editor.getForEditing(req.params.pageId as string);
       if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
@@ -484,8 +559,8 @@ export function registerPublishRoutes({
       await editor.unpublish(req.params.pageId as string);
       await clearScheduledPublish(req.params.pageId as string);
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "PUBLISH",
       action: "PAGE_UNPUBLISHED",
       targetType: "landing_page",
@@ -505,6 +580,10 @@ export function registerPublishRoutes({
     "/:pageId/archive",
     requirePageOwnerOrPermission(prisma),
     asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
 
       const page = await editor.getForEditing(req.params.pageId as string);
       if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
@@ -515,8 +594,8 @@ export function registerPublishRoutes({
       await editor.archive(req.params.pageId as string);
       await clearScheduledPublish(req.params.pageId as string);
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "PUBLISH",
       action: "PAGE_ARCHIVED",
       targetType: "landing_page",
@@ -534,16 +613,19 @@ export function registerPublishRoutes({
 
   router.get(
     "/approvals/publish",
-    requirePermission(prisma, "publish"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
+        return;
+      }
+      if (!(await canReviewPublishApprovals(req))) {
+        sendForbidden(res, "permission_denied");
         return;
       }
 
       const status = typeof req.query.status === "string" ? req.query.status : "PENDING";
 
-      const rows = await editor.listPublishApprovalRequests(req.organizationId, status);
+      const rows = await editor.listPublishApprovalRequests(req.organizationId!, status);
 
       sendSuccess(res, {
       approvals: rows.map((r) => ({
@@ -563,22 +645,25 @@ export function registerPublishRoutes({
 
   router.post(
     "/approvals/publish/:requestId/review",
-    requirePermission(prisma, "publish"),
     asyncHandler(async (req: AuthReq, res: Response) => {
       const parse = ReviewPublishApprovalSchema.safeParse(req.body);
       if (!parse.success) {
         sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
-      if (!req.organizationId || !req.userId) {
+      if (!req.organizationId! || !req.userId!) {
         sendUnauthorized(res, "Authentication required");
+        return;
+      }
+      if (!(await canReviewPublishApprovals(req))) {
+        sendForbidden(res, "permission_denied");
         return;
       }
 
       try {
         const request = await editor.findPublishApprovalRequest(
           req.params.requestId as string,
-          req.organizationId
+          req.organizationId!
         );
         if (!request) {
           sendNotFound(res, "Publish approval request not found");
@@ -606,13 +691,13 @@ export function registerPublishRoutes({
         if (parse.data.decision === "REJECT") {
           await editor.updateApprovalRequest(request.id, {
             status: "REJECTED",
-            reviewerUserId: req.userId,
+            reviewerUserId: req.userId!,
             reviewNotes: parse.data.notes ?? null,
             reviewedAt: new Date(),
           });
           await auditLogs.record({
-            organizationId: req.organizationId,
-            actorUserId: req.userId,
+            organizationId: req.organizationId!,
+            actorUserId: req.userId!,
             category: "PUBLISH",
             action: "PAGE_PUBLISH_APPROVAL_REJECTED",
             targetType: "landing_page",
@@ -628,7 +713,7 @@ export function registerPublishRoutes({
 
         const approvals = Array.isArray(payload.approvals) ? payload.approvals : [];
         const alreadyReviewedThisStep = approvals.some(
-          (a) => a.step_order === currentStepOrder && a.reviewer_user_id === req.userId
+          (a) => a.step_order === currentStepOrder && a.reviewer_user_id === req.userId!
         );
         if (alreadyReviewedThisStep) {
           sendConflict(res, "You already approved this workflow step.");
@@ -637,7 +722,7 @@ export function registerPublishRoutes({
 
         approvals.push({
           step_order: currentStepOrder,
-          reviewer_user_id: req.userId,
+          reviewer_user_id: req.userId!,
           reviewer_name: null,
           reviewer_email: null,
           decided_at: new Date().toISOString(),
@@ -677,7 +762,7 @@ export function registerPublishRoutes({
         };
 
         const page = await editor.getForEditing(request.targetId);
-        const governance = await getArtifactPublishGovernance(prisma, req.organizationId);
+        const governance = await getArtifactPublishGovernance(prisma, req.organizationId!);
         if (publishOptions.expires_at && governance.maxExpirationDays) {
           const expiresAt = new Date(publishOptions.expires_at);
           const maxDate = new Date();
@@ -698,14 +783,14 @@ export function registerPublishRoutes({
           expiresAt: publishOptions.expires_at
             ? new Date(publishOptions.expires_at)
             : undefined,
-          publishedByUserId: req.userId,
+          publishedByUserId: req.userId!,
           approvalRequestId: request.id,
           releaseNotes: publishOptions.release_notes,
           provenance: {
             publish_mode: "approval_chain",
             approval_request_id: request.id,
             approvals,
-            finalized_by_user_id: req.userId,
+            finalized_by_user_id: req.userId!,
             finalized_at: new Date().toISOString(),
           },
         });
@@ -713,7 +798,7 @@ export function registerPublishRoutes({
 
         await editor.updateApprovalRequest(request.id, {
           status: "APPROVED",
-          reviewerUserId: req.userId,
+          reviewerUserId: req.userId!,
           reviewNotes: parse.data.notes ?? null,
           reviewedAt: new Date(),
           requestPayload: {
@@ -724,8 +809,8 @@ export function registerPublishRoutes({
         });
 
         await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
+          organizationId: req.organizationId!,
+          actorUserId: req.userId!,
           category: "PUBLISH",
           action: "PAGE_PUBLISH_APPROVAL_APPROVED",
           targetType: "landing_page",
@@ -740,18 +825,18 @@ export function registerPublishRoutes({
           userAgent: req.get("user-agent"),
         });
         await enqueuePostPublishValidation({
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           pageId: request.targetId,
-          publishedByUserId: req.userId,
+          publishedByUserId: req.userId!,
         });
         await dispatchOutboundWebhookEvent(prisma, {
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           eventType: "landing_page_published",
           payload: {
             page_id: request.targetId,
             slug: result.slug,
             url: result.url,
-            published_by_user_id: req.userId,
+            published_by_user_id: req.userId!,
             approval_request_id: request.id,
           },
         }).catch((err) => {

@@ -12,6 +12,8 @@ export interface BuildStoryRequest {
   story_length?: StoryLength;
   story_outline?: StoryOutline;
   story_type?: StoryTypeInput;
+  ai_provider?: "openai" | "anthropic" | "google";
+  ai_model?: string;
 }
 
 export interface StoryQuote {
@@ -71,7 +73,7 @@ export interface StorySummary {
   id: string;
   title: string;
   story_type: string;
-  story_status: "DRAFT" | "PAGE_CREATED" | "PUBLISHED" | "ARCHIVED";
+  story_status: "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED";
   funnel_stages: FunnelStage[];
   filter_tags: string[];
   generated_at: string;
@@ -86,6 +88,11 @@ export interface StoryLibraryItem extends StorySummary {
     name: string;
     domain: string | null;
   };
+}
+
+export interface StoryLibraryTaxonomyCounts {
+  funnel_stage_counts: Record<string, number>;
+  topic_counts: Record<string, number>;
 }
 
 export interface StoryComment {
@@ -992,6 +999,40 @@ export interface DataGovernanceSettings {
   rpo_target_minutes: number;
 }
 
+export type ApprovalPolicyMode =
+  | "ALL_REQUIRED"
+  | "ANON_NO_APPROVAL"
+  | "NAMED_NO_APPROVAL"
+  | "ALL_NO_APPROVAL";
+
+export interface DashboardPublishSettings {
+  landing_pages_enabled: boolean;
+  default_page_visibility: "PRIVATE" | "SHARED_WITH_LINK";
+  approval_policy: ApprovalPolicyMode;
+  require_approval_to_publish: boolean;
+  allowed_publishers: string[];
+  max_pages_per_user: number | null;
+  company_name_replacements: Record<string, string>;
+}
+
+export interface DataGovernanceOverview {
+  pending_approvals_count: number;
+  pending_deletion_requests_count: number;
+  retention_days: number;
+  eligible_call_deletions: number;
+  legal_hold_enabled: boolean;
+  pii_export_enabled: boolean;
+  allow_named_story_exports: boolean;
+  recent_audit_events: Array<{
+    id: string;
+    category: string;
+    action: string;
+    severity: string;
+    actor_user_id: string | null;
+    created_at: string;
+  }>;
+}
+
 export interface DeletionRequest {
   id: string;
   status: string;
@@ -1097,6 +1138,7 @@ export interface TranscriptCallMeta {
   recordingUrl: string | null;
   language: string;
   wordCount: number;
+  viewMode?: "RAW" | "SCRUBBED";
 }
 
 export interface TranscriptData {
@@ -1136,6 +1178,12 @@ export interface SavePageDraftSuccess {
 
 export type SavePageDraftResult = SavePageDraftSuccess | SavePageDraftConflict;
 
+export interface PublishPiiScanResult {
+  blocking: boolean;
+  total_detections: number;
+  by_type: Record<string, number>;
+}
+
 export interface ArtifactVersion {
   id: string;
   version_number: number;
@@ -1156,7 +1204,11 @@ export interface ArtifactVersion {
 export interface PublishApprovalRequestRow {
   id: string;
   status: string;
-  target_id: string;
+  asset_type: string;
+  asset_id: string;
+  title: string;
+  account_name: string | null;
+  request_type: string;
   created_at: string;
   reviewed_at: string | null;
   requested_by: {
@@ -1170,6 +1222,35 @@ export interface PublishApprovalRequestRow {
     email: string;
   } | null;
   payload: Record<string, unknown> | null;
+}
+
+export interface MyApprovalRequestRow {
+  id: string;
+  status: string;
+  asset_type: string;
+  asset_id: string;
+  title: string;
+  account_name: string | null;
+  request_type: string;
+  created_at: string;
+  reviewed_at: string | null;
+  review_notes: string | null;
+  requested_by: {
+    id: string;
+    name: string | null;
+    email: string;
+  };
+  reviewer: {
+    id: string;
+    name: string | null;
+    email: string;
+  } | null;
+}
+
+export interface ApprovalSlackSettings {
+  enabled: boolean;
+  approver_webhook_url_masked: string | null;
+  creator_webhook_url_masked: string | null;
 }
 
 export interface ArtifactGovernancePolicySettings {
@@ -1280,6 +1361,7 @@ export interface DashboardPageSummary {
   title: string;
   slug: string;
   status: string;
+  lifecycleStage: "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED";
   visibility: string;
   viewCount: number;
   accountName: string;
@@ -1293,6 +1375,96 @@ export interface DashboardCreator {
   userId: string;
   name: string | null;
   email: string;
+}
+
+export interface ContentQueueItem {
+  asset_type: "story" | "landing_page";
+  asset_id: string;
+  title: string;
+  account: {
+    id: string;
+    name: string;
+  };
+  creator: {
+    id: string;
+    name: string | null;
+    email: string;
+  } | null;
+  stage: "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED";
+  updated_at: string;
+  published_at: string | null;
+  latest_page_id: string | null;
+  archived: boolean;
+}
+
+export interface MyQueueBuckets {
+  draft: ContentQueueItem[];
+  in_review: ContentQueueItem[];
+  approved: ContentQueueItem[];
+  published_recent: ContentQueueItem[];
+}
+
+export interface MyQueueCounts {
+  draft: number;
+  in_review: number;
+  approved: number;
+  published_recent: number;
+}
+
+// ─── Quote Library ──────────────────────────────────────────────────────────
+
+export type QuoteAttributionDisplay = "DISPLAYED" | "HIDDEN" | "OBFUSCATED";
+
+export interface QuoteLibraryItem {
+  id: string;
+  tier: "AUTO" | "CURATED";
+  quote_text: string;
+  confidence_score: number;
+  created_at: string;
+  curated_at: string | null;
+  curation_note: string | null;
+  account: {
+    id: string;
+    name: string | null;
+  } | null;
+  call: {
+    id: string;
+    title: string | null;
+    occurred_at: string;
+  } | null;
+  is_starred: boolean;
+  curated_by: {
+    id: string;
+    name: string | null;
+    email: string | null;
+  } | null;
+  source: {
+    available: boolean;
+    mode: "RAW" | "PROXY";
+    url: string | null;
+  };
+}
+
+export interface QuoteLibraryResponse {
+  attribution_display: QuoteAttributionDisplay;
+  quotes: QuoteLibraryItem[];
+}
+
+export interface QuoteSourceSegmentResponse {
+  quote_id: string;
+  mode: "RAW" | "SCRUBBED";
+  call: {
+    id: string;
+    title: string | null;
+    occurred_at: string;
+  } | null;
+  source: {
+    chunk_id: string | null;
+    start_ms: number | null;
+    end_ms: number | null;
+    text: string;
+  };
+  transcript_url: string | null;
 }
 
 // ─── Chatbot Connector ──────────────────────────────────────────────────────

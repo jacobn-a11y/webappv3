@@ -33,7 +33,7 @@ export function registerHealthRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const organizationId = req.organizationId;
+      const organizationId = req.organizationId!;
       const runAgg = await service.getIntegrationHealth(organizationId);
 
       sendSuccess(res, { integrations: runAgg });
@@ -46,7 +46,7 @@ export function registerHealthRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const organizationId = req.organizationId;
+      const organizationId = req.organizationId!;
 
       const snapshot = await service.getDiagnosticsSnapshot(organizationId);
 
@@ -110,7 +110,7 @@ export function registerHealthRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const organizationId = req.organizationId;
+      const organizationId = req.organizationId!;
 
       const { runs24h, failedByProvider, configs } = await service.getQueueSloData(organizationId);
 

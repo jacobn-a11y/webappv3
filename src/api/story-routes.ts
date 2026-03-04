@@ -14,6 +14,7 @@ import type { StoryBuilder } from "../services/story-builder.js";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import { AccountAccessService } from "../services/account-access.js";
 import { RoleProfileService } from "../services/role-profiles.js";
+import { StoryQueryService } from "../services/story-query.js";
 import { AIConfigService } from "../services/ai-config.js";
 import { AIUsageTracker, TrackedAIClient } from "../services/ai-usage-tracker.js";
 import { FailoverAIClient } from "../services/ai-resilience.js";
@@ -34,6 +35,7 @@ export function createStoryRoutes(
   const router = Router();
   const accessService = new AccountAccessService(prisma);
   const roleProfiles = new RoleProfileService(prisma);
+  const storyQuery = new StoryQueryService(prisma);
 
   const normalizeRole = (role: unknown): UserRole => {
     if (
@@ -51,12 +53,18 @@ export function createStoryRoutes(
     organizationId: string;
     userId: string;
     userRole: UserRole;
+    provider?: "openai" | "anthropic" | "google";
+    model?: string;
   }) => {
     const resolved = await aiConfigService.resolveClientWithFailover(
       input.organizationId,
       input.userId,
       input.userRole,
-      { operation: "STORY_GENERATION" }
+      {
+        operation: "STORY_GENERATION",
+        provider: input.provider,
+        model: input.model,
+      }
     );
 
     const primaryTracked = new TrackedAIClient(
@@ -108,6 +116,7 @@ export function createStoryRoutes(
   const sharedDeps = {
     router,
     prisma,
+    storyQuery,
     accessService,
     roleProfiles,
   };
@@ -120,7 +129,10 @@ export function createStoryRoutes(
     dispatchStoryEvent,
   });
 
-  registerLibraryRoutes(sharedDeps);
+  registerLibraryRoutes({
+    ...sharedDeps,
+    ragEngine,
+  });
 
   registerExportRoutes({
     ...sharedDeps,

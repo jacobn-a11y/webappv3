@@ -36,8 +36,14 @@ export function sendError(
   res.status(statusCode).json(body);
 }
 
-export function sendBadRequest(res: Response, message: string, details?: unknown): void {
-  sendError(res, 400, "bad_request", message, details);
+export function sendBadRequest(res: Response, messageOrError: string, details?: unknown): void {
+  // Route handlers often pass a machine-readable code (e.g. validation_error).
+  // Preserve that code in `error` while still supporting plain-text messages.
+  if (/^[a-z0-9_]+$/.test(messageOrError)) {
+    sendError(res, 400, messageOrError, undefined, details);
+    return;
+  }
+  sendError(res, 400, "bad_request", messageOrError, details);
 }
 
 export function sendUnauthorized(res: Response, message = "Authentication required"): void {

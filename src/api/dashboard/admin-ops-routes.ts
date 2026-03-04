@@ -60,7 +60,7 @@ export function registerAdminOpsRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const incidents = await prisma.incident.findMany({
-      where: { organizationId: req.organizationId },
+      where: { organizationId: req.organizationId! },
       include: {
         updates: {
           orderBy: { createdAt: "desc" },
@@ -107,7 +107,7 @@ export function registerAdminOpsRoutes({
 
       const incident = await prisma.incident.create({
       data: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         title: payload.title,
         summary: payload.summary,
         severity: payload.severity ?? "MEDIUM",
@@ -115,20 +115,20 @@ export function registerAdminOpsRoutes({
         startedAt: payload.started_at
           ? new Date(payload.started_at)
           : new Date(),
-        createdByUserId: req.userId ?? null,
+        createdByUserId: req.userId! ?? null,
         updates: {
           create: {
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
             message: "Incident opened.",
             status: "OPEN",
-            createdByUserId: req.userId ?? null,
+            createdByUserId: req.userId! ?? null,
           },
         },
       },
       });
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "OPS",
       action: "INCIDENT_CREATED",
       targetType: "incident",
@@ -165,7 +165,7 @@ export function registerAdminOpsRoutes({
       const existing = await prisma.incident.findFirst({
       where: {
         id: incidentId,
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
       },
       select: { id: true, status: true },
       });
@@ -179,11 +179,11 @@ export function registerAdminOpsRoutes({
       prisma.incidentUpdate.create({
         data: {
           incidentId,
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           message: payload.message,
           status: status ?? null,
           metadata: (payload.metadata ?? undefined) as Prisma.InputJsonValue | undefined,
-          createdByUserId: req.userId ?? null,
+          createdByUserId: req.userId! ?? null,
         },
       }),
       prisma.incident.update({
@@ -201,8 +201,8 @@ export function registerAdminOpsRoutes({
       ]);
 
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "OPS",
       action: "INCIDENT_UPDATED",
       targetType: "incident",
@@ -232,7 +232,7 @@ export function registerAdminOpsRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const sessions = await prisma.userSession.findMany({
-      where: { organizationId: req.organizationId },
+      where: { organizationId: req.organizationId! },
       include: {
         user: {
           select: { id: true, email: true, name: true, role: true },
@@ -272,7 +272,7 @@ export function registerAdminOpsRoutes({
       const result = await prisma.userSession.updateMany({
       where: {
         id: sessionId,
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         revokedAt: null,
       },
       data: { revokedAt: new Date() },
@@ -282,8 +282,8 @@ export function registerAdminOpsRoutes({
       return;
       }
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "SECURITY",
       action: "SESSION_REVOKED",
       targetType: "user_session",
@@ -305,10 +305,10 @@ export function registerAdminOpsRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const config = await prisma.scimProvisioning.findUnique({
-      where: { organizationId: req.organizationId },
+      where: { organizationId: req.organizationId! },
       });
       const count = await prisma.scimIdentity.count({
-      where: { organizationId: req.organizationId },
+      where: { organizationId: req.organizationId! },
       });
       sendSuccess(res, {
       enabled: config?.enabled ?? false,
@@ -330,16 +330,16 @@ export function registerAdminOpsRoutes({
       }
 
       const cfg = await prisma.scimProvisioning.upsert({
-      where: { organizationId: req.organizationId },
+      where: { organizationId: req.organizationId! },
       create: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         enabled: payload.enabled,
       },
       update: { enabled: payload.enabled },
       });
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "SECURITY",
       action: "SCIM_PROVISIONING_UPDATED",
       targetType: "scim_provisioning",
@@ -363,9 +363,9 @@ export function registerAdminOpsRoutes({
       const hashed = hashScimToken(raw);
       const hint = `${raw.slice(0, 4)}...${raw.slice(-4)}`;
       const cfg = await prisma.scimProvisioning.upsert({
-      where: { organizationId: req.organizationId },
+      where: { organizationId: req.organizationId! },
       create: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         enabled: true,
         tokenHash: hashed,
         endpointSecretHint: hint,
@@ -377,8 +377,8 @@ export function registerAdminOpsRoutes({
       },
       });
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "SECURITY",
       action: "SCIM_TOKEN_ROTATED",
       targetType: "scim_provisioning",
@@ -404,7 +404,7 @@ export function registerAdminOpsRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const flags = await featureFlags.listResolved(req.organizationId);
+      const flags = await featureFlags.listResolved(req.organizationId!);
       sendSuccess(res, {
       flags: flags.map((f: { id: string; key: string; enabled: boolean; resolvedEnabled: boolean; overrideSource: string | null; config: unknown; createdAt: Date; updatedAt: Date }) => ({
         id: f.id,
@@ -426,7 +426,7 @@ export function registerAdminOpsRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const enabledKeys = await featureFlags.getResolvedEnabledKeys(req.organizationId);
+      const enabledKeys = await featureFlags.getResolvedEnabledKeys(req.organizationId!);
       sendSuccess(res, {
       environment: process.env.DEPLOY_ENV || process.env.NODE_ENV || "development",
       enabled_feature_flags: enabledKeys,
@@ -445,14 +445,14 @@ export function registerAdminOpsRoutes({
       }
 
         const flag = await featureFlags.upsert({
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           key: payload.key,
           enabled: payload.enabled,
           config: payload.config,
         });
         await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
+          organizationId: req.organizationId!,
+          actorUserId: req.userId!,
           category: "POLICY",
           action: "FEATURE_FLAG_UPDATED",
           targetType: "feature_flag",

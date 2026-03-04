@@ -24,6 +24,8 @@ const PERMISSION_COLUMNS = [
   { key: "CREATE_LANDING_PAGE", label: "Create", adminOnly: false },
   { key: "PUBLISH_LANDING_PAGE", label: "Publish", adminOnly: false },
   { key: "PUBLISH_NAMED_LANDING_PAGE", label: "Publish Named", adminOnly: true },
+  { key: "APPROVE_PUBLISH_REQUESTS", label: "Approve Requests", adminOnly: false },
+  { key: "VIEW_RAW_TRANSCRIPTS", label: "View Raw Transcript", adminOnly: false },
   { key: "EDIT_ANY_LANDING_PAGE", label: "Edit Any", adminOnly: false },
   { key: "DELETE_ANY_LANDING_PAGE", label: "Delete Any", adminOnly: false },
   { key: "VIEW_ANALYTICS", label: "Analytics", adminOnly: false },

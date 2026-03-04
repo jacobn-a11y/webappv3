@@ -65,6 +65,10 @@ model Organization {
   teamApprovalAdminScopes TeamApprovalAdminScope[]
   storyQualityFeedback StoryQualityFeedback[]
   storyClaimLineage    StoryClaimLineage[]
+  starredStoryQuotes   UserStarredQuote[]
+  quotes               Quote[]
+  quoteStars           QuoteStar[]
+  quoteAuditEvents     QuoteAuditEvent[]
   accountMergeRuns     AccountMergeRun[]
   supportImpersonationSessions SupportImpersonationSession[]
   incidents           Incident[]
@@ -301,6 +305,7 @@ model User {
   workosUserId   String?  @unique
   organizationId String
   role           UserRole @default(MEMBER)
+  quoteAttributionDisplay QuoteAttributionDisplay @default(DISPLAYED)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -329,6 +334,12 @@ model User {
   supportImpersonationActorSessions SupportImpersonationSession[] @relation("SupportImpersonationActor")
   supportImpersonationTargetSessions SupportImpersonationSession[] @relation("SupportImpersonationTarget")
   supportImpersonationRevokedSessions SupportImpersonationSession[] @relation("SupportImpersonationRevokedBy")
+  curatedQuotes       HighValueQuote[]  @relation("QuoteCuratedBy")
+  starredQuotes       UserStarredQuote[]
+  createdQuotes       Quote[]           @relation("QuoteCreatedBy")
+  curatedLibraryQuotes Quote[]          @relation("QuoteCuratedByV2")
+  quoteStars          QuoteStar[]
+  quoteAuditEvents    QuoteAuditEvent[]
 
   @@index([organizationId])
   @@map("users")
@@ -339,6 +350,12 @@ enum UserRole {
   ADMIN
   MEMBER
   VIEWER
+}
+
+enum QuoteAttributionDisplay {
+  DISPLAYED
+  HIDDEN
+  OBFUSCATED
 }
 
 model RoleProfile {
@@ -410,6 +427,7 @@ model Account {
   domainAliases    AccountDomain[]
   userAccess       UserAccountAccess[]
   storyRegenLogs   StoryRegenLog[]
+  quotes           Quote[]
 
   @@unique([organizationId, domain])
   @@unique([organizationId, salesforceId])
@@ -475,6 +493,7 @@ model Call {
   transcript   Transcript?
   participants CallParticipant[]
   tags         CallTag[]
+  quotes       Quote[]
 
   @@index([organizationId, accountId])
   @@index([organizationId, occurredAt])
@@ -643,12 +662,14 @@ model Story {
   generatedById  String?
   confidenceScore Float         @default(0.5)
   lineageSummary  Json?
+  publishedAt     DateTime?
   generatedAt    DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
   organization Organization   @relation(fields: [organizationId], references: [id])
   account      Account        @relation(fields: [accountId], references: [id])
   quotes       HighValueQuote[]
+  libraryQuotes Quote[]
   landingPages LandingPage[]
   claimLineage StoryClaimLineage[]
   qualityFeedback StoryQualityFeedback[]
@@ -676,14 +697,130 @@ model HighValueQuote {
   metricType  String?
   metricValue String?
   callId      String?
+  sourceChunkId String?
+  tier        QuoteTier @default(AUTO)
+  createdByType QuoteCreatedByType @default(SYSTEM)
+  curatedByUserId String?
+  curatedAt   DateTime?
+  curationNote String?
   createdAt   DateTime @default(now())
   confidenceScore Float @default(0.6)
   lineageMetadata Json?
 
   story Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  curatedBy User? @relation("QuoteCuratedBy", fields: [curatedByUserId], references: [id], onDelete: SetNull)
+  starredByUsers UserStarredQuote[]
 
   @@index([storyId])
+  @@index([storyId, tier, createdAt])
   @@map("high_value_quotes")
+}
+
+model Quote {
+  id              String             @id @default(cuid())
+  organizationId  String
+  accountId       String
+  storyId         String?
+  callId          String
+  quoteText       String
+  sourceChunkId   String
+  sourceStartMs   Int?
+  sourceEndMs     Int?
+  tier            QuoteTier          @default(AUTO)
+  createdByType   QuoteCreatedByType @default(SYSTEM)
+  createdByUserId String?
+  curatedByUserId String?
+  curatedAt       DateTime?
+  curationNote    String?
+  confidenceScore Float              @default(0.6)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  account      Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  story        Story?       @relation(fields: [storyId], references: [id], onDelete: SetNull)
+  call         Call         @relation(fields: [callId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("QuoteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  curatedBy    User?        @relation("QuoteCuratedByV2", fields: [curatedByUserId], references: [id], onDelete: SetNull)
+  stars        QuoteStar[]
+  auditEvents  QuoteAuditEvent[]
+
+  @@index([organizationId, accountId, tier, createdAt])
+  @@index([organizationId, callId, createdAt])
+  @@index([organizationId, sourceChunkId])
+  @@map("quotes")
+}
+
+model QuoteStar {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  quoteId        String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quote        Quote        @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, quoteId])
+  @@index([organizationId, userId, createdAt])
+  @@map("quote_stars")
+}
+
+enum QuoteAuditAction {
+  CREATE
+  AUTO_EXTRACT
+  SAVE_FROM_TRANSCRIPT
+  PROMOTE
+  DEMOTE
+  STAR
+  UNSTAR
+}
+
+model QuoteAuditEvent {
+  id             String          @id @default(cuid())
+  organizationId String
+  quoteId        String
+  actorUserId    String?
+  action         QuoteAuditAction
+  previousTier   QuoteTier?
+  newTier        QuoteTier?
+  metadata       Json?
+  occurredAt     DateTime        @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  quote        Quote        @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  actor        User?        @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, quoteId, occurredAt])
+  @@index([organizationId, actorUserId, occurredAt])
+  @@map("quote_audit_events")
+}
+
+enum QuoteTier {
+  AUTO
+  CURATED
+}
+
+enum QuoteCreatedByType {
+  SYSTEM
+  USER
+}
+
+model UserStarredQuote {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  quoteId        String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quote        HighValueQuote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, quoteId])
+  @@index([organizationId, userId, createdAt])
+  @@map("user_starred_quotes")
 }
 
 model StoryClaimLineage {
@@ -1117,6 +1254,7 @@ model OrgSettings {
   organizationId            String                   @unique
   landingPagesEnabled       Boolean                  @default(true)
   defaultPageVisibility     PageVisibility           @default(PRIVATE)
+  approvalPolicy            ApprovalPolicy           @default(ALL_REQUIRED)
   requireApprovalToPublish  Boolean                  @default(false)
   allowedPublishers         UserRole[]               @default([OWNER, ADMIN])
   maxPagesPerUser           Int?
@@ -1139,6 +1277,13 @@ model OrgSettings {
 enum TranscriptTruncationMode {
   OLDEST_FIRST
   NEWEST_FIRST
+}
+
+enum ApprovalPolicy {
+  ALL_REQUIRED
+  ANON_NO_APPROVAL
+  NAMED_NO_APPROVAL
+  ALL_NO_APPROVAL
 }
 
 model UserPermission {
@@ -1185,6 +1330,8 @@ enum PermissionType {
   CREATE_LANDING_PAGE
   PUBLISH_LANDING_PAGE
   PUBLISH_NAMED_LANDING_PAGE
+  APPROVE_PUBLISH_REQUESTS
+  VIEW_RAW_TRANSCRIPTS
   EDIT_ANY_LANDING_PAGE
   DELETE_ANY_LANDING_PAGE
   MANAGE_PERMISSIONS
@@ -1718,10 +1865,13 @@ model AIUsageLimit {
   id                  String   @id @default(cuid())
   organizationId      String
   userId              String?
+  maxTokensPerWeek    Int?
   maxTokensPerDay     Int?
   maxTokensPerMonth   Int?
+  maxRequestsPerWeek  Int?
   maxRequestsPerDay   Int?
   maxRequestsPerMonth Int?
+  maxStoriesPerWeek   Int?
   maxStoriesPerMonth  Int?
   warningThresholdPct Int      @default(80)
   createdAt           DateTime @default(now())

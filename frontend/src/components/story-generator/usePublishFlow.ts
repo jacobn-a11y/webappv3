@@ -96,6 +96,12 @@ export function usePublishFlow(options: {
       const title = sanitizeFileName(result.title || `${accountName}-story`);
       setExportingFormat(format);
       try {
+        const proceed = window.confirm(
+          "This export may contain PII or named customer data. Confirm you have permission to share externally."
+        );
+        if (!proceed) {
+          return;
+        }
         const blob = await downloadStoryExport(result.story_id, format);
         saveBlob(blob, `${title || "story"}.${format}`);
         onPackagingAction?.("download_export", { format });

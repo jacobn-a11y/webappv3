@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import {
+  getApprovalSlackSettings,
   getPublishApprovals,
   reviewPublishApproval,
+  saveApprovalSlackSettings,
   type PublishApprovalRequestRow,
 } from "../lib/api";
 import { badgeClass, formatEnumLabel } from "../lib/format";
@@ -13,6 +15,13 @@ export function AdminPublishApprovalsPage() {
   const [status, setStatus] = useState("PENDING");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [slackSettingsVisible, setSlackSettingsVisible] = useState(false);
+  const [slackEnabled, setSlackEnabled] = useState(false);
+  const [approverWebhook, setApproverWebhook] = useState("");
+  const [creatorWebhook, setCreatorWebhook] = useState("");
+  const [approverWebhookMasked, setApproverWebhookMasked] = useState<string | null>(null);
+  const [creatorWebhookMasked, setCreatorWebhookMasked] = useState<string | null>(null);
+  const [slackSaving, setSlackSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -28,8 +37,25 @@ export function AdminPublishApprovalsPage() {
   };
 
   useEffect(() => {
-    load();
+    void load();
+    const intervalId = window.setInterval(() => {
+      void load();
+    }, 30_000);
+    return () => window.clearInterval(intervalId);
   }, [status]);
+
+  useEffect(() => {
+    getApprovalSlackSettings()
+      .then((settings) => {
+        setSlackSettingsVisible(true);
+        setSlackEnabled(settings.enabled);
+        setApproverWebhookMasked(settings.approver_webhook_url_masked);
+        setCreatorWebhookMasked(settings.creator_webhook_url_masked);
+      })
+      .catch(() => {
+        setSlackSettingsVisible(false);
+      });
+  }, []);
 
   const review = async (id: string, decision: "APPROVE" | "REJECT") => {
     setError(null);
@@ -38,6 +64,27 @@ export function AdminPublishApprovalsPage() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to review request");
+    }
+  };
+
+  const saveSlackSettings = async () => {
+    setSlackSaving(true);
+    setError(null);
+    try {
+      await saveApprovalSlackSettings({
+        enabled: slackEnabled,
+        approver_webhook_url: approverWebhook.trim() || undefined,
+        creator_webhook_url: creatorWebhook.trim() || undefined,
+      });
+      const refreshed = await getApprovalSlackSettings();
+      setApproverWebhook("");
+      setCreatorWebhook("");
+      setApproverWebhookMasked(refreshed.approver_webhook_url_masked);
+      setCreatorWebhookMasked(refreshed.creator_webhook_url_masked);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save Slack settings");
+    } finally {
+      setSlackSaving(false);
     }
   };
 
@@ -55,6 +102,51 @@ export function AdminPublishApprovalsPage() {
           </select>
         </div>
       </AdminSection>
+
+      {slackSettingsVisible && (
+        <AdminSection
+          title="Slack Integration"
+          subtitle="Send approval requests to approvers and decision updates to creators."
+        >
+          <div className="form-grid" style={{ gridTemplateColumns: "220px 1fr 1fr auto" }}>
+            <label className="form-group">
+              <span className="form-group__label">Enabled</span>
+              <input
+                type="checkbox"
+                checked={slackEnabled}
+                onChange={(event) => setSlackEnabled(event.target.checked)}
+              />
+            </label>
+            <label className="form-group">
+              <span className="form-group__label">Approver webhook URL</span>
+              <input
+                className="form-input"
+                value={approverWebhook}
+                onChange={(event) => setApproverWebhook(event.target.value)}
+                placeholder={approverWebhookMasked ?? "https://hooks.slack.com/services/..."}
+              />
+            </label>
+            <label className="form-group">
+              <span className="form-group__label">Creator webhook URL</span>
+              <input
+                className="form-input"
+                value={creatorWebhook}
+                onChange={(event) => setCreatorWebhook(event.target.value)}
+                placeholder={creatorWebhookMasked ?? "https://hooks.slack.com/services/..."}
+              />
+            </label>
+            <div className="form-group" style={{ alignSelf: "end" }}>
+              <button
+                className="btn btn--secondary"
+                onClick={() => void saveSlackSettings()}
+                disabled={slackSaving}
+              >
+                {slackSaving ? "Saving..." : "Save Slack Settings"}
+              </button>
+            </div>
+          </div>
+        </AdminSection>
+      )}
 
       {error && (
         <AdminErrorState
@@ -78,25 +170,23 @@ export function AdminPublishApprovalsPage() {
               <tr>
                 <th>Created</th>
                 <th>Status</th>
-                <th>Page ID</th>
+                <th>Asset</th>
+                <th>Title</th>
+                <th>Account</th>
                 <th>Requested By</th>
-                <th>Current Step</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => {
-                const payload =
-                  r.payload && typeof r.payload === "object"
-                    ? (r.payload as { current_step_order?: number })
-                    : {};
                 return (
                   <tr key={r.id}>
                     <td>{new Date(r.created_at).toLocaleString()}</td>
                     <td><span className={badgeClass(r.status)}>{formatEnumLabel(r.status)}</span></td>
-                    <td>{r.target_id}</td>
+                    <td>{formatEnumLabel(r.asset_type)}</td>
+                    <td>{r.title}</td>
+                    <td>{r.account_name ?? "-"}</td>
                     <td>{r.requested_by.name || r.requested_by.email}</td>
-                    <td>{payload.current_step_order ?? "-"}</td>
                     <td>
                       {r.status === "PENDING" ? (
                         <>

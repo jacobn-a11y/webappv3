@@ -31,9 +31,12 @@ export interface UsageContext {
 
 export interface UsageSummary {
   dailyTokens: number;
+  weeklyTokens: number;
   monthlyTokens: number;
   dailyRequests: number;
+  weeklyRequests: number;
   monthlyRequests: number;
+  weeklyStories: number;
   monthlyStories: number;
 }
 
@@ -42,10 +45,13 @@ export interface LimitStatus {
   reason?: string;
   usage: UsageSummary;
   limits: {
+    maxTokensPerWeek: number | null;
     maxTokensPerDay: number | null;
     maxTokensPerMonth: number | null;
+    maxRequestsPerWeek: number | null;
     maxRequestsPerDay: number | null;
     maxRequestsPerMonth: number | null;
+    maxStoriesPerWeek: number | null;
     maxStoriesPerMonth: number | null;
   };
   balance?: { balanceCents: number; lifetimeSpentCents: number } | null;
@@ -208,6 +214,9 @@ export class AIUsageTracker {
     costCents: number;
   }): Promise<void> {
     await this.prisma.aIUsageRecord.create({ data: record });
+    await this.checkOrgBudgetAlerts(record.organizationId).catch((err) => {
+      logger.error("Org budget alert check failed", { error: err });
+    });
   }
 
   /**
@@ -371,14 +380,25 @@ export class AIUsageTracker {
     ]);
 
     const limits = {
+      maxTokensPerWeek: limit?.maxTokensPerWeek ?? null,
       maxTokensPerDay: limit?.maxTokensPerDay ?? null,
       maxTokensPerMonth: limit?.maxTokensPerMonth ?? null,
+      maxRequestsPerWeek: limit?.maxRequestsPerWeek ?? null,
       maxRequestsPerDay: limit?.maxRequestsPerDay ?? null,
       maxRequestsPerMonth: limit?.maxRequestsPerMonth ?? null,
+      maxStoriesPerWeek: limit?.maxStoriesPerWeek ?? null,
       maxStoriesPerMonth: limit?.maxStoriesPerMonth ?? null,
     };
 
     // Check each limit
+    if (limits.maxTokensPerWeek !== null && usage.weeklyTokens >= limits.maxTokensPerWeek) {
+      return {
+        allowed: false,
+        reason: `Weekly token limit reached (${usage.weeklyTokens.toLocaleString()} / ${limits.maxTokensPerWeek.toLocaleString()})`,
+        usage, limits, balance,
+      };
+    }
+
     if (limits.maxTokensPerDay !== null && usage.dailyTokens >= limits.maxTokensPerDay) {
       return {
         allowed: false,
@@ -395,6 +415,14 @@ export class AIUsageTracker {
       };
     }
 
+    if (limits.maxRequestsPerWeek !== null && usage.weeklyRequests >= limits.maxRequestsPerWeek) {
+      return {
+        allowed: false,
+        reason: `Weekly request limit reached (${usage.weeklyRequests} / ${limits.maxRequestsPerWeek})`,
+        usage, limits, balance,
+      };
+    }
+
     if (limits.maxRequestsPerDay !== null && usage.dailyRequests >= limits.maxRequestsPerDay) {
       return {
         allowed: false,
@@ -407,6 +435,14 @@ export class AIUsageTracker {
       return {
         allowed: false,
         reason: `Monthly request limit reached (${usage.monthlyRequests} / ${limits.maxRequestsPerMonth})`,
+        usage, limits, balance,
+      };
+    }
+
+    if (limits.maxStoriesPerWeek !== null && usage.weeklyStories >= limits.maxStoriesPerWeek) {
+      return {
+        allowed: false,
+        reason: `Weekly story limit reached (${usage.weeklyStories} / ${limits.maxStoriesPerWeek})`,
         usage, limits, balance,
       };
     }
@@ -430,16 +466,37 @@ export class AIUsageTracker {
     userId: string
   ): Promise<UsageSummary> {
     const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfDay = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    );
+    const startOfMonth = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+    );
+    const utcWeekday = now.getUTCDay();
+    const daysSinceMonday = (utcWeekday + 6) % 7;
+    const startOfWeek = new Date(startOfDay);
+    startOfWeek.setUTCDate(startOfWeek.getUTCDate() - daysSinceMonday);
 
-    const [dailyAgg, monthlyAgg, dailyCount, monthlyCount, monthlyStories] =
+    const [
+      dailyAgg,
+      weeklyAgg,
+      monthlyAgg,
+      dailyCount,
+      weeklyCount,
+      monthlyCount,
+      weeklyStories,
+      monthlyStories,
+    ] =
       await Promise.all([
         this.prisma.aIUsageRecord.aggregate({
           where: { organizationId, userId, createdAt: { gte: startOfDay } },
           _sum: { totalTokens: true },
         }),
         this.prisma.aIUsageRecord.aggregate({
+          where: { organizationId, userId, createdAt: { gte: startOfWeek } },
+          _sum: { totalTokens: true },
+        }),
+        this.prisma.aIUsageRecord.aggregate({
           where: { organizationId, userId, createdAt: { gte: startOfMonth } },
           _sum: { totalTokens: true },
         }),
@@ -447,7 +504,18 @@ export class AIUsageTracker {
           where: { organizationId, userId, createdAt: { gte: startOfDay } },
         }),
         this.prisma.aIUsageRecord.count({
+          where: { organizationId, userId, createdAt: { gte: startOfWeek } },
+        }),
+        this.prisma.aIUsageRecord.count({
           where: { organizationId, userId, createdAt: { gte: startOfMonth } },
+        }),
+        this.prisma.aIUsageRecord.count({
+          where: {
+            organizationId,
+            userId,
+            operation: "STORY_GENERATION",
+            createdAt: { gte: startOfWeek },
+          },
         }),
         this.prisma.aIUsageRecord.count({
           where: {
@@ -461,9 +529,12 @@ export class AIUsageTracker {
 
     return {
       dailyTokens: dailyAgg._sum.totalTokens ?? 0,
+      weeklyTokens: weeklyAgg._sum.totalTokens ?? 0,
       monthlyTokens: monthlyAgg._sum.totalTokens ?? 0,
       dailyRequests: dailyCount,
+      weeklyRequests: weeklyCount,
       monthlyRequests: monthlyCount,
+      weeklyStories,
       monthlyStories,
     };
   }
@@ -522,12 +593,18 @@ export class AIUsageTracker {
 
     if (limit.maxTokensPerDay)
       checks.push({ limitType: "daily_tokens", current: usage.dailyTokens, max: limit.maxTokensPerDay });
+    if (limit.maxTokensPerWeek)
+      checks.push({ limitType: "weekly_tokens", current: usage.weeklyTokens, max: limit.maxTokensPerWeek });
     if (limit.maxTokensPerMonth)
       checks.push({ limitType: "monthly_tokens", current: usage.monthlyTokens, max: limit.maxTokensPerMonth });
     if (limit.maxRequestsPerDay)
       checks.push({ limitType: "daily_requests", current: usage.dailyRequests, max: limit.maxRequestsPerDay });
+    if (limit.maxRequestsPerWeek)
+      checks.push({ limitType: "weekly_requests", current: usage.weeklyRequests, max: limit.maxRequestsPerWeek });
     if (limit.maxRequestsPerMonth)
       checks.push({ limitType: "monthly_requests", current: usage.monthlyRequests, max: limit.maxRequestsPerMonth });
+    if (limit.maxStoriesPerWeek)
+      checks.push({ limitType: "weekly_stories", current: usage.weeklyStories, max: limit.maxStoriesPerWeek });
     if (limit.maxStoriesPerMonth)
       checks.push({ limitType: "monthly_stories", current: usage.monthlyStories, max: limit.maxStoriesPerMonth });
 
@@ -646,6 +723,84 @@ export class AIUsageTracker {
     }
   }
 
+  private async checkOrgBudgetAlerts(organizationId: string): Promise<void> {
+    const orgSettings = await this.prisma.orgSettings.findUnique({
+      where: { organizationId },
+      select: { dataGovernancePolicy: true },
+    });
+    const policy = decodeDataGovernancePolicy(orgSettings?.dataGovernancePolicy);
+    const mode =
+      policy.ai_budget_mode === "TOKENS" || policy.ai_budget_mode === "COST_CENTS"
+        ? policy.ai_budget_mode
+        : "COST_CENTS";
+    const budget =
+      mode === "TOKENS"
+        ? policy.ai_budget_monthly_tokens ?? null
+        : policy.ai_budget_monthly_cents ?? null;
+    if (!budget || budget <= 0) {
+      return;
+    }
+
+    const thresholds = Array.from(
+      new Set((policy.ai_budget_thresholds ?? [80, 90, 100]).filter((n) => n >= 1 && n <= 100))
+    ).sort((a, b) => a - b);
+    if (thresholds.length === 0) {
+      return;
+    }
+
+    const now = new Date();
+    const startOfMonth = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+    );
+
+    const usageAgg =
+      mode === "TOKENS"
+        ? await this.prisma.aIUsageRecord.aggregate({
+            where: { organizationId, createdAt: { gte: startOfMonth } },
+            _sum: { totalTokens: true },
+          })
+        : await this.prisma.aIUsageRecord.aggregate({
+            where: { organizationId, createdAt: { gte: startOfMonth } },
+            _sum: { costCents: true },
+          });
+
+    const currentUsage =
+      mode === "TOKENS"
+        ? Math.round((usageAgg as { _sum: { totalTokens?: number | null } })._sum.totalTokens ?? 0)
+        : Math.round((usageAgg as { _sum: { costCents?: number | null } })._sum.costCents ?? 0);
+    const pct = budget > 0 ? Math.floor((currentUsage / budget) * 100) : 0;
+    if (pct < thresholds[0]) {
+      return;
+    }
+
+    const recipients = await this.prisma.user.findMany({
+      where: {
+        organizationId,
+        role: { in: ["OWNER", "ADMIN"] },
+      },
+      select: { id: true },
+    });
+    if (recipients.length === 0) {
+      return;
+    }
+
+    const limitType = mode === "TOKENS" ? "monthly_budget_tokens" : "monthly_budget_cost";
+    for (const threshold of thresholds) {
+      if (pct < threshold) continue;
+      for (const recipient of recipients) {
+        await this.createNotificationIfNewSince(
+          organizationId,
+          recipient.id,
+          limitType,
+          threshold,
+          currentUsage,
+          budget,
+          startOfMonth
+        );
+      }
+    }
+  }
+
   // ─── Notifications ──────────────────────────────────────────────────
 
   async getPendingNotifications(organizationId: string, userId: string) {
@@ -688,10 +843,13 @@ export class AIUsageTracker {
   async setLimit(input: {
     organizationId: string;
     userId?: string;
+    maxTokensPerWeek?: number | null;
     maxTokensPerDay?: number | null;
     maxTokensPerMonth?: number | null;
+    maxRequestsPerWeek?: number | null;
     maxRequestsPerDay?: number | null;
     maxRequestsPerMonth?: number | null;
+    maxStoriesPerWeek?: number | null;
     maxStoriesPerMonth?: number | null;
     warningThresholdPct?: number;
   }): Promise<void> {
@@ -706,18 +864,24 @@ export class AIUsageTracker {
       create: {
         organizationId: input.organizationId,
         userId: input.userId ?? undefined,
+        maxTokensPerWeek: input.maxTokensPerWeek ?? undefined,
         maxTokensPerDay: input.maxTokensPerDay ?? undefined,
         maxTokensPerMonth: input.maxTokensPerMonth ?? undefined,
+        maxRequestsPerWeek: input.maxRequestsPerWeek ?? undefined,
         maxRequestsPerDay: input.maxRequestsPerDay ?? undefined,
         maxRequestsPerMonth: input.maxRequestsPerMonth ?? undefined,
+        maxStoriesPerWeek: input.maxStoriesPerWeek ?? undefined,
         maxStoriesPerMonth: input.maxStoriesPerMonth ?? undefined,
         warningThresholdPct: input.warningThresholdPct ?? 80,
       },
       update: {
+        maxTokensPerWeek: input.maxTokensPerWeek,
         maxTokensPerDay: input.maxTokensPerDay,
         maxTokensPerMonth: input.maxTokensPerMonth,
+        maxRequestsPerWeek: input.maxRequestsPerWeek,
         maxRequestsPerDay: input.maxRequestsPerDay,
         maxRequestsPerMonth: input.maxRequestsPerMonth,
+        maxStoriesPerWeek: input.maxStoriesPerWeek,
         maxStoriesPerMonth: input.maxStoriesPerMonth,
         warningThresholdPct: input.warningThresholdPct,
       },
@@ -763,24 +927,48 @@ export class AIUsageTracker {
   ): Promise<void> {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
+    await this.createNotificationIfNewSince(
+      organizationId,
+      userId,
+      limitType,
+      thresholdPct,
+      currentUsage,
+      limitValue,
+      startOfDay
+    );
+  }
 
+  private async createNotificationIfNewSince(
+    organizationId: string,
+    userId: string,
+    limitType: string,
+    thresholdPct: number,
+    currentUsage: number,
+    limitValue: number,
+    since: Date
+  ): Promise<void> {
     const existing = await this.prisma.aIUsageNotification.findFirst({
       where: {
         organizationId,
         userId,
         limitType,
         thresholdPct,
-        createdAt: { gte: startOfDay },
+        createdAt: { gte: since },
       },
     });
     if (existing) return;
 
     const labels: Record<string, string> = {
       daily_tokens: "daily token",
+      weekly_tokens: "weekly token",
       monthly_tokens: "monthly token",
       daily_requests: "daily request",
+      weekly_requests: "weekly request",
       monthly_requests: "monthly request",
+      weekly_stories: "weekly story",
       monthly_stories: "monthly case study",
+      monthly_budget_tokens: "monthly AI token budget",
+      monthly_budget_cost: "monthly AI spend budget",
       daily_spend_org: "daily AI spend",
       daily_spend_anomaly: "daily AI spend anomaly baseline",
     };

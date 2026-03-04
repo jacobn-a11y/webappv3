@@ -53,13 +53,15 @@ function formatDate(dateStr: string): string {
 function renderStatusBadge(status: string) {
   const labels: Record<string, string> = {
     DRAFT: "Draft",
+    IN_REVIEW: "In Review",
+    APPROVED: "Approved",
     PUBLISHED: "Published",
-    ARCHIVED: "Archived",
   };
   const classes: Record<string, string> = {
     DRAFT: "dash-pages__badge--draft",
+    IN_REVIEW: "dash-pages__badge--warning",
+    APPROVED: "dash-pages__badge--success",
     PUBLISHED: "dash-pages__badge--published",
-    ARCHIVED: "dash-pages__badge--archived",
   };
   return (
     <span className={`dash-pages__badge ${classes[status] || ""}`}>
@@ -226,7 +228,7 @@ export function PageTable({
                     {page.accountName}
                   </span>
                 </td>
-                <td>{renderStatusBadge(page.status)}</td>
+                <td>{renderStatusBadge(page.lifecycleStage)}</td>
                 <td>{renderVisibilityBadge(page.visibility)}</td>
                 <td>{formatNumber(page.viewCount)}</td>
                 <td>{page.createdByName || page.createdByEmail}</td>

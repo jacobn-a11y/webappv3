@@ -738,7 +738,7 @@ export class SyncEngine {
           creds.accessToken = newAccessToken;
           await this.prisma.integrationConfig.update({
             where: { id: config.id },
-            data: { credentials: creds },
+            data: { credentials: creds as Prisma.InputJsonValue },
           });
         }
       });

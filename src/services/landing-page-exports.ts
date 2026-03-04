@@ -7,8 +7,7 @@
  *   3. Slack — Posts the story summary + top 3 callout boxes to a Slack channel
  */
 
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import type { PrismaClient } from "@prisma/client";
 import { google } from "googleapis";
@@ -21,9 +20,6 @@ import {
   assertSafeOutboundUrl,
   parseHostAllowlist,
 } from "../lib/url-security.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 /**
  * Resolve the worker script path.  In the compiled build the layout is

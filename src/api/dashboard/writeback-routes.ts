@@ -48,7 +48,7 @@ export function registerWritebackRoutes({
 
       const requests = await prisma.approvalRequest.findMany({
       where: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         requestType: "CRM_WRITEBACK",
       },
       orderBy: { createdAt: "desc" },
@@ -82,7 +82,7 @@ export function registerWritebackRoutes({
       }
 
       const account = await prisma.account.findFirst({
-      where: { id: payload.account_id, organizationId: req.organizationId },
+      where: { id: payload.account_id, organizationId: req.organizationId! },
       select: { id: true },
       });
       if (!account) {
@@ -91,11 +91,11 @@ export function registerWritebackRoutes({
       }
       const request = await prisma.approvalRequest.create({
       data: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         requestType: "CRM_WRITEBACK",
         targetType: "account",
         targetId: payload.account_id,
-        requestedByUserId: req.userId,
+        requestedByUserId: req.userId!,
         status: "PENDING",
         requestPayload: {
           provider: payload.provider,
@@ -110,8 +110,8 @@ export function registerWritebackRoutes({
       },
       });
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "WRITEBACK",
       action: "CRM_WRITEBACK_REQUESTED",
       targetType: "approval_request",
@@ -138,7 +138,7 @@ export function registerWritebackRoutes({
       const request = await prisma.approvalRequest.findFirst({
       where: {
         id: String(req.params.requestId),
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         requestType: "CRM_WRITEBACK",
       },
       });
@@ -156,14 +156,14 @@ export function registerWritebackRoutes({
         where: { id: request.id },
         data: {
           status: "REJECTED",
-          reviewerUserId: req.userId,
+          reviewerUserId: req.userId!,
           reviewNotes: payload.notes ?? null,
           reviewedAt: new Date(),
         },
       });
       await auditLogs.record({
-        organizationId: req.organizationId,
-        actorUserId: req.userId,
+        organizationId: req.organizationId!,
+        actorUserId: req.userId!,
         category: "WRITEBACK",
         action: "CRM_WRITEBACK_REJECTED",
         targetType: "approval_request",
@@ -213,14 +213,14 @@ export function registerWritebackRoutes({
       where: { id: request.id },
       data: {
         status: "COMPLETED",
-        reviewerUserId: req.userId,
+        reviewerUserId: req.userId!,
         reviewNotes: payload.notes ?? null,
         reviewedAt: new Date(),
       },
       });
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "WRITEBACK",
       action: "CRM_WRITEBACK_APPROVED_EXECUTED",
       targetType: "approval_request",
@@ -243,7 +243,7 @@ export function registerWritebackRoutes({
       const request = await prisma.approvalRequest.findFirst({
       where: {
         id: String(req.params.requestId),
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         requestType: "CRM_WRITEBACK",
         status: "COMPLETED",
       },
@@ -265,14 +265,14 @@ export function registerWritebackRoutes({
       where: { id: request.id },
       data: {
         status: "ROLLED_BACK",
-        reviewerUserId: req.userId,
+        reviewerUserId: req.userId!,
         reviewNotes: "Rolled back by admin",
         reviewedAt: new Date(),
       },
       });
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "WRITEBACK",
       action: "CRM_WRITEBACK_ROLLED_BACK",
       targetType: "approval_request",

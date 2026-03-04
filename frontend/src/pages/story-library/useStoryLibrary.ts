@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "../../components/Toast";
 import {
   createStoryComment,
@@ -8,34 +8,40 @@ import {
   downloadStoryExport,
   getStoryComments,
   getStoryLibrary,
+  getStoryLibraryTaxonomy,
   requestWriteback,
   trackSellerAdoptionEvent,
   type StoryComment,
   type StoryLibraryItem,
 } from "../../lib/api";
-import { STORY_TYPE_LABELS } from "../../types/taxonomy";
+import {
+  FUNNEL_STAGE_LABELS,
+  STAGE_TOPICS,
+  STORY_TYPE_LABELS,
+  type FunnelStage,
+} from "../../types/taxonomy";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 export const STORY_STATUS_LABELS: Record<StoryLibraryItem["story_status"], string> = {
   DRAFT: "Draft",
-  PAGE_CREATED: "Page Created",
+  IN_REVIEW: "In Review",
+  APPROVED: "Approved",
   PUBLISHED: "Published",
-  ARCHIVED: "Archived",
 };
 
 export const STORY_STATUS_HINTS: Record<StoryLibraryItem["story_status"], string> = {
-  DRAFT: "Story is generated but not yet packaged into a page.",
-  PAGE_CREATED: "Landing page exists and can be finalized for share.",
+  DRAFT: "Story is in draft and not yet in the publish flow.",
+  IN_REVIEW: "Publish request is pending approval.",
+  APPROVED: "Approved and ready for publish.",
   PUBLISHED: "Published and share-ready.",
-  ARCHIVED: "Archived and hidden from active workflows.",
 };
 
 export const STORY_STATUS_BADGES: Record<StoryLibraryItem["story_status"], string> = {
   DRAFT: "badge--draft",
-  PAGE_CREATED: "badge--accent",
+  IN_REVIEW: "badge--warning",
+  APPROVED: "badge--success",
   PUBLISHED: "badge--success",
-  ARCHIVED: "badge--archived",
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -112,16 +118,31 @@ export interface ConfirmState {
   message: string;
 }
 
+function confirmGovernedExport(message?: string): boolean {
+  return window.confirm(
+    message ??
+      "This export may contain PII or named customer data. Confirm you have permission to share externally."
+  );
+}
+
 export function useStoryLibrary(userRole: string) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stories, setStories] = useState<StoryLibraryItem[]>([]);
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
+  const [searchMode, setSearchMode] = useState<"keyword" | "semantic">("keyword");
   const [status, setStatus] = useState<"ALL" | StoryLibraryItem["story_status"]>("ALL");
   const [storyType, setStoryType] = useState("ALL");
+  const [funnelStage, setFunnelStage] = useState<string>(
+    searchParams.get("funnel_stage")?.trim() || "ALL"
+  );
+  const [topic, setTopic] = useState<string>(
+    searchParams.get("topic")?.trim() || "ALL"
+  );
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -139,6 +160,8 @@ export function useStoryLibrary(userRole: string) {
   const [commentDraft, setCommentDraft] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const [funnelStageCounts, setFunnelStageCounts] = useState<Record<string, number>>({});
+  const [topicCounts, setTopicCounts] = useState<Record<string, number>>({});
 
   const isViewer = userRole === "VIEWER";
 
@@ -151,37 +174,87 @@ export function useStoryLibrary(userRole: string) {
   }, [searchDraft]);
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (funnelStage !== "ALL") next.set("funnel_stage", funnelStage);
+      else next.delete("funnel_stage");
+      if (topic !== "ALL") next.set("topic", topic);
+      else next.delete("topic");
+      return next;
+    }, { replace: true });
+  }, [funnelStage, topic, setSearchParams]);
 
-    void getStoryLibrary({
-      page,
-      limit: pageSize,
-      search: search || undefined,
-      story_type: storyType === "ALL" ? undefined : storyType,
-      status: status === "ALL" ? undefined : status,
-    })
+  useEffect(() => {
+    void getStoryLibraryTaxonomy()
       .then((res) => {
+        setFunnelStageCounts(res.funnel_stage_counts ?? {});
+        setTopicCounts(res.topic_counts ?? {});
+      })
+      .catch(() => {
+        setFunnelStageCounts({});
+        setTopicCounts({});
+      });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const runLoad = async (opts?: { silent?: boolean }) => {
+      if (!opts?.silent) {
+        setLoading(true);
+      }
+      setError(null);
+      try {
+        const res = await getStoryLibrary({
+          page,
+          limit: pageSize,
+          search: search || undefined,
+          search_mode: searchMode,
+          story_type: storyType === "ALL" ? undefined : storyType,
+          status: status === "ALL" ? undefined : status,
+          funnel_stage:
+            funnelStage === "ALL" ? undefined : [funnelStage],
+          topic: topic === "ALL" ? undefined : [topic],
+        });
         if (cancelled) return;
         setStories(res.stories);
         setServerLimit(res.pagination.limit);
         setTotalPages(Math.max(res.pagination.totalPages, 1));
         setTotalCount(res.pagination.totalCount);
-      })
-      .catch((err) => {
+      } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Failed to load story library");
         setStories([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      } finally {
+        if (!cancelled && !opts?.silent) {
+          setLoading(false);
+        }
+      }
+    };
 
-    return () => { cancelled = true; };
-  }, [page, pageSize, search, status, storyType]);
+    void runLoad();
+    const intervalId = window.setInterval(() => {
+      void runLoad({ silent: true });
+    }, 30_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [page, pageSize, search, searchMode, status, storyType, funnelStage, topic]);
 
   const uniqueStoryTypes = useMemo(() => Object.keys(STORY_TYPE_LABELS).sort(), []);
+  const availableFunnelStages = useMemo(
+    () => Object.keys(FUNNEL_STAGE_LABELS).sort() as FunnelStage[],
+    []
+  );
+  const availableTopics = useMemo(() => {
+    const topics =
+      funnelStage === "ALL"
+        ? (Object.values(STAGE_TOPICS).flat() as string[])
+        : [...(STAGE_TOPICS[funnelStage as FunnelStage] ?? [])];
+    return Array.from(new Set(topics)).sort();
+  }, [funnelStage]);
   const selectedStories = useMemo(() => {
     const selectedSet = new Set(selectedStoryIds);
     return stories.filter((story) => selectedSet.has(story.id));
@@ -190,7 +263,7 @@ export function useStoryLibrary(userRole: string) {
   const rangeStart = totalCount === 0 ? 0 : (page - 1) * serverLimit + 1;
   const rangeEnd = totalCount === 0 ? 0 : Math.min(rangeStart + serverLimit - 1, totalCount);
 
-  useEffect(() => { setSelectedStoryIds([]); }, [page, search, storyType, status]);
+  useEffect(() => { setSelectedStoryIds([]); }, [page, search, searchMode, storyType, status, funnelStage, topic]);
 
   useEffect(() => {
     if (!commentStory) {
@@ -212,6 +285,9 @@ export function useStoryLibrary(userRole: string) {
   }, [commentStory, commentTarget]);
 
   const handleExport = useCallback(async (story: StoryLibraryItem, format: "pdf" | "docx") => {
+    if (!confirmGovernedExport()) {
+      return;
+    }
     setBusyStoryId(story.id);
     try {
       const blob = await downloadStoryExport(story.id, format);
@@ -327,6 +403,13 @@ export function useStoryLibrary(userRole: string) {
   }, [selectedStories, showToast]);
 
   const doBulkExport = useCallback(async (format: "pdf" | "docx") => {
+    if (
+      !confirmGovernedExport(
+        `You are exporting ${selectedStories.length} file(s). This export may contain PII or named customer data. Continue?`
+      )
+    ) {
+      return;
+    }
     setBulkBusy(true);
     let successCount = 0;
     let failedCount = 0;
@@ -417,8 +500,11 @@ export function useStoryLibrary(userRole: string) {
     stories,
     searchDraft, setSearchDraft,
     search,
+    searchMode, setSearchMode,
     status, setStatus,
     storyType, setStoryType,
+    funnelStage, setFunnelStage,
+    topic, setTopic,
     viewMode, setViewMode,
     page, setPage,
     pageSize, setPageSize,
@@ -431,6 +517,10 @@ export function useStoryLibrary(userRole: string) {
     allSelectedOnPage,
     isViewer,
     uniqueStoryTypes,
+    availableFunnelStages,
+    availableTopics,
+    funnelStageCounts,
+    topicCounts,
     confirmState, setConfirmState,
     commentStory,
     commentTarget, setCommentTarget,

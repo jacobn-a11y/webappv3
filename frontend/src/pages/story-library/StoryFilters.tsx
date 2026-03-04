@@ -1,14 +1,24 @@
 import type { Dispatch, SetStateAction } from "react";
-import { STORY_TYPE_LABELS } from "../../types/taxonomy";
+import { FUNNEL_STAGE_LABELS, STORY_TYPE_LABELS, TOPIC_LABELS } from "../../types/taxonomy";
 import type { StoryLibraryItem } from "../../lib/api";
 
 export interface StoryFiltersProps {
   searchDraft: string;
   setSearchDraft: Dispatch<SetStateAction<string>>;
+  searchMode: "keyword" | "semantic";
+  setSearchMode: Dispatch<SetStateAction<"keyword" | "semantic">>;
   storyType: string;
   setStoryType: Dispatch<SetStateAction<string>>;
   status: "ALL" | StoryLibraryItem["story_status"];
   setStatus: Dispatch<SetStateAction<"ALL" | StoryLibraryItem["story_status"]>>;
+  funnelStage: string;
+  setFunnelStage: Dispatch<SetStateAction<string>>;
+  topic: string;
+  setTopic: Dispatch<SetStateAction<string>>;
+  availableFunnelStages: string[];
+  availableTopics: string[];
+  funnelStageCounts: Record<string, number>;
+  topicCounts: Record<string, number>;
   pageSize: number;
   setPageSize: Dispatch<SetStateAction<number>>;
   viewMode: "cards" | "table";
@@ -20,10 +30,20 @@ export interface StoryFiltersProps {
 export function StoryFilters({
   searchDraft,
   setSearchDraft,
+  searchMode,
+  setSearchMode,
   storyType,
   setStoryType,
   status,
   setStatus,
+  funnelStage,
+  setFunnelStage,
+  topic,
+  setTopic,
+  availableFunnelStages,
+  availableTopics,
+  funnelStageCounts,
+  topicCounts,
   pageSize,
   setPageSize,
   viewMode,
@@ -41,6 +61,18 @@ export function StoryFilters({
         placeholder="Search by title, account, or content"
         aria-label="Search story library"
       />
+      <select
+        className="form-field__input"
+        value={searchMode}
+        onChange={(event) => {
+          setSearchMode(event.target.value as "keyword" | "semantic");
+          setPage(1);
+        }}
+        aria-label="Search mode"
+      >
+        <option value="keyword">Keyword Search</option>
+        <option value="semantic">Semantic Search</option>
+      </select>
       <select
         className="form-field__input"
         value={storyType}
@@ -68,9 +100,45 @@ export function StoryFilters({
       >
         <option value="ALL">All Statuses</option>
         <option value="DRAFT">Draft</option>
-        <option value="PAGE_CREATED">Page Created</option>
+        <option value="IN_REVIEW">In Review</option>
+        <option value="APPROVED">Approved</option>
         <option value="PUBLISHED">Published</option>
-        <option value="ARCHIVED">Archived</option>
+      </select>
+      <select
+        className="form-field__input"
+        value={funnelStage}
+        onChange={(e) => {
+          const nextStage = e.target.value;
+          setFunnelStage(nextStage);
+          setTopic("ALL");
+          setPage(1);
+        }}
+        aria-label="Filter funnel stage"
+      >
+        <option value="ALL">All Funnel Stages</option>
+        {availableFunnelStages.map((stage) => (
+          <option key={stage} value={stage}>
+            {FUNNEL_STAGE_LABELS[stage as keyof typeof FUNNEL_STAGE_LABELS] ?? stage}
+            {typeof funnelStageCounts[stage] === "number" ? ` (${funnelStageCounts[stage]})` : ""}
+          </option>
+        ))}
+      </select>
+      <select
+        className="form-field__input"
+        value={topic}
+        onChange={(e) => {
+          setTopic(e.target.value);
+          setPage(1);
+        }}
+        aria-label="Filter taxonomy topic"
+      >
+        <option value="ALL">All Topics</option>
+        {availableTopics.map((topicKey) => (
+          <option key={topicKey} value={topicKey}>
+            {TOPIC_LABELS[topicKey as keyof typeof TOPIC_LABELS] ?? topicKey}
+            {typeof topicCounts[topicKey] === "number" ? ` (${topicCounts[topicKey]})` : ""}
+          </option>
+        ))}
       </select>
       <select
         className="form-field__input"

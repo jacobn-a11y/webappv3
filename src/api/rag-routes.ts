@@ -82,7 +82,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    *   }
    */
   router.post("/query", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const orgId = req.organizationId;
+    const orgId = req.organizationId!;
     if (!orgId) {
       sendUnauthorized(res, "Authentication required");
       return;
@@ -102,9 +102,9 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
         return;
       }
 
-      if (req.userId) {
+      if (req.userId!) {
         const canAccessAccount = await accessService.canAccessAccount(
-          req.userId,
+          req.userId!,
           orgId,
           account_id,
           req.userRole
@@ -146,7 +146,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    * follow-up questions are resolved with context.
    */
   router.post("/chat", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const orgId = req.organizationId;
+    const orgId = req.organizationId!;
     if (!orgId) {
       sendUnauthorized(res, "Authentication required");
       return;
@@ -161,9 +161,9 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
     const { query, account_id, history, top_k, funnel_stages } =
       parseResult.data;
 
-      if (req.userId) {
+      if (req.userId!) {
         const canAccessAccount = await accessService.canAccessAccount(
-          req.userId,
+          req.userId!,
           orgId,
           account_id,
           req.userRole
@@ -207,14 +207,14 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    * Query params: search (optional text filter)
    */
   router.get("/accounts", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const orgId = req.organizationId;
-    if (!orgId || !req.userId) {
+    const orgId = req.organizationId!;
+    if (!orgId || !req.userId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
 
       const accessibleIds = await accessService.getAccessibleAccountIds(
-        req.userId,
+        req.userId!,
         orgId,
         req.userRole
       );

@@ -8,6 +8,9 @@
  */
 
 import type { PrismaClient, Prisma } from "@prisma/client";
+import { LifecycleStageService } from "./lifecycle-stage-service.js";
+import type { LifecycleStage } from "./lifecycle-stage.js";
+import type { RAGEngine } from "./rag-engine.js";
 
 // ─── Library types ───────────────────────────────────────────────────────────
 
@@ -16,8 +19,13 @@ export interface StoryLibraryFilters {
   /** When provided, restrict to these account IDs (RBAC scoping). */
   accessibleAccountIds?: string[] | null;
   storyType?: string;
-  status?: "DRAFT" | "PAGE_CREATED" | "PUBLISHED" | "ARCHIVED";
+  status?: LifecycleStage;
+  topics?: string[];
+  funnelStages?: string[];
+  includeArchived?: boolean;
   search?: string;
+  searchMode?: "keyword" | "semantic";
+  semanticAccountIds?: string[];
   page?: number;
   limit?: number;
 }
@@ -52,7 +60,11 @@ export interface CreateCommentInput {
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 export class StoryQueryService {
-  constructor(private prisma: PrismaClient) {}
+  private lifecycle: LifecycleStageService;
+
+  constructor(private prisma: PrismaClient) {
+    this.lifecycle = new LifecycleStageService(prisma);
+  }
 
   // ── Library ──────────────────────────────────────────────────────────────
 
@@ -70,24 +82,33 @@ export class StoryQueryService {
     if (filters.accessibleAccountIds !== undefined && filters.accessibleAccountIds !== null) {
       where.accountId = { in: filters.accessibleAccountIds };
     }
+    if (filters.semanticAccountIds && filters.semanticAccountIds.length > 0) {
+      const scopedIds =
+        filters.accessibleAccountIds && filters.accessibleAccountIds.length > 0
+          ? filters.semanticAccountIds.filter((id) =>
+              filters.accessibleAccountIds?.includes(id)
+            )
+          : filters.semanticAccountIds;
+      where.accountId = { in: scopedIds };
+    }
 
     if (filters.storyType) {
       where.storyType = filters.storyType;
     }
 
-    if (filters.status) {
-      if (filters.status === "DRAFT") {
-        where.landingPages = { none: {} };
-      } else if (filters.status === "PAGE_CREATED") {
-        where.landingPages = { some: { status: "DRAFT" } };
-      } else if (filters.status === "PUBLISHED") {
-        where.landingPages = { some: { status: "PUBLISHED" } };
-      } else if (filters.status === "ARCHIVED") {
-        where.landingPages = { some: { status: "ARCHIVED" } };
-      }
+    if (filters.topics && filters.topics.length > 0) {
+      where.filterTags = { hasSome: filters.topics };
     }
 
-    if (filters.search && filters.search.trim().length > 0) {
+    if (filters.funnelStages && filters.funnelStages.length > 0) {
+      where.funnelStages = { hasSome: filters.funnelStages as never[] };
+    }
+
+    if (
+      (filters.searchMode ?? "keyword") === "keyword" &&
+      filters.search &&
+      filters.search.trim().length > 0
+    ) {
       const needle = filters.search.trim();
       where.OR = [
         { title: { contains: needle, mode: "insensitive" } },
@@ -118,45 +139,194 @@ export class StoryQueryService {
       ];
     }
 
-    const [totalCount, stories] = await Promise.all([
-      this.prisma.story.count({ where: where as Prisma.StoryWhereInput }),
-      this.prisma.story.findMany({
-        where: where as Prisma.StoryWhereInput,
-        include: {
-          account: {
-            select: {
-              id: true,
-              name: true,
-              domain: true,
-            },
-          },
-          quotes: true,
-          landingPages: {
-            select: {
-              id: true,
-              slug: true,
-              status: true,
-              publishedAt: true,
-              createdAt: true,
-            },
-            orderBy: { createdAt: "desc" },
-            take: 1,
+    const stories = await this.prisma.story.findMany({
+      where: where as Prisma.StoryWhereInput,
+      include: {
+        account: {
+          select: {
+            id: true,
+            name: true,
+            domain: true,
           },
         },
-        orderBy: { generatedAt: "desc" },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-    ]);
+        quotes: true,
+        landingPages: {
+          select: {
+            id: true,
+            slug: true,
+            status: true,
+            publishedAt: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: "desc" },
+        },
+      },
+      orderBy: { generatedAt: "desc" },
+    });
 
-    return { stories, totalCount, page, limit };
+    const lifecycle = await this.lifecycle.resolveStoryLifecycle(
+      filters.organizationId,
+      stories.map((story) => ({
+        id: story.id,
+        publishedAt: story.publishedAt,
+        landingPages: story.landingPages.map((pageRow) => ({ id: pageRow.id })),
+      }))
+    );
+
+    const filteredStories = stories
+      .filter((story) => {
+        if (filters.includeArchived) {
+          return true;
+        }
+        const latestPage = story.landingPages[0];
+        return latestPage?.status !== "ARCHIVED";
+      })
+      .filter((story) => {
+        if (!filters.status) {
+          return true;
+        }
+        return lifecycle.get(story.id)?.stage === filters.status;
+      })
+      .sort((a, b) => {
+        if (
+          (filters.searchMode ?? "keyword") !== "semantic" ||
+          !filters.semanticAccountIds ||
+          filters.semanticAccountIds.length === 0
+        ) {
+          return 0;
+        }
+        const rankA = filters.semanticAccountIds.indexOf(a.accountId);
+        const rankB = filters.semanticAccountIds.indexOf(b.accountId);
+        const normalizedA = rankA === -1 ? Number.MAX_SAFE_INTEGER : rankA;
+        const normalizedB = rankB === -1 ? Number.MAX_SAFE_INTEGER : rankB;
+        return normalizedA - normalizedB;
+      })
+      .map((story) => {
+        const stage = lifecycle.get(story.id)?.stage ?? "DRAFT";
+        return {
+          ...story,
+          lifecycleStage: stage,
+          landingPages: story.landingPages.slice(0, 1),
+        };
+      });
+
+    const totalCount = filteredStories.length;
+    const pagedStories = filteredStories.slice((page - 1) * limit, page * limit);
+
+    return { stories: pagedStories, totalCount, page, limit };
+  }
+
+  async rankSemanticSearchAccounts(input: {
+    ragEngine: RAGEngine;
+    organizationId: string;
+    query: string;
+    accessibleAccountIds?: string[] | null;
+    funnelStages?: string[];
+  }): Promise<string[]> {
+    const response = await input.ragEngine.chat({
+      query: input.query,
+      organizationId: input.organizationId,
+      accountId: null,
+      history: [],
+      topK: 20,
+      funnelStages: input.funnelStages,
+    });
+    const callIds = Array.from(
+      new Set(response.sources.map((source) => source.callId).filter(Boolean))
+    );
+    if (callIds.length === 0) {
+      return [];
+    }
+
+    const calls = await this.prisma.call.findMany({
+      where: {
+        organizationId: input.organizationId,
+        id: { in: callIds },
+      },
+      select: {
+        id: true,
+        accountId: true,
+      },
+    });
+
+    const callToAccountId = new Map(
+      calls
+        .filter((callRow): callRow is { id: string; accountId: string } => !!callRow.accountId)
+        .map((callRow) => [callRow.id, callRow.accountId])
+    );
+
+    const scores = new Map<string, number>();
+    for (const source of response.sources) {
+      const accountId = callToAccountId.get(source.callId);
+      if (!accountId) continue;
+      const nextScore = (scores.get(accountId) ?? 0) + source.relevanceScore;
+      scores.set(accountId, nextScore);
+    }
+
+    const ranked = [...scores.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([accountId]) => accountId);
+
+    if (input.accessibleAccountIds === null || input.accessibleAccountIds === undefined) {
+      return ranked;
+    }
+    if (input.accessibleAccountIds.length === 0) {
+      return [];
+    }
+    const allowed = new Set(input.accessibleAccountIds);
+    return ranked.filter((accountId) => allowed.has(accountId));
+  }
+
+  /**
+   * Aggregates story counts by funnel stage and taxonomy topic.
+   */
+  async getLibraryTaxonomyCounts(input: {
+    organizationId: string;
+    accessibleAccountIds?: string[] | null;
+  }): Promise<{
+    funnelStageCounts: Record<string, number>;
+    topicCounts: Record<string, number>;
+  }> {
+    const where: Prisma.StoryWhereInput = {
+      organizationId: input.organizationId,
+    };
+
+    if (
+      input.accessibleAccountIds !== undefined &&
+      input.accessibleAccountIds !== null
+    ) {
+      where.accountId = { in: input.accessibleAccountIds };
+    }
+
+    const stories = await this.prisma.story.findMany({
+      where,
+      select: {
+        funnelStages: true,
+        filterTags: true,
+      },
+    });
+
+    const funnelStageCounts: Record<string, number> = {};
+    const topicCounts: Record<string, number> = {};
+
+    for (const story of stories) {
+      for (const stage of story.funnelStages) {
+        funnelStageCounts[stage] = (funnelStageCounts[stage] ?? 0) + 1;
+      }
+      for (const tag of story.filterTags) {
+        if (!tag || tag.includes(":")) continue;
+        topicCounts[tag] = (topicCounts[tag] ?? 0) + 1;
+      }
+    }
+
+    return { funnelStageCounts, topicCounts };
   }
 
   /**
    * List stories for a single account (no pagination, newest first).
    */
   async getStoriesByAccount(accountId: string, organizationId: string) {
-    return this.prisma.story.findMany({
+    const stories = await this.prisma.story.findMany({
       where: { accountId, organizationId },
       include: {
         quotes: true,
@@ -174,6 +344,20 @@ export class StoryQueryService {
       },
       orderBy: { generatedAt: "desc" },
     });
+
+    const lifecycle = await this.lifecycle.resolveStoryLifecycle(
+      organizationId,
+      stories.map((story) => ({
+        id: story.id,
+        publishedAt: story.publishedAt,
+        landingPages: story.landingPages.map((pageRow) => ({ id: pageRow.id })),
+      }))
+    );
+
+    return stories.map((story) => ({
+      ...story,
+      lifecycleStage: lifecycle.get(story.id)?.stage ?? "DRAFT",
+    }));
   }
 
   // ── Export / single-story lookups ────────────────────────────────────────

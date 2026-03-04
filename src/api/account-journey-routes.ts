@@ -40,14 +40,14 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
    *   - stage counts
    */
   router.get("/:accountId/journey", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
 
       const data = await journeyService.getAccountJourney(
         req.params.accountId as string,
-        req.organizationId
+        req.organizationId!
       );
 
       res.setHeader("Cache-Control", "private, no-store");
@@ -122,14 +122,14 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
   router.get(
     "/:accountId/journey/view",
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
         const data = await journeyService.getAccountJourney(
           req.params.accountId as string,
-          req.organizationId
+          req.organizationId!
         );
 
         res.setHeader("Cache-Control", "private, no-store");

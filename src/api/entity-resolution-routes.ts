@@ -80,12 +80,12 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
     "/queue",
     resolvePermission,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
-        const result = await queueService.listQueue(req.organizationId, {
+        const result = await queueService.listQueue(req.organizationId!, {
           page: req.query.page ? parseInt(req.query.page as string, 10) : undefined,
           pageSize: req.query.page_size ? parseInt(req.query.page_size as string, 10) : undefined,
           search: req.query.search as string | undefined,
@@ -109,12 +109,12 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
     "/stats",
     resolvePermission,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
-        const stats = await queueService.getQueueStats(req.organizationId);
+        const stats = await queueService.getQueueStats(req.organizationId!);
         sendSuccess(res, stats);
       
     }
@@ -132,7 +132,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
     "/accounts",
     resolvePermission,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -144,7 +144,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
         });
 
         const accounts = await queueService.searchAccounts(
-          req.organizationId,
+          req.organizationId!,
           query,
           limit
         );
@@ -167,7 +167,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
     "/resolve",
     resolvePermission,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -182,7 +182,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
         await queueService.resolveCall(
           parse.data.call_id,
           parse.data.account_id,
-          req.organizationId
+          req.organizationId!
         );
 
         sendSuccess(res, { resolved: true, call_id: parse.data.call_id, account_id: parse.data.account_id });
@@ -205,7 +205,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
     "/bulk-resolve",
     resolvePermission,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -219,7 +219,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
         const result = await queueService.bulkResolve(
           parse.data.call_ids,
           parse.data.account_id,
-          req.organizationId
+          req.organizationId!
         );
 
         sendSuccess(res, result);
@@ -239,7 +239,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
     "/dismiss",
     resolvePermission,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -252,7 +252,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
 
         const result = await queueService.dismissCalls(
           parse.data.call_ids,
-          req.organizationId
+          req.organizationId!
         );
 
         sendSuccess(res, result);
@@ -272,7 +272,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
     "/create-account",
     resolvePermission,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -286,7 +286,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
       try {
         const result = await queueService.createAccountFromCall(
           parse.data.call_id,
-          req.organizationId,
+          req.organizationId!,
           {
             name: parse.data.account_name,
             domain: parse.data.domain,
@@ -315,7 +315,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
     "/merge",
     resolvePermission,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -330,7 +330,7 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
         await queueService.mergeAccounts(
           parse.data.source_account_id,
           parse.data.target_account_id,
-          req.organizationId
+          req.organizationId!
         );
 
         sendSuccess(res, {

@@ -10,6 +10,7 @@
 import type { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import type { AuditLogService } from "../../services/audit-log.js";
+import { OpsDiagnosticsService } from "../../services/ops-diagnostics.js";
 import { registerHealthRoutes } from "./ops-diagnostics/health-routes.js";
 import { registerRunsRoutes } from "./ops-diagnostics/runs-routes.js";
 import { registerAuditRoutes } from "./ops-diagnostics/audit-routes.js";
@@ -25,7 +26,8 @@ export function registerOpsDiagnosticsRoutes({
   prisma,
   auditLogs,
 }: RegisterOpsDiagnosticsRoutesOptions): void {
-  registerHealthRoutes({ router, prisma });
-  registerRunsRoutes({ router, prisma });
+  const service = new OpsDiagnosticsService(prisma);
+  registerHealthRoutes({ router, prisma, service });
+  registerRunsRoutes({ router, prisma, service });
   registerAuditRoutes({ router, prisma, auditLogs });
 }

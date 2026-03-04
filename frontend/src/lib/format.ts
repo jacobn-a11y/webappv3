@@ -26,6 +26,8 @@ const SPECIAL_LABELS: Record<string, string> = {
   CREATE_LANDING_PAGE: "Create Page",
   PUBLISH_LANDING_PAGE: "Publish Page",
   PUBLISH_NAMED_LANDING_PAGE: "Publish Named Page",
+  APPROVE_PUBLISH_REQUESTS: "Approve Publish Requests",
+  VIEW_RAW_TRANSCRIPTS: "View Raw Transcript",
   EDIT_ANY_LANDING_PAGE: "Edit Any Page",
   DELETE_ANY_LANDING_PAGE: "Delete Any Page",
   VIEW_ANALYTICS: "Analytics",

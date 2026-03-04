@@ -17,6 +17,7 @@ const AdminOpsDiagnosticsPage = lazy(() => import("../pages/AdminOpsDiagnosticsP
 const AdminPermissionsPage = lazy(() => import("../pages/AdminPermissionsPage").then(m => ({ default: m.AdminPermissionsPage })));
 const AdminPublishApprovalsPage = lazy(() => import("../pages/AdminPublishApprovalsPage").then(m => ({ default: m.AdminPublishApprovalsPage })));
 const AdminRolesPage = lazy(() => import("../pages/AdminRolesPage").then(m => ({ default: m.AdminRolesPage })));
+const AdminAIUsagePage = lazy(() => import("../pages/AdminAIUsagePage").then(m => ({ default: m.AdminAIUsagePage })));
 const AdminSecurityPolicyPage = lazy(() => import("../pages/AdminSecurityPolicyPage").then(m => ({ default: m.AdminSecurityPolicyPage })));
 const AdminSetupWizardPage = lazy(() => import("../pages/AdminSetupWizardPage").then(m => ({ default: m.AdminSetupWizardPage })));
 const IntegrationsSettingsPage = lazy(() => import("../pages/IntegrationsSettingsPage").then(m => ({ default: m.IntegrationsSettingsPage })));
@@ -26,6 +27,7 @@ const AuthCallbackPage = lazy(() => import("../pages/AuthCallbackPage").then(m =
 const AuthPage = lazy(() => import("../pages/AuthPage").then(m => ({ default: m.AuthPage })));
 const AutomationsPage = lazy(() => import("../pages/AutomationsPage").then(m => ({ default: m.AutomationsPage })));
 const ChatbotConnectorPage = lazy(() => import("../pages/ChatbotConnectorPage").then(m => ({ default: m.ChatbotConnectorPage })));
+const ContentQueuePage = lazy(() => import("../pages/ContentQueuePage").then(m => ({ default: m.ContentQueuePage })));
 const DashboardPagesPage = lazy(() => import("../pages/DashboardPagesPage").then(m => ({ default: m.DashboardPagesPage })));
 const HomePage = lazy(() => import("../pages/HomePage").then(m => ({ default: m.HomePage })));
 const InviteAcceptPage = lazy(() => import("../pages/InviteAcceptPage").then(m => ({ default: m.InviteAcceptPage })));
@@ -34,6 +36,10 @@ const PlatformOwnerDashboardPage = lazy(() => import("../pages/PlatformOwnerDash
 const ProfileCenterPage = lazy(() => import("../pages/ProfileCenterPage").then(m => ({ default: m.ProfileCenterPage })));
 const StatusPage = lazy(() => import("../pages/StatusPage").then(m => ({ default: m.StatusPage })));
 const StoryLibraryPage = lazy(() => import("../pages/StoryLibraryPage").then(m => ({ default: m.StoryLibraryPage })));
+const QuoteLibraryPage = lazy(() => import("../pages/QuoteLibraryPage").then(m => ({ default: m.QuoteLibraryPage })));
+const QuoteSourcePage = lazy(() => import("../pages/QuoteSourcePage").then(m => ({ default: m.QuoteSourcePage })));
+const TaxonomyBrowserPage = lazy(() => import("../pages/TaxonomyBrowserPage").then(m => ({ default: m.TaxonomyBrowserPage })));
+const MyQueuePage = lazy(() => import("../pages/MyQueuePage").then(m => ({ default: m.MyQueuePage })));
 const TranscriptViewerPage = lazy(() => import("../pages/TranscriptViewerPage").then(m => ({ default: m.TranscriptViewerPage })));
 const WorkspacesPage = lazy(() => import("../pages/WorkspacesPage").then(m => ({ default: m.WorkspacesPage })));
 const WritebacksPage = lazy(() => import("../pages/WritebacksPage").then(m => ({ default: m.WritebacksPage })));
@@ -50,6 +56,11 @@ export function AuthenticatedRoutes({ user }: AuthenticatedRoutesProps) {
       <Route path="/" element={<HomePage />} />
       <Route path="/accounts" element={<AccountsIndexPage />} />
       <Route path="/stories" element={<StoryLibraryPage userRole={user.role} />} />
+      <Route path="/quotes" element={<QuoteLibraryPage />} />
+      <Route path="/quotes/source/:quoteId" element={<QuoteSourcePage />} />
+      <Route path="/taxonomy" element={<TaxonomyBrowserPage />} />
+      <Route path="/content-queue" element={<ContentQueuePage />} />
+      <Route path="/my-queue" element={<MyQueuePage />} />
       <Route path="/accounts/:accountId" element={<AccountDetailPage userRole={user.role} />} />
       <Route path="/accounts/:accountId/journey" element={<AccountJourneyPage />} />
       <Route path="/pages/:pageId/edit" element={<LandingPageEditorPage />} />
@@ -120,7 +131,7 @@ export function AuthenticatedRoutes({ user }: AuthenticatedRoutesProps) {
       <Route
         path="/admin/publish-approvals"
         element={
-          <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user}>
+          <ProtectedRoute requiredRole={["OWNER", "ADMIN", "MEMBER", "VIEWER"]} user={user}>
             <AdminPublishApprovalsPage />
           </ProtectedRoute>
         }
@@ -138,6 +149,14 @@ export function AuthenticatedRoutes({ user }: AuthenticatedRoutesProps) {
         element={
           <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user}>
             <AdminSetupWizardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/ai-usage"
+        element={
+          <ProtectedRoute requiredRole={["OWNER", "ADMIN"]} user={user}>
+            <AdminAIUsagePage />
           </ProtectedRoute>
         }
       />

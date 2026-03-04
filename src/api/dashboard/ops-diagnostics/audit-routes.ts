@@ -33,7 +33,7 @@ export function registerAuditRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const organizationId = req.organizationId;
+      const organizationId = req.organizationId!;
       const settings = await prisma.orgSettings.findUnique({
       where: { organizationId },
       select: { dataGovernancePolicy: true },
@@ -111,7 +111,7 @@ export function registerAuditRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const organizationId = req.organizationId;
+      const organizationId = req.organizationId!;
       const [accountCount, callCount, storyCount, pageCount] = await Promise.all([
       prisma.account.count({ where: { organizationId } }),
       prisma.call.count({ where: { organizationId } }),
@@ -120,7 +120,7 @@ export function registerAuditRoutes({
       ]);
       await auditLogs.record({
       organizationId,
-      actorUserId: req.userId,
+      actorUserId: req.userId!,
       category: "DR",
       action: "DR_BACKUP_VERIFIED",
       targetType: "organization",
@@ -148,7 +148,7 @@ export function registerAuditRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const organizationId = req.organizationId;
+      const organizationId = req.organizationId!;
       const [accountCount, callCount, storyCount] = await Promise.all([
       prisma.account.count({ where: { organizationId } }),
       prisma.call.count({ where: { organizationId } }),
@@ -157,7 +157,7 @@ export function registerAuditRoutes({
       const passed = accountCount >= 0 && callCount >= 0 && storyCount >= 0;
       await auditLogs.record({
       organizationId,
-      actorUserId: req.userId,
+      actorUserId: req.userId!,
       category: "DR",
       action: passed ? "DR_RESTORE_VALIDATED" : "DR_RESTORE_VALIDATION_FAILED",
       targetType: "organization",

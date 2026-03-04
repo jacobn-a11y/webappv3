@@ -253,6 +253,8 @@ export function StoryGeneratorModal({
               storyTypeMode={form.storyTypeMode}
               storyTypeSearch={form.storyTypeSearch}
               filteredStoryTypeOptions={form.filteredStoryTypeOptions}
+              aiModelOptions={form.aiModelOptions}
+              selectedAIModelKey={form.selectedAIModelKey}
               isLengthDefault={form.isLengthDefault}
               isOutlineDefault={form.isOutlineDefault}
               isTypeDefault={form.isTypeDefault}
@@ -276,6 +278,7 @@ export function StoryGeneratorModal({
               setStoryTypeMode={form.setStoryTypeMode}
               setStoryTypeSearch={form.setStoryTypeSearch}
               setSelectedTopics={form.setSelectedTopics}
+              setSelectedAIModelKey={form.setSelectedAIModelKey}
               handleDeleteSavedTemplate={(assetId) =>
                 void form.handleDeleteSavedTemplate(assetId)
               }

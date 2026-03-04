@@ -98,7 +98,7 @@ export function registerRunsRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const organizationId = req.organizationId;
+      const organizationId = req.organizationId!;
 
       const { runs, pendingApprovals, failedBackfills } =
         await service.getPipelineStatusData(organizationId);
@@ -145,7 +145,7 @@ export function registerRunsRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const organizationId = req.organizationId;
+      const organizationId = req.organizationId!;
       const windowHoursRaw = readQueryString(req.query.window_hours);
       const parsedWindowHours = windowHoursRaw ? Number.parseInt(windowHoursRaw, 10) : 24;
       const windowHours =

@@ -37,13 +37,13 @@ export function createBillingRoutes(
     "/",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
         const org = await prisma.organization.findUnique({
-          where: { id: req.organizationId },
+          where: { id: req.organizationId! },
         });
 
         if (!org) {
@@ -104,7 +104,7 @@ export function createBillingRoutes(
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const org = await prisma.organization.findUnique({
-      where: { id: req.organizationId },
+      where: { id: req.organizationId! },
       });
 
       if (!org) {
@@ -135,7 +135,7 @@ export function createBillingRoutes(
       // Sum call durations (seconds) from the current period
       const result = await prisma.call.aggregate({
       where: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         occurredAt: { gte: periodStart },
         duration: { not: null },
       },
@@ -172,7 +172,7 @@ export function createBillingRoutes(
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const org = await prisma.organization.findUnique({
-      where: { id: req.organizationId },
+      where: { id: req.organizationId! },
       });
 
       if (!org) {

@@ -31,7 +31,7 @@ export function registerAccountReportingRoutes({
 
       const accounts = await prisma.account.findMany({
       where: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         ...(q
           ? {
               OR: [
@@ -69,7 +69,7 @@ export function registerAccountReportingRoutes({
 
         const accessRecords = await prisma.userAccountAccess.findMany({
           where: {
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
             scopeType: "CRM_REPORT",
             crmProvider: provider as CRMProvider,
             crmReportId: { not: null },

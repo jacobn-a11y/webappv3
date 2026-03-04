@@ -29,16 +29,16 @@ export function registerDashboardOverviewRoutes({
   // ── Dashboard Overview ──────────────────────────────────────────────
 
   router.get("/home", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
 
-      const cacheKey = `${req.organizationId}:${req.userId}:${req.userRole ?? "MEMBER"}`;
+      const cacheKey = `${req.organizationId!}:${req.userId!}:${req.userRole ?? "MEMBER"}`;
       const payload = await homeCache.getOrSet(cacheKey, async () => {
         const homeData = await overviewService.getHomePageData(
-          req.organizationId as string,
-          req.userId as string
+          req.organizationId! as string,
+          req.userId! as string
         );
         const { assignment, user, stories30d, pages30d, failedIntegrations, pendingApprovals } = homeData;
 
@@ -61,12 +61,12 @@ export function registerDashboardOverviewRoutes({
           persona = "MARKETING_ANALYST";
         }
 
-        const funnelCounts = await overviewService.getFunnelCounts(req.organizationId as string);
+        const funnelCounts = await overviewService.getFunnelCounts(req.organizationId! as string);
         const { postSaleStories, mofuStories, bofuStories, totalPageViews } = funnelCounts;
 
         return {
           user: {
-            id: req.userId,
+            id: req.userId!,
             name: user?.name ?? null,
             email: user?.email ?? null,
             base_role: baseRole,
@@ -122,12 +122,12 @@ export function registerDashboardOverviewRoutes({
   }));
 
   router.get("/customer-success/health", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
 
-    const orgId = req.organizationId;
+    const orgId = req.organizationId!;
     const csData = await overviewService.getCustomerSuccessRawData(orgId);
     const {
     totalUsers,
@@ -255,12 +255,12 @@ export function registerDashboardOverviewRoutes({
   router.get(
     "/customer-success/renewal-value-report",
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      const orgId = req.organizationId;
+      const orgId = req.organizationId!;
       const renewalData = await overviewService.getRenewalValueRawData(orgId);
       const {
       usage90d,
@@ -335,12 +335,12 @@ export function registerDashboardOverviewRoutes({
    * Returns aggregate stats for the landing pages dashboard.
    */
   router.get("/stats", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
 
-      const stats = await editor.getDashboardStats(req.organizationId);
+      const stats = await editor.getDashboardStats(req.organizationId!);
       sendSuccess(res, stats);
     
   }));
@@ -352,17 +352,19 @@ export function registerDashboardOverviewRoutes({
    * Query params: status, created_by, search
    */
   router.get("/pages", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
 
-      const pages = await editor.listForOrg(req.organizationId, {
+      const pages = await editor.listForOrg(req.organizationId!, {
         status: req.query.status as string | undefined as
           | "DRAFT"
+          | "IN_REVIEW"
+          | "APPROVED"
           | "PUBLISHED"
-          | "ARCHIVED"
           | undefined,
+        includeArchived: req.query.include_archived === "true",
         createdById: req.query.created_by as string | undefined,
         search: req.query.search as string | undefined,
       });
@@ -378,7 +380,7 @@ export function registerDashboardOverviewRoutes({
    * for the React DashboardPagesPage component.
    */
   router.get("/pages/data", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
@@ -386,12 +388,18 @@ export function registerDashboardOverviewRoutes({
     const isAdmin = req.userRole && ["OWNER", "ADMIN"].includes(req.userRole);
     const effectiveCreatorFilter = isAdmin
       ? (req.query.created_by as string | undefined)
-      : req.userId;
+      : req.userId!;
 
       const [dashboardStats, pages] = await Promise.all([
-        editor.getDashboardStats(req.organizationId),
-        editor.listForOrg(req.organizationId, {
-          status: req.query.status as "DRAFT" | "PUBLISHED" | "ARCHIVED" | undefined,
+        editor.getDashboardStats(req.organizationId!),
+        editor.listForOrg(req.organizationId!, {
+          status: req.query.status as
+            | "DRAFT"
+            | "IN_REVIEW"
+            | "APPROVED"
+            | "PUBLISHED"
+            | undefined,
+          includeArchived: req.query.include_archived === "true",
           createdById: effectiveCreatorFilter,
           search: (req.query.search as string) || undefined,
         }),
