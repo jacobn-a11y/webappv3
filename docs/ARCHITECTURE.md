@@ -1,5 +1,7 @@
 # StoryEngine — System Architecture
 
+**Last updated: March 4, 2026**
+
 ## Overview
 
 StoryEngine consolidates call recordings from 10+ providers (Gong, Chorus, Zoom,
@@ -64,6 +66,7 @@ customer stories tagged against a B2B sales-funnel taxonomy.
 │  ┌────────────────────────────────────────────────────────────────────┐  │
 │  │                    MIDDLEWARE LAYER                                 │  │
 │  │  WorkOS Auth │ Stripe Billing │ Free Trial Gate │ Rate Limiter     │  │
+│  │  CSRF Protection │ Session Auth │ Security Policy (MFA, IP)         │  │
 │  └────────────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────────┘
              │                                          │
@@ -71,12 +74,22 @@ customer stories tagged against a B2B sales-funnel taxonomy.
 ┌──────────────────────┐                    ┌──────────────────────┐
 │   PostgreSQL (Prisma) │                    │  Third-Party          │
 │                        │                    │  Chatbot Connector    │
-│  Accounts · Contacts   │                    │  (via RAG API)        │
-│  Calls · Transcripts   │                    └──────────────────────┘
-│  Tags · SF Events      │
+│  Accounts · Contacts   │                    │  Outbound Webhooks   │
+│  Calls · Transcripts   │                    │  (via RAG API)       │
+│  Tags · SF Events      │                    └──────────────────────┘
 │  Organizations · Users │
 └──────────────────────┘
 ```
+
+### Webhook Ingestion Paths
+
+StoryEngine accepts recordings from multiple webhook sources:
+
+- **Merge.dev** — `POST /api/webhooks/merge` — unified API for Gong, Chorus, Zoom, etc.
+- **Gong (direct)** — `POST /api/webhooks/gong` — direct Gong integration
+- **Grain** — `POST /api/webhooks/grain` — direct Grain integration
+
+All webhooks use signature verification (HMAC SHA256) and idempotency to prevent replay and duplicate processing. See `src/lib/webhook-security.ts`, `src/lib/webhook-idempotency.ts`.
 
 ## 2. Data Flow — Recording to Story
 
@@ -192,3 +205,36 @@ Quote attribution format:
 - **Scrubbed pages**: "a senior executive at the client"
 
 See `src/services/company-scrubber.ts` for implementation.
+
+---
+
+## 6. Security & Observability
+
+### Security Middleware
+
+| Layer | Implementation | Notes |
+|-------|----------------|-------|
+| CSRF | `csrf-protection.ts` | Protects state-changing endpoints with double-submit cookie |
+| Rate limiting | `rate-limiter.ts` | API, webhook, password, export limiters; Redis or in-memory |
+| Security policy | `security-policy.ts` | Per-org MFA, IP allowlist, session requirements |
+| Webhook signatures | `webhook-security.ts` | HMAC SHA256 for Merge, Gong, Grain, Stripe |
+| PII masking | `pii-masker.ts` | Pre-LLM redaction of emails, phones, SSNs, etc. |
+
+### Observability
+
+- **Sentry** — Error tracking and performance (`src/lib/sentry.ts`)
+- **Winston** — Structured logging (`src/lib/logger.ts`)
+- **Request logging** — Request ID, timing, audit trail
+- **OpenTelemetry** — Optional tracing (`src/lib/otel.ts`)
+
+---
+
+## 7. Outbound Webhooks & Events
+
+Customers can subscribe to StoryEngine events via outbound webhooks:
+
+- **Service**: `src/services/outbound-webhooks.ts`
+- **Events**: Story generated, page published, transcript processed, etc.
+- **Delivery**: HTTP POST with signature; retries and dead-letter handling
+
+See API docs for subscription management endpoints.

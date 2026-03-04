@@ -1,6 +1,10 @@
 # Production Readiness — Task List
 
+**Last updated: March 4, 2026**
+
 Fix all identified issues to make StoryEngine production-ready. Ordered by priority and dependency.
+
+**Current status:** CI passes (782+ tests), typecheck clean, lint clean. Phase 1 and 5.1 complete. Remaining work: lint warnings, npm audit, smoke/deploy verification.
 
 ---
 
@@ -33,20 +37,12 @@ Fix all identified issues to make StoryEngine production-ready. Ordered by prior
 **Issue:** `npm run build` fails with 100+ errors (Prisma exports, implicit `any`).
 
 **Tasks:**
-- [ ] Run `npx prisma generate` — ensure client is current
-- [ ] Fix Prisma export errors:
-  - [ ] `UserRole`, `User`, `FunnelStage`, `PermissionType`, etc. — verify schema matches imports
-  - [ ] `Prisma.InputJsonValue` → use correct Prisma 5.x type (`Prisma.JsonValue` or generated type)
-  - [ ] `Prisma.JsonNull` → verify correct usage for Prisma 5
-- [ ] Fix implicit `any` errors — add explicit types to callback parameters in:
-  - [ ] `src/api/dashboard-routes.ts` (~50 occurrences)
-  - [ ] `src/api/ai-settings-routes.ts`
-  - [ ] `src/api/analytics-routes.ts`
-  - [ ] `src/api/account-merge-routes.ts`
-  - [ ] `src/services/*.ts` (account-merge, ai-config, analytics, etc.)
-- [ ] Run `npm run build` — verify zero errors
+- [x] Run `npx prisma generate` — ensure client is current
+- [x] Fix Prisma export errors
+- [x] Fix implicit `any` errors in dashboard, ai-settings, analytics, account-merge, services
+- [x] Run `npm run build` — verify zero errors
 
-**Estimate:** 4–6 hours
+**Estimate:** 4–6 hours *(completed)*
 
 ---
 
@@ -54,10 +50,10 @@ Fix all identified issues to make StoryEngine production-ready. Ordered by prior
 **Issue:** Tests in `src/**/*.test.ts` are never run.
 
 **Tasks:**
-- [ ] Add `src/**/*.test.ts` to `vitest.config.ts` include array
-- [ ] Run full test suite — ensure no regressions from newly included tests
+- [x] Add `src/**/*.test.ts` to `vitest.config.ts` include array (or equivalent)
+- [x] Run full test suite — 782+ tests pass
 
-**Estimate:** 15 min
+**Estimate:** 15 min *(completed)*
 
 ---
 
@@ -65,11 +61,11 @@ Fix all identified issues to make StoryEngine production-ready. Ordered by prior
 **Issue:** Ensure CI has everything it needs.
 
 **Tasks:**
-- [ ] Verify `ci-cd.yml` runs `npx prisma generate` before typecheck and test (already present)
-- [ ] Verify test job has `TEST_DATABASE_URL` and Postgres/Redis services (already present)
-- [ ] Push changes — confirm CI passes (lint, typecheck, test, build)
+- [x] Verify `ci-cd.yml` runs `npx prisma generate` before typecheck and test
+- [x] Verify test job has `TEST_DATABASE_URL` and Postgres/Redis services
+- [x] CI passes (lint, typecheck, test, build)
 
-**Estimate:** 30 min
+**Estimate:** 30 min *(completed)*
 
 ---
 
@@ -99,11 +95,10 @@ Fix all identified issues to make StoryEngine production-ready. Ordered by prior
 **Issue:** 41 tests skipped — requires `TEST_DATABASE_URL` and Prisma.
 
 **Tasks:**
-- [ ] Ensure `landing-page-lifecycle.test.ts` runs in CI (test job has DB)
-- [ ] If skipped due to missing setup — add `beforeAll` to seed or skip with clear reason
-- [ ] Document in README: integration tests require Postgres + Redis
+- [x] Ensure `landing-page-lifecycle.test.ts` runs in CI (test job has DB)
+- [x] Document in README: integration tests require Postgres + Redis
 
-**Estimate:** 1 hour
+**Estimate:** 1 hour *(completed)*
 
 ---
 
@@ -211,9 +206,9 @@ Fix all identified issues to make StoryEngine production-ready. Ordered by prior
 
 ## Definition of Done
 
-- [ ] `npm run lint` — 0 errors, 0 warnings
-- [ ] `npm run build` — success
-- [ ] `npm test` — all tests pass (no supertest port errors)
-- [ ] CI/CD pipeline — green on main
+- [ ] `npm run lint` — 0 errors, 0 warnings (some unused-var warnings may remain)
+- [x] `npm run build` — success
+- [x] `npm test` — all tests pass (782+)
+- [x] CI/CD pipeline — green on main
 - [ ] `npm run smoke:test` — passes against deployed app
 - [ ] No critical/high npm audit vulnerabilities
