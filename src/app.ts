@@ -109,6 +109,7 @@ export function createApp(deps: AppDeps): express.Application {
   } = services;
 
   const app = express();
+  configureTrustProxy(app);
 
   // Named security-policy presets (see src/middleware/security-policy.ts)
   const standardPolicy = requireOrgSecurityPolicy(prisma, {
@@ -177,20 +178,38 @@ export function createApp(deps: AppDeps): express.Application {
 
   // Request ID tracing (before any route handlers)
   app.use(requestIdMiddleware);
+  app.use(requestLoggingMiddleware);
 
-  // Stripe webhooks need raw body (limit to prevent large payload DoS)
+  // Webhook endpoints need raw body for signature verification.
+  // Keep these mounted before JSON parsing.
   app.post(
     "/api/webhooks/stripe",
     express.raw({ type: "application/json", limit: "1mb" }),
     webhookRateLimiter,
     createStripeWebhookHandler(prisma, stripe)
   );
+  app.post(
+    "/api/webhooks/merge",
+    express.raw({ type: "application/json", limit: "1mb" }),
+    webhookRateLimiter,
+    createMergeWebhookHandler({ prisma, processingQueue: queues.processingQueue })
+  );
+  app.post(
+    "/api/webhooks/gong",
+    express.raw({ type: "application/json", limit: "1mb" }),
+    webhookRateLimiter,
+    createGongWebhookHandler({ prisma, processingQueue: queues.processingQueue })
+  );
+  app.post(
+    "/api/webhooks/grain",
+    express.raw({ type: "application/json", limit: "1mb" }),
+    webhookRateLimiter,
+    createGrainWebhookHandler({ prisma, processingQueue: queues.processingQueue })
+  );
 
   // All other routes use JSON parsing
   app.use(express.json({ limit: "10mb" }));
-
-  // Request logging (after body parsing so we can log status codes)
-  app.use(requestLoggingMiddleware);
+  app.use(express.urlencoded({ extended: false, limit: "100kb" }));
 
   // ─── Public Routes ───────────────────────────────────────────────────────
 
@@ -198,28 +217,6 @@ export function createApp(deps: AppDeps): express.Application {
     res.json({ status: "ok", service: "storyengine", version: "1.0.0" });
   });
   app.use("/api/status", createStatusRoutes(prisma));
-
-  // Webhook endpoints (authenticated by signature, not user auth)
-  app.post(
-    "/api/webhooks/merge",
-    express.raw({ type: "application/json", limit: "1mb" }),
-    webhookRateLimiter,
-    createMergeWebhookHandler({ prisma, processingQueue: queues.processingQueue })
-  );
-
-  app.post(
-    "/api/webhooks/gong",
-    express.raw({ type: "application/json", limit: "1mb" }),
-    webhookRateLimiter,
-    createGongWebhookHandler({ prisma, processingQueue: queues.processingQueue })
-  );
-
-  app.post(
-    "/api/webhooks/grain",
-    express.raw({ type: "application/json", limit: "1mb" }),
-    webhookRateLimiter,
-    createGrainWebhookHandler({ prisma, processingQueue: queues.processingQueue })
-  );
 
   // Public landing pages — no auth, served at /s/:slug
   app.use("/s", passwordRateLimiter, createPublicPageRoutes(prisma));
@@ -296,7 +293,7 @@ export function createApp(deps: AppDeps): express.Application {
     "/api/stories",
     trialGate,
     apiRateLimiter,
-    createStoryRoutes(storyBuilder, prisma, aiConfigService, aiUsageTracker)
+    createStoryRoutes(storyBuilder, prisma, aiConfigService, aiUsageTracker, ragEngine)
   );
   app.use(
     "/api/stories",
@@ -325,7 +322,7 @@ export function createApp(deps: AppDeps): express.Application {
     trialGate,
     standardPolicy,
     apiRateLimiter,
-    createDashboardRoutes(prisma)
+    createDashboardRoutes(prisma, ragEngine)
   );
 
   // Transcript Viewer
@@ -438,4 +435,32 @@ export function createApp(deps: AppDeps): express.Application {
   });
 
   return app;
+}
+
+function configureTrustProxy(app: express.Application): void {
+  const rawTrustProxy = process.env.TRUST_PROXY?.trim();
+  if (!rawTrustProxy) {
+    if (process.env.NODE_ENV === "production") {
+      app.set("trust proxy", 1);
+    }
+    return;
+  }
+
+  const normalized = rawTrustProxy.toLowerCase();
+  if (normalized === "true") {
+    app.set("trust proxy", true);
+    return;
+  }
+  if (normalized === "false") {
+    app.set("trust proxy", false);
+    return;
+  }
+
+  const numeric = Number.parseInt(rawTrustProxy, 10);
+  if (Number.isFinite(numeric)) {
+    app.set("trust proxy", numeric);
+    return;
+  }
+
+  app.set("trust proxy", rawTrustProxy);
 }

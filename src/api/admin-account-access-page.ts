@@ -25,7 +25,7 @@ export function createAdminAccountAccessPage(prisma: PrismaClient): Router {
     "/",
     requirePermission(prisma, "manage_permissions"),
     async (_req: AuthenticatedRequest, res: Response) => {
-      res.setHeader("Cache-Control", "private, no-cache");
+      res.setHeader("Cache-Control", "private, no-store");
       res.send(renderAccountAccessPage());
     }
   );

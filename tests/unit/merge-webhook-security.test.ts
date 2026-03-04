@@ -27,6 +27,8 @@ describe("Merge webhook tenant isolation and idempotency", () => {
 
   afterEach(() => {
     delete process.env.MERGE_WEBHOOK_SECRET;
+    delete process.env.MERGE_WEBHOOK_SECRET_PREVIOUS;
+    delete process.env.MERGE_WEBHOOK_SECRETS;
     vi.restoreAllMocks();
   });
 
@@ -49,7 +51,7 @@ describe("Merge webhook tenant isolation and idempotency", () => {
     );
 
     const payload = JSON.stringify({
-      hook: { event: "recording.created" },
+      hook: { event: "recording.created", timestamp: new Date().toISOString() },
       linked_account: {
         id: "la-1",
         integration: "gong",
@@ -101,13 +103,13 @@ describe("Merge webhook tenant isolation and idempotency", () => {
     );
 
     const payload = JSON.stringify({
-      hook: { event: "recording.created" },
+      hook: { event: "recording.created", timestamp: new Date().toISOString() },
       linked_account: {
         id: "la-1",
         integration: "gong",
         organization: "org-real",
       },
-      data: { id: "rec-1", remote_id: "remote-1", transcript: "hello world" },
+      data: { id: "rec-rotation", remote_id: "remote-rotation", transcript: "hello world" },
     });
 
     const signature = signPayload(payload, process.env.MERGE_WEBHOOK_SECRET!);
@@ -125,5 +127,59 @@ describe("Merge webhook tenant isolation and idempotency", () => {
       expect.objectContaining({ callId: "call-1", organizationId: "org-real" }),
       expect.objectContaining({ jobId: "process-call:call-1" })
     );
+  });
+
+  it("accepts signature generated with previous secret during rotation", async () => {
+    process.env.MERGE_WEBHOOK_SECRET = "whsec_merge_current";
+    process.env.MERGE_WEBHOOK_SECRET_PREVIOUS = "whsec_merge_previous";
+
+    const queue = { add: vi.fn().mockResolvedValue(undefined) } as any;
+    const prisma = {
+      linkedAccount: {
+        findUnique: vi.fn().mockResolvedValue({
+          organizationId: "org-real",
+          status: "ACTIVE",
+        }),
+      },
+      call: {
+        upsert: vi.fn().mockResolvedValue({ id: "call-1", accountId: null }),
+      },
+      callParticipant: {
+        findFirst: vi.fn(),
+        create: vi.fn(),
+      },
+      transcript: {
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    } as any;
+
+    const app = express();
+    app.post(
+      "/api/webhooks/merge",
+      express.raw({ type: "application/json" }),
+      createMergeWebhookHandler({ prisma, processingQueue: queue })
+    );
+
+    const payload = JSON.stringify({
+      hook: { event: "recording.created", timestamp: new Date().toISOString() },
+      linked_account: {
+        id: "la-1",
+        integration: "gong",
+        organization: "org-real",
+      },
+      data: { id: "rec-1", remote_id: "remote-1", transcript: "hello world" },
+    });
+
+    const signature = signPayload(payload, process.env.MERGE_WEBHOOK_SECRET_PREVIOUS!);
+    await withRequestServer(app, (req) =>
+      req
+        .post("/api/webhooks/merge")
+        .set("content-type", "application/json")
+        .set("x-merge-webhook-signature", signature)
+        .send(payload)
+        .expect(200)
+    );
+
+    expect(queue.add).toHaveBeenCalledTimes(1);
   });
 });

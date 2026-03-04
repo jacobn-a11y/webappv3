@@ -14,7 +14,6 @@
 
 import { Router, type Response } from "express";
 import type { PrismaClient } from "@prisma/client";
-import logger from "../lib/logger.js";
 import {
   AccountJourneyService,
   type TimelineNode,
@@ -51,6 +50,7 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
         req.organizationId
       );
 
+      res.setHeader("Cache-Control", "private, no-store");
       sendSuccess(res, {
         account: {
           id: data.account.id,
@@ -132,7 +132,7 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
           req.organizationId
         );
 
-        res.setHeader("Cache-Control", "private, no-cache");
+        res.setHeader("Cache-Control", "private, no-store");
         res.send(
           renderJourneyPage(data.account, data.timeline, data.stageCounts)
         );
@@ -963,12 +963,6 @@ function renderCrmEventNode(node: TimelineCrmEventNode): string {
       </div>
     </div>
   `;
-}
-
-// ─── Error Page ───────────────────────────────────────────────────────────────
-
-function renderErrorPage(): string {
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Error</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f8fafc}h1{color:#64748b;font-weight:500}</style></head><body><h1>Failed to load account journey</h1></body></html>`;
 }
 
 // ─── Utility ──────────────────────────────────────────────────────────────────

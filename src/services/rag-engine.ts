@@ -244,7 +244,6 @@ ${contextBlock}`,
   /**
    * Conversation-aware chat: retrieves context for the latest query while
    * carrying prior conversation history so the LLM can resolve follow-ups.
-   * When accountId is null, searches across all accounts in the org.
    */
   async chat(input: RAGChatQuery): Promise<RAGChatResponse> {
     const topK = input.topK ?? 8;
@@ -442,6 +441,115 @@ ${contextBlock}`,
 
     await this.prisma.transcriptChunk.updateMany({
       where: { id: { in: candidates.map((c) => c.id) } },
+      data: { embeddingId: null },
+    });
+
+    return vectorIds.length;
+  }
+
+  async pruneVectorsForCall(input: {
+    organizationId: string;
+    callId: string;
+  }): Promise<number> {
+    const candidates = await this.prisma.transcriptChunk.findMany({
+      where: {
+        embeddingId: { not: null },
+        transcript: {
+          call: {
+            id: input.callId,
+            organizationId: input.organizationId,
+          },
+        },
+      },
+      select: { id: true, embeddingId: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const vectorIds = candidates
+      .map((chunk) => chunk.embeddingId)
+      .filter((value): value is string => !!value);
+    if (vectorIds.length === 0) {
+      return 0;
+    }
+
+    const index = this.pinecone.Index(this.indexName);
+    for (let i = 0; i < vectorIds.length; i += 100) {
+      const batch = vectorIds.slice(i, i + 100);
+      if (batch.length === 0) continue;
+      await this.withRetry(() => index.deleteMany(batch));
+    }
+
+    await this.prisma.transcriptChunk.updateMany({
+      where: { id: { in: candidates.map((candidate) => candidate.id) } },
+      data: { embeddingId: null },
+    });
+
+    return vectorIds.length;
+  }
+
+  async pruneVectorsForStory(input: {
+    organizationId: string;
+    storyId: string;
+  }): Promise<number> {
+    const lineageRows = await this.prisma.storyClaimLineage.findMany({
+      where: {
+        organizationId: input.organizationId,
+        storyId: input.storyId,
+        sourceChunkId: { not: null },
+      },
+      select: { sourceChunkId: true },
+    });
+    const candidateChunkIds = Array.from(new Set(
+      lineageRows
+        .map((row) => row.sourceChunkId)
+        .filter((value): value is string => !!value)
+    ));
+    if (candidateChunkIds.length === 0) {
+      return 0;
+    }
+
+    const referencedElsewhere = await this.prisma.storyClaimLineage.findMany({
+      where: {
+        organizationId: input.organizationId,
+        storyId: { not: input.storyId },
+        sourceChunkId: { in: candidateChunkIds },
+      },
+      select: { sourceChunkId: true },
+    });
+    const protectedChunkIds = new Set(
+      referencedElsewhere
+        .map((row) => row.sourceChunkId)
+        .filter((value): value is string => !!value)
+    );
+    const prunableChunkIds = candidateChunkIds.filter((id) => !protectedChunkIds.has(id));
+    if (prunableChunkIds.length === 0) {
+      return 0;
+    }
+
+    const candidates = await this.prisma.transcriptChunk.findMany({
+      where: {
+        id: { in: prunableChunkIds },
+        embeddingId: { not: null },
+        transcript: { call: { organizationId: input.organizationId } },
+      },
+      select: { id: true, embeddingId: true },
+    });
+    const vectorIds = candidates
+      .map((chunk) => chunk.embeddingId)
+      .filter((value): value is string => !!value);
+    if (vectorIds.length === 0) {
+      return 0;
+    }
+
+    const index = this.pinecone.Index(this.indexName);
+    for (let i = 0; i < vectorIds.length; i += 100) {
+      const batch = vectorIds.slice(i, i + 100);
+      if (batch.length === 0) continue;
+      await this.withRetry(() => index.deleteMany(batch));
+    }
+
+    await this.prisma.transcriptChunk.updateMany({
+      where: { id: { in: candidates.map((candidate) => candidate.id) } },
       data: { embeddingId: null },
     });
 

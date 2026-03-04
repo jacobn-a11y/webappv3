@@ -12,7 +12,6 @@ import type { PrismaClient, UserRole } from "@prisma/client";
 import { PermissionManager, requirePermission } from "../middleware/permissions.js";
 import { AccountAccessService } from "../services/account-access.js";
 import { escapeHtml } from "../lib/html-utils.js";
-import logger from "../lib/logger.js";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import { sendUnauthorized } from "./_shared/responses.js";
@@ -70,7 +69,7 @@ export function createAdminPermissionsPage(prisma: PrismaClient): Router {
           }
         }
 
-        res.setHeader("Cache-Control", "private, no-cache");
+        res.setHeader("Cache-Control", "private, no-store");
         res.send(renderPermissionsPage(matrix, accessByUser));
       
     }
@@ -772,4 +771,3 @@ function renderAccessGrant(grant: AccessGrant): string {
             </div>
           </div>`;
 }
-

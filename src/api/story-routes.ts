@@ -18,6 +18,7 @@ import { AIConfigService } from "../services/ai-config.js";
 import { AIUsageTracker, TrackedAIClient } from "../services/ai-usage-tracker.js";
 import { FailoverAIClient } from "../services/ai-resilience.js";
 import { dispatchOutboundWebhookEvent } from "../services/outbound-webhooks.js";
+import type { RAGEngine } from "../services/rag-engine.js";
 import logger from "../lib/logger.js";
 import { registerBuildRoutes } from "./story/build-routes.js";
 import { registerLibraryRoutes } from "./story/library-routes.js";
@@ -27,7 +28,8 @@ export function createStoryRoutes(
   storyBuilder: StoryBuilder,
   prisma: PrismaClient,
   aiConfigService: AIConfigService,
-  aiUsageTracker: AIUsageTracker
+  aiUsageTracker: AIUsageTracker,
+  ragEngine?: RAGEngine
 ): Router {
   const router = Router();
   const accessService = new AccountAccessService(prisma);
@@ -120,7 +122,10 @@ export function createStoryRoutes(
 
   registerLibraryRoutes(sharedDeps);
 
-  registerExportRoutes(sharedDeps);
+  registerExportRoutes({
+    ...sharedDeps,
+    ragEngine,
+  });
 
   return router;
 }

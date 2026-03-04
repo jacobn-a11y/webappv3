@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { decodeCalloutBoxes, decodeProvenance, encodeJsonValue } from "../types/json-boundaries.js";
 import { collectLinkCandidates, validateLinkSyntax } from "./publish-link-utils.js";
+import { assertSafeOutboundUrl, parseHostAllowlist } from "../lib/url-security.js";
 
 export interface PostPublishValidationJobData {
   organizationId: string;
@@ -31,6 +32,9 @@ interface LinkCheckResult {
 
 const LINK_CHECK_TIMEOUT_MS = 6000;
 const MAX_LINKS_PER_PAGE = 30;
+const LINK_CHECK_HOST_ALLOWLIST = parseHostAllowlist(
+  process.env.POST_PUBLISH_VALIDATION_HOST_ALLOWLIST
+);
 
 export class PostPublishValidationService {
   private prisma: PrismaClient;
@@ -185,6 +189,21 @@ export class PostPublishValidationService {
     url: string,
     method: "HEAD" | "GET"
   ): Promise<LinkCheckResult> {
+    try {
+      await assertSafeOutboundUrl(url, {
+        allowHttp: true,
+        allowHttps: true,
+        denyPrivateNetworks: true,
+        allowlistHosts: LINK_CHECK_HOST_ALLOWLIST,
+      });
+    } catch {
+      return {
+        statusCode: null,
+        broken: true,
+        reason: `${method} blocked by outbound URL policy`,
+      };
+    }
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), LINK_CHECK_TIMEOUT_MS);
     try {

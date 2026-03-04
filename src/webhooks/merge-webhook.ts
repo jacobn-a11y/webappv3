@@ -141,9 +141,13 @@ export function createMergeWebhookHandler(deps: {
     // ── Verify signature ──────────────────────────────────────────────
     const signatureHeader = req.headers["x-merge-webhook-signature"];
     const signature = typeof signatureHeader === "string" ? signatureHeader : "";
-    const webhookSecret = process.env.MERGE_WEBHOOK_SECRET;
+    const webhookSecrets = resolveWebhookSecrets(
+      process.env.MERGE_WEBHOOK_SECRETS,
+      process.env.MERGE_WEBHOOK_SECRET,
+      process.env.MERGE_WEBHOOK_SECRET_PREVIOUS
+    );
 
-    if (!webhookSecret) {
+    if (webhookSecrets.length === 0) {
       res.status(500).json({ error: "MERGE_WEBHOOK_SECRET is not configured" });
       return;
     }
@@ -151,7 +155,10 @@ export function createMergeWebhookHandler(deps: {
       res.status(401).json({ error: "Missing webhook signature" });
       return;
     }
-    if (!verifyMergeSignature(rawBody, signature, webhookSecret)) {
+    const isValidSignature = webhookSecrets.some((secret) =>
+      verifyMergeSignature(rawBody, signature, secret)
+    );
+    if (!isValidSignature) {
       res.status(401).json({ error: "Invalid webhook signature" });
       return;
     }
@@ -497,4 +504,11 @@ async function handleCRMOpportunityEvent(
       rawPayload: payload.data as object,
     },
   });
+}
+
+function resolveWebhookSecrets(...rawValues: Array<string | undefined>): string[] {
+  return rawValues
+    .flatMap((value) => (value ?? "").split(","))
+    .map((secret) => secret.trim())
+    .filter((secret) => secret.length > 0);
 }

@@ -16,6 +16,7 @@ import type {
   PrismaClient,
   Plan,
   SubscriptionStatus,
+  UserRole,
 } from "@prisma/client";
 import { z } from "zod";
 import {
@@ -390,16 +391,20 @@ export function createStripeWebhookHandler(
 ) {
   return async (req: Request, res: Response) => {
     const sig = req.headers["stripe-signature"] as string;
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    const webhookSecrets = resolveWebhookSecrets(
+      process.env.STRIPE_WEBHOOK_SECRETS,
+      process.env.STRIPE_WEBHOOK_SECRET,
+      process.env.STRIPE_WEBHOOK_SECRET_PREVIOUS
+    );
 
-    if (!webhookSecret) {
+    if (webhookSecrets.length === 0) {
       res.status(500).json({ error: "Webhook secret not configured" });
       return;
     }
 
     let event: Stripe.Event;
     try {
-      event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+      event = constructStripeEvent(stripe, req.body, sig, webhookSecrets);
     } catch {
       res.status(400).json({ error: "Invalid webhook signature" });
       return;
@@ -541,10 +546,28 @@ export function createStripeWebhookHandler(
             where: { stripeSubscriptionId: subscriptionId },
           });
 
+          if (localSub && isStaleStripeLifecycleEvent(localSub.updatedAt, event.created)) {
+            logger.info("Ignoring stale Stripe invoice.payment_failed event", {
+              subscriptionId,
+              eventId: event.id,
+              eventCreated: event.created,
+            });
+            break;
+          }
+
           if (localSub) {
+            const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
             await prisma.subscription.update({
               where: { stripeSubscriptionId: subscriptionId },
-              data: { status: "PAST_DUE" },
+              data: {
+                status: mapStripeStatus(stripeSub.status),
+                currentPeriodStart: new Date(
+                  stripeSub.current_period_start * 1000
+                ),
+                currentPeriodEnd: new Date(
+                  stripeSub.current_period_end * 1000
+                ),
+              },
             });
           }
 
@@ -557,8 +580,24 @@ export function createStripeWebhookHandler(
 
         // ── Subscription updated ────────────────────────────────────────
         case "customer.subscription.updated": {
-          const stripeSubscription = event.data
+          const incomingSubscription = event.data
             .object as Stripe.Subscription;
+          const existing = await prisma.subscription.findUnique({
+            where: { stripeSubscriptionId: incomingSubscription.id },
+            select: { updatedAt: true },
+          });
+          if (existing && isStaleStripeLifecycleEvent(existing.updatedAt, event.created)) {
+            logger.info("Ignoring stale Stripe customer.subscription.updated event", {
+              subscriptionId: incomingSubscription.id,
+              eventId: event.id,
+              eventCreated: event.created,
+            });
+            break;
+          }
+
+          const stripeSubscription = await stripe.subscriptions.retrieve(
+            incomingSubscription.id
+          );
           const orgId =
             stripeSubscription.metadata.organizationId ??
             (await resolveOrgFromCustomer(
@@ -626,6 +665,18 @@ export function createStripeWebhookHandler(
         case "customer.subscription.deleted": {
           const stripeSubscription = event.data
             .object as Stripe.Subscription;
+          const existing = await prisma.subscription.findUnique({
+            where: { stripeSubscriptionId: stripeSubscription.id },
+            select: { updatedAt: true },
+          });
+          if (existing && isStaleStripeLifecycleEvent(existing.updatedAt, event.created)) {
+            logger.info("Ignoring stale Stripe customer.subscription.deleted event", {
+              subscriptionId: stripeSubscription.id,
+              eventId: event.id,
+              eventCreated: event.created,
+            });
+            break;
+          }
           const orgId =
             stripeSubscription.metadata.organizationId ??
             (await resolveOrgFromCustomer(
@@ -709,4 +760,37 @@ async function resolveOrgFromCustomer(
     where: { stripeCustomerId },
   });
   return org?.id ?? null;
+}
+
+function resolveWebhookSecrets(...rawValues: Array<string | undefined>): string[] {
+  return rawValues
+    .flatMap((value) => (value ?? "").split(","))
+    .map((secret) => secret.trim())
+    .filter((secret) => secret.length > 0);
+}
+
+function constructStripeEvent(
+  stripe: Stripe,
+  payload: Buffer | string,
+  signature: string,
+  secrets: string[]
+): Stripe.Event {
+  let lastError: unknown = null;
+  for (const secret of secrets) {
+    try {
+      return stripe.webhooks.constructEvent(payload, signature, secret);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error("Invalid webhook signature");
+}
+
+function isStaleStripeLifecycleEvent(
+  lastLocalUpdate: Date,
+  eventCreatedEpochSeconds: number
+): boolean {
+  const eventMs = eventCreatedEpochSeconds * 1000;
+  const staleSkewMs = 5000;
+  return lastLocalUpdate.getTime() - staleSkewMs > eventMs;
 }

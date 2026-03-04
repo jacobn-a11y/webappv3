@@ -35,10 +35,14 @@ import { registerAccountReportingRoutes } from "./dashboard/account-reporting-ro
 import { registerArtifactGovernanceRoutes } from "./dashboard/artifact-governance-routes.js";
 import { registerDataQualityRoutes } from "./dashboard/data-quality-routes.js";
 import { registerSellerAdoptionRoutes } from "./dashboard/seller-adoption-routes.js";
+import type { RAGEngine } from "../services/rag-engine.js";
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
-export function createDashboardRoutes(prisma: PrismaClient): Router {
+export function createDashboardRoutes(
+  prisma: PrismaClient,
+  ragEngine?: RAGEngine
+): Router {
   const router = Router();
   const editor = new LandingPageEditor(prisma);
   const permManager = new PermissionManager(prisma);
@@ -57,6 +61,12 @@ export function createDashboardRoutes(prisma: PrismaClient): Router {
     targetId: string
   ): Promise<boolean> => {
     if (targetType === "CALL") {
+      if (ragEngine) {
+        await ragEngine.pruneVectorsForCall({
+          organizationId,
+          callId: targetId,
+        });
+      }
       const result = await prisma.call.deleteMany({
         where: { id: targetId, organizationId },
       });

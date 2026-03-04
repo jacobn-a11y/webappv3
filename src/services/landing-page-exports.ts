@@ -17,6 +17,10 @@ import type { CalloutBox } from "./landing-page-editor.js";
 import { decodeCalloutBoxes } from "../types/json-boundaries.js";
 import type { StoryContextSettings } from "../types/story-generation.js";
 import type { PdfWorkerRequest } from "../workers/pdf-export-worker.js";
+import {
+  assertSafeOutboundUrl,
+  parseHostAllowlist,
+} from "../lib/url-security.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -32,6 +36,13 @@ const PDF_WORKER_PATH = join(__dirname, "..", "workers", "pdf-export-worker.js")
 // ─── PDF Concurrency Limiter ─────────────────────────────────────────────────
 
 const MAX_PDF_CONCURRENCY = 3;
+const PDF_WORKER_TIMEOUT_MS = resolvePositiveInt(
+  process.env.PDF_EXPORT_WORKER_TIMEOUT_MS,
+  45_000
+);
+const SLACK_WEBHOOK_HOST_ALLOWLIST = parseHostAllowlist(
+  process.env.SLACK_WEBHOOK_HOST_ALLOWLIST
+);
 
 class Semaphore {
   private queue: (() => void)[] = [];
@@ -314,12 +325,14 @@ export class LandingPageExporter {
     pageId: string,
     webhookUrl?: string
   ): Promise<{ ok: boolean }> {
-    const url = webhookUrl ?? process.env.SLACK_WEBHOOK_URL;
+    const rawUrl = webhookUrl ?? process.env.SLACK_WEBHOOK_URL;
+    const url = rawUrl?.trim();
     if (!url) {
       throw new Error(
         "No Slack webhook URL provided. Pass webhook_url in the request body or set SLACK_WEBHOOK_URL."
       );
     }
+    await this.validateSlackWebhookUrl(url);
 
     const page = await this.getExportablePage(pageId);
     const publicUrl = await this.getPagePublicUrl(pageId);
@@ -480,6 +493,18 @@ export class LandingPageExporter {
     const baseUrl = process.env.APP_URL ?? "http://localhost:3000";
     return `${baseUrl}/s/${page.slug}`;
   }
+
+  private async validateSlackWebhookUrl(url: string): Promise<void> {
+    const allowlistHosts = SLACK_WEBHOOK_HOST_ALLOWLIST.length > 0
+      ? SLACK_WEBHOOK_HOST_ALLOWLIST
+      : ["hooks.slack.com", "hooks.slack-gov.com"];
+    await assertSafeOutboundUrl(url, {
+      allowHttp: process.env.NODE_ENV !== "production",
+      allowHttps: true,
+      denyPrivateNetworks: true,
+      allowlistHosts,
+    });
+  }
 }
 
 // ─── Worker Thread Helper ────────────────────────────────────────────────────
@@ -492,14 +517,28 @@ export class LandingPageExporter {
 function runPdfWorker(request: PdfWorkerRequest): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     const worker = new Worker(PDF_WORKER_PATH);
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      void worker.terminate();
+      reject(new Error(`PDF worker timed out after ${PDF_WORKER_TIMEOUT_MS}ms`));
+    }, PDF_WORKER_TIMEOUT_MS);
 
-    worker.on("message", (msg: { buffer?: Uint8Array; error?: string }) => {
-      if (msg.error) {
-        reject(new Error(`PDF worker error: ${msg.error}`));
-      } else if (msg.buffer) {
-        resolve(Buffer.from(msg.buffer));
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      fn();
+    };
+
+    worker.on("message", (msg: { buffer: Uint8Array } | { error: string }) => {
+      if ("error" in msg) {
+        settle(() => reject(new Error(`PDF worker error: ${msg.error}`)));
+      } else if ("buffer" in msg) {
+        settle(() => resolve(Buffer.from(msg.buffer)));
       } else {
-        reject(new Error("PDF worker returned an unexpected message"));
+        settle(() => reject(new Error("PDF worker returned an unexpected message")));
       }
       // The worker will exit naturally after the message handler returns,
       // but terminate explicitly to free resources promptly.
@@ -507,13 +546,15 @@ function runPdfWorker(request: PdfWorkerRequest): Promise<Buffer> {
     });
 
     worker.on("error", (err) => {
-      reject(new Error(`PDF worker thread error: ${err.message}`));
+      settle(() => reject(new Error(`PDF worker thread error: ${err.message}`)));
     });
 
     worker.on("exit", (code) => {
       if (code !== 0) {
-        reject(new Error(`PDF worker exited with code ${code}`));
+        settle(() => reject(new Error(`PDF worker exited with code ${code}`)));
+        return;
       }
+      clearTimeout(timeout);
     });
 
     worker.postMessage(request);
@@ -555,4 +596,13 @@ function calloutEmoji(icon?: string): string {
     success: ":white_check_mark:",
   };
   return emojis[icon ?? "insight"] ?? ":bulb:";
+}
+
+function resolvePositiveInt(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
 }

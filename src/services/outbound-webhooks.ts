@@ -2,6 +2,7 @@ import crypto from "crypto";
 import type { PrismaClient } from "@prisma/client";
 import logger from "../lib/logger.js";
 import { decodeSecurityPolicy, encodeJsonValue } from "../types/json-boundaries.js";
+import { assertSafeOutboundUrl, parseHostAllowlist, UrlPolicyError } from "../lib/url-security.js";
 
 export const OUTBOUND_WEBHOOK_EVENTS = [
   "landing_page_published",
@@ -23,6 +24,10 @@ export interface OutboundWebhookSubscription {
   created_at: string;
   updated_at: string;
 }
+
+const OUTBOUND_WEBHOOK_HOST_ALLOWLIST = parseHostAllowlist(
+  process.env.OUTBOUND_WEBHOOK_HOST_ALLOWLIST
+);
 
 interface OutboundEventEnvelope {
   event_id: string;
@@ -121,6 +126,20 @@ export async function deliverWebhookToSubscription(
   subscription: OutboundWebhookSubscription,
   envelope: OutboundEventEnvelope
 ): Promise<{ status: number; ok: boolean; error?: string }> {
+  try {
+    await assertSafeOutboundUrl(subscription.url, {
+      allowHttp: process.env.NODE_ENV !== "production",
+      allowHttps: true,
+      denyPrivateNetworks: true,
+      allowlistHosts: OUTBOUND_WEBHOOK_HOST_ALLOWLIST,
+    });
+  } catch (error) {
+    if (error instanceof UrlPolicyError) {
+      return { status: 0, ok: false, error: error.code };
+    }
+    return { status: 0, ok: false, error: "invalid_webhook_url" };
+  }
+
   const payload = JSON.stringify(envelope);
   const signature = crypto
     .createHmac("sha256", subscription.secret)
