@@ -1,3 +1,8 @@
+/**
+ * TranscriptViewerPage — Layout shell, data fetching, and state management.
+ * Sub-components decomposed into ./transcript/
+ */
+
 import {
   useState,
   useEffect,
@@ -7,128 +12,20 @@ import {
 } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import { getTranscriptData, type TranscriptData } from "../lib/api";
-import { formatEnumLabel } from "../lib/format";
-import { TOPIC_LABELS, type TaxonomyTopic } from "../types/taxonomy";
+import { TranscriptBody, TagPill } from "./transcript/TranscriptBody";
+import { TranscriptSidebar } from "./transcript/TranscriptSidebar";
+import { TranscriptSearch } from "./transcript/TranscriptSearch";
 import "./TranscriptViewerPage.css";
 
-// ─── Constants ──────────────────────────────────────────────────────────────
+// Re-export sub-components for backward compatibility
+export { TranscriptBody } from "./transcript/TranscriptBody";
+export type { TranscriptBodyProps } from "./transcript/TranscriptBody";
+export { TranscriptSidebar } from "./transcript/TranscriptSidebar";
+export type { TranscriptSidebarProps } from "./transcript/TranscriptSidebar";
+export { TranscriptSearch } from "./transcript/TranscriptSearch";
+export type { TranscriptSearchProps } from "./transcript/TranscriptSearch";
 
-const SPEAKER_PALETTE = [
-  "#4f46e5",
-  "#7c3aed",
-  "#059669",
-  "#d97706",
-  "#dc2626",
-  "#2563eb",
-  "#0891b2",
-  "#be185d",
-  "#65a30d",
-  "#ea580c",
-];
-
-const STAGE_COLORS: Record<string, string> = {
-  TOFU: "#2563eb",
-  MOFU: "#7c3aed",
-  BOFU: "#059669",
-  POST_SALE: "#d97706",
-  INTERNAL: "#6b7280",
-  VERTICAL: "#dc2626",
-};
-
-const STAGE_BG_COLORS: Record<string, string> = {
-  TOFU: "rgba(37, 99, 235, 0.12)",
-  MOFU: "rgba(124, 58, 237, 0.12)",
-  BOFU: "rgba(5, 150, 105, 0.12)",
-  POST_SALE: "rgba(217, 119, 6, 0.12)",
-  INTERNAL: "rgba(107, 114, 128, 0.12)",
-  VERTICAL: "rgba(220, 38, 38, 0.12)",
-};
-
-const STAGE_LABELS: Record<string, string> = {
-  TOFU: "Top of Funnel",
-  MOFU: "Mid-Funnel",
-  BOFU: "Bottom of Funnel",
-  POST_SALE: "Post-Sale",
-  INTERNAL: "Internal",
-  VERTICAL: "Vertical",
-};
-
-const PROVIDER_LABELS: Record<string, string> = {
-  GONG: "Gong",
-  CHORUS: "Chorus",
-  ZOOM: "Zoom",
-  GOOGLE_MEET: "Google Meet",
-  TEAMS: "Microsoft Teams",
-  FIREFLIES: "Fireflies",
-  DIALPAD: "Dialpad",
-  AIRCALL: "Aircall",
-  RINGCENTRAL: "RingCentral",
-  SALESLOFT: "SalesLoft",
-  OUTREACH: "Outreach",
-  OTHER: "Other",
-};
-
-// ─── Helper Functions ───────────────────────────────────────────────────────
-
-function speakerColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = (hash * 31 + name.charCodeAt(i)) & 0x7fffffff;
-  }
-  return SPEAKER_PALETTE[hash % SPEAKER_PALETTE.length];
-}
-
-function speakerInitials(name: string): string {
-  return name
-    .split(/\s+/)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .slice(0, 2)
-    .join("");
-}
-
-function formatMs(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  if (hours > 0) return `${hours}:${pad(minutes)}:${pad(seconds)}`;
-  return `${pad(minutes)}:${pad(seconds)}`;
-}
-
-function formatDuration(totalSeconds: number): string {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const secs = totalSeconds % 60;
-  const parts: string[] = [];
-  if (hours > 0) parts.push(`${hours}h`);
-  if (minutes > 0) parts.push(`${minutes}m`);
-  if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
-  return parts.join(" ");
-}
-
-function formatProvider(provider: string): string {
-  return PROVIDER_LABELS[provider] ?? provider;
-}
-
-function stageColor(stage: string): string {
-  return STAGE_COLORS[stage] ?? "#6b7280";
-}
-
-function stageBgColor(stage: string): string {
-  return STAGE_BG_COLORS[stage] ?? "rgba(107, 114, 128, 0.12)";
-}
-
-function stageLabel(stage: string): string {
-  return STAGE_LABELS[stage] ?? stage;
-}
-
-function topicLabel(topic: string): string {
-  return (
-    TOPIC_LABELS[topic as TaxonomyTopic] ??
-    formatEnumLabel(topic)
-  );
-}
+// ─── Helpers (search-related, kept here since they drive page-level state) ──
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -137,400 +34,8 @@ function escapeRegex(str: string): string {
 function parseNonNegativeInt(value: string | null): number | null {
   if (!value) return null;
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return null;
-  }
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
   return parsed;
-}
-
-// ─── Search Highlight Helper ────────────────────────────────────────────────
-
-interface HighlightResult {
-  parts: Array<{ text: string; isMatch: boolean; matchIndex: number }>;
-  matchCount: number;
-}
-
-function highlightText(
-  text: string,
-  query: string,
-  startMatchIndex: number,
-): HighlightResult {
-  if (!query || query.length < 2) {
-    return { parts: [{ text, isMatch: false, matchIndex: -1 }], matchCount: 0 };
-  }
-
-  const regex = new RegExp(`(${escapeRegex(query)})`, "gi");
-  const parts: HighlightResult["parts"] = [];
-  let lastIndex = 0;
-  let matchCount = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push({
-        text: text.slice(lastIndex, match.index),
-        isMatch: false,
-        matchIndex: -1,
-      });
-    }
-    parts.push({
-      text: match[1],
-      isMatch: true,
-      matchIndex: startMatchIndex + matchCount,
-    });
-    matchCount++;
-    lastIndex = regex.lastIndex;
-  }
-
-  if (lastIndex < text.length) {
-    parts.push({
-      text: text.slice(lastIndex),
-      isMatch: false,
-      matchIndex: -1,
-    });
-  }
-
-  if (parts.length === 0) {
-    parts.push({ text, isMatch: false, matchIndex: -1 });
-  }
-
-  return { parts, matchCount };
-}
-
-// ─── Tag Pill Component ─────────────────────────────────────────────────────
-
-interface TagPillProps {
-  funnelStage: string;
-  topic: string;
-  confidence: number;
-  small?: boolean;
-}
-
-function TagPill({ funnelStage, topic, confidence, small }: TagPillProps) {
-  const label = topicLabel(topic);
-  const tooltip = `${label} (${stageLabel(funnelStage)}) \u2014 ${Math.round(confidence * 100)}% confidence`;
-
-  return (
-    <span
-      className={`transcript__tag-pill${small ? " transcript__tag-pill--header" : ""}`}
-      style={{
-        background: stageBgColor(funnelStage),
-        color: stageColor(funnelStage),
-        borderColor: `${stageColor(funnelStage)}20`,
-      }}
-      title={tooltip}
-    >
-      {label}
-    </span>
-  );
-}
-
-// ─── Segment Component ──────────────────────────────────────────────────────
-
-interface SegmentProps {
-  segment: TranscriptData["segments"][number];
-  searchQuery: string;
-  activeMatchIndex: number;
-  matchStartIndex: number;
-  matchRefs: React.MutableRefObject<Map<number, HTMLElement>>;
-  segmentRefs: React.MutableRefObject<Map<string, HTMLDivElement>>;
-  highlightedSegmentId: string | null;
-}
-
-function Segment({
-  segment,
-  searchQuery,
-  activeMatchIndex,
-  matchStartIndex,
-  matchRefs,
-  segmentRefs,
-  highlightedSegmentId,
-}: SegmentProps) {
-  const speaker = segment.speaker ?? "Unknown Speaker";
-  const color = speakerColor(speaker);
-  const initials = speakerInitials(speaker);
-
-  const { parts } = highlightText(segment.text, searchQuery, matchStartIndex);
-
-  return (
-    <div
-      ref={(el) => {
-        if (el) {
-          segmentRefs.current.set(segment.id, el);
-        } else {
-          segmentRefs.current.delete(segment.id);
-        }
-      }}
-      className={`transcript__seg${segment.id === highlightedSegmentId ? " transcript__seg--deep-linked" : ""}`}
-      data-speaker={speaker}
-      data-chunk-id={segment.id}
-    >
-      <div className="transcript__seg-gutter">
-        <div
-          className="transcript__seg-avatar"
-          style={{ background: color }}
-        >
-          {initials}
-        </div>
-        {segment.startMs != null && (
-          <span className="transcript__seg-timestamp">
-            {formatMs(segment.startMs)}
-          </span>
-        )}
-      </div>
-      <div className="transcript__seg-body">
-        <div className="transcript__seg-header">
-          <span className="transcript__seg-speaker">{speaker}</span>
-          {segment.endMs != null && segment.startMs != null && (
-            <span className="transcript__seg-duration">
-              {formatMs(segment.endMs - segment.startMs)}
-            </span>
-          )}
-        </div>
-        <div className="transcript__seg-text">
-          {parts.map((part, i) =>
-            part.isMatch ? (
-              <mark
-                key={i}
-                ref={(el) => {
-                  if (el) {
-                    matchRefs.current.set(part.matchIndex, el);
-                  }
-                }}
-                className={`transcript__search-hit${
-                  part.matchIndex === activeMatchIndex
-                    ? " transcript__search-hit--active"
-                    : ""
-                }`}
-                data-match-id={part.matchIndex}
-              >
-                {part.text}
-              </mark>
-            ) : (
-              <span key={i}>{part.text}</span>
-            ),
-          )}
-        </div>
-        {segment.tags.length > 0 && (
-          <div className="transcript__seg-tags">
-            {segment.tags.map((tag, i) => (
-              <TagPill
-                key={i}
-                funnelStage={tag.funnelStage}
-                topic={tag.topic}
-                confidence={tag.confidence}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Sidebar Component ──────────────────────────────────────────────────────
-
-interface SidebarProps {
-  meta: TranscriptData["meta"];
-  participants: TranscriptData["participants"];
-  entity: TranscriptData["entity"];
-  collapsed: boolean;
-  onToggle: () => void;
-}
-
-function Sidebar({
-  meta,
-  participants,
-  entity,
-  collapsed,
-  onToggle,
-}: SidebarProps) {
-  const metaRows = useMemo(() => {
-    const rows = [
-      { label: "Provider", value: formatProvider(meta.provider) },
-      {
-        label: "Date",
-        value: new Date(meta.occurredAt).toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        }),
-      },
-      {
-        label: "Time",
-        value: new Date(meta.occurredAt).toLocaleTimeString("en-US", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      },
-    ];
-    if (meta.duration != null) {
-      rows.push({ label: "Duration", value: formatDuration(meta.duration) });
-    }
-    rows.push(
-      { label: "Language", value: meta.language.toUpperCase() },
-      { label: "Word Count", value: meta.wordCount.toLocaleString() },
-    );
-    return rows;
-  }, [meta]);
-
-  const sidebarClasses = [
-    "transcript__sidebar",
-    collapsed ? "transcript__sidebar--collapsed" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  return (
-    <aside className={sidebarClasses}>
-      <button
-        className="transcript__sidebar-toggle"
-        onClick={onToggle}
-        aria-label="Toggle sidebar"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M15 18l-6-6 6-6" />
-        </svg>
-      </button>
-
-      <div className="transcript__sidebar-content">
-        {/* Call Details */}
-        <section className="transcript__sidebar-section">
-          <h3 className="transcript__sidebar-heading">Call Details</h3>
-          {meta.title && (
-            <h4 className="transcript__sidebar-call-title">{meta.title}</h4>
-          )}
-          {meta.recordingUrl && (
-            <a
-              href={meta.recordingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="transcript__recording-link"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                width="14"
-                height="14"
-              >
-                <polygon points="5,3 19,12 5,21" />
-              </svg>
-              Play Recording
-            </a>
-          )}
-          <div className="transcript__meta-grid">
-            {metaRows.map((row) => (
-              <div className="transcript__meta-row" key={row.label}>
-                <span className="transcript__meta-label">{row.label}</span>
-                <span className="transcript__meta-value">{row.value}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* Participants */}
-        <section className="transcript__sidebar-section">
-          <h3 className="transcript__sidebar-heading">
-            Participants{" "}
-            <span className="transcript__count-badge">
-              {participants.length}
-            </span>
-          </h3>
-          <div className="transcript__participants-list">
-            {participants.length > 0 ? (
-              participants.map((p, i) => {
-                const displayName =
-                  p.contactName ?? p.name ?? p.email ?? "Unknown";
-                const subtitle = p.contactTitle ?? p.email ?? "";
-                const pColor = speakerColor(displayName);
-                const pInitials = speakerInitials(displayName);
-
-                return (
-                  <div className="transcript__participant" key={i}>
-                    <div
-                      className="transcript__participant-avatar"
-                      style={{ background: pColor }}
-                    >
-                      {pInitials}
-                    </div>
-                    <div className="transcript__participant-info">
-                      <span className="transcript__participant-name">
-                        {displayName}
-                        {p.isHost && (
-                          <span className="transcript__host-badge">Host</span>
-                        )}
-                      </span>
-                      {subtitle && (
-                        <span className="transcript__participant-subtitle">
-                          {subtitle}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <p className="transcript__sidebar-empty">
-                No participants recorded
-              </p>
-            )}
-          </div>
-        </section>
-
-        {/* Entity Resolution */}
-        <section className="transcript__sidebar-section">
-          <h3 className="transcript__sidebar-heading">Entity Resolution</h3>
-          {entity.accountId ? (
-            <div className="transcript__entity-card transcript__entity-card--resolved">
-              <div className="transcript__entity-status">
-                <span className="transcript__entity-dot transcript__entity-dot--resolved" />
-                <span>{entity.accountName ? "Resolved" : "Partial"}</span>
-              </div>
-              <div className="transcript__entity-detail">
-                <span className="transcript__entity-label">Account</span>
-                <span className="transcript__entity-value">
-                  {entity.accountName ?? "\u2014"}
-                </span>
-              </div>
-              {entity.accountDomain && (
-                <div className="transcript__entity-detail">
-                  <span className="transcript__entity-label">Domain</span>
-                  <span className="transcript__entity-value">
-                    {entity.accountDomain}
-                  </span>
-                </div>
-              )}
-              {entity.accountIndustry && (
-                <div className="transcript__entity-detail">
-                  <span className="transcript__entity-label">Industry</span>
-                  <span className="transcript__entity-value">
-                    {entity.accountIndustry}
-                  </span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="transcript__entity-card transcript__entity-card--unresolved">
-              <div className="transcript__entity-status">
-                <span className="transcript__entity-dot transcript__entity-dot--unresolved" />
-                <span>Unresolved</span>
-              </div>
-              <p className="transcript__entity-note">
-                This call has not been matched to a CRM account.
-              </p>
-            </div>
-          )}
-        </section>
-      </div>
-    </aside>
-  );
 }
 
 // ─── Main Page Component ────────────────────────────────────────────────────
@@ -551,7 +56,6 @@ export function TranscriptViewerPage() {
   const [totalMatches, setTotalMatches] = useState(0);
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
 
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const matchRefs = useRef<Map<number, HTMLElement>>(new Map());
   const segmentRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -650,7 +154,6 @@ export function TranscriptViewerPage() {
   useEffect(() => {
     if (activeMatchIndex < 0) return;
 
-    // Use requestAnimationFrame to ensure refs are populated after render
     requestAnimationFrame(() => {
       const el = matchRefs.current.get(activeMatchIndex);
       if (el) {
@@ -662,18 +165,12 @@ export function TranscriptViewerPage() {
   // ─── Deep-Link Jump (quote provenance) ──────────────────────────────────
 
   useEffect(() => {
-    if (!data) {
-      return;
-    }
+    if (!data) return;
     const { timestampMs, chunkId } = deepLinkTarget;
-    if (timestampMs == null && !chunkId) {
-      return;
-    }
+    if (timestampMs == null && !chunkId) return;
 
     const fingerprint = `${callId ?? ""}:${chunkId ?? ""}:${timestampMs ?? ""}`;
-    if (deepLinkHandledRef.current === fingerprint) {
-      return;
-    }
+    if (deepLinkHandledRef.current === fingerprint) return;
 
     let targetSegment = chunkId
       ? data.segments.find((segment) => segment.id === chunkId)
@@ -692,9 +189,7 @@ export function TranscriptViewerPage() {
       }
     }
 
-    if (!targetSegment) {
-      return;
-    }
+    if (!targetSegment) return;
 
     deepLinkHandledRef.current = fingerprint;
     setHighlightedSegmentId(targetSegment.id);
@@ -737,42 +232,10 @@ export function TranscriptViewerPage() {
     setActiveMatchIndex((prev) => (prev + 1) % totalMatches);
   }, [totalMatches]);
 
-  // ─── Keyboard Shortcuts ──────────────────────────────────────────────
-
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      // Ctrl/Cmd+F focuses search
-      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+  const clearSearch = useCallback(() => {
+    setSearchQuery("");
+    setDebouncedQuery("");
   }, []);
-
-  const handleSearchKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        if (totalMatches > 0) {
-          if (e.shiftKey) {
-            goToPrevMatch();
-          } else {
-            goToNextMatch();
-          }
-        }
-      }
-      if (e.key === "Escape") {
-        setSearchQuery("");
-        setDebouncedQuery("");
-        searchInputRef.current?.blur();
-      }
-    },
-    [totalMatches, goToPrevMatch, goToNextMatch],
-  );
 
   // ─── Toggle Sidebar ──────────────────────────────────────────────────
 
@@ -780,7 +243,7 @@ export function TranscriptViewerPage() {
     setSidebarCollapsed((prev) => !prev);
   }, []);
 
-  // ─── Render: Loading ──────────────────────────────────────────────────
+  // ─── Render: Loading / Error States ──────────────────────────────────
 
   if (!callId) {
     return (
@@ -866,123 +329,41 @@ export function TranscriptViewerPage() {
               </div>
             )}
 
-            <div className="transcript__search" role="search">
-              <svg
-                className="transcript__search-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden="true"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-              <input
-                ref={searchInputRef}
-                className="transcript__search-input"
-                type="text"
-                placeholder="Search transcript..."
-                autoComplete="off"
-                spellCheck={false}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                aria-label="Search transcript"
-              />
-              <span className="transcript__search-count">
-                {debouncedQuery.length >= 2
-                  ? totalMatches > 0
-                    ? `${activeMatchIndex + 1}/${totalMatches}`
-                    : "0 results"
-                  : ""}
-              </span>
-            </div>
-
-            {totalMatches > 0 && (
-              <div className="transcript__search-nav">
-                <button
-                  className="transcript__search-nav-btn"
-                  onClick={goToPrevMatch}
-                  aria-label="Previous match"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <polyline points="18,15 12,9 6,15" />
-                  </svg>
-                </button>
-                <button
-                  className="transcript__search-nav-btn"
-                  onClick={goToNextMatch}
-                  aria-label="Next match"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <polyline points="6,9 12,15 18,9" />
-                  </svg>
-                </button>
-              </div>
-            )}
+            <TranscriptSearch
+              searchQuery={searchQuery}
+              onSearchQueryChange={setSearchQuery}
+              debouncedQuery={debouncedQuery}
+              onClearSearch={clearSearch}
+              activeMatchIndex={activeMatchIndex}
+              totalMatches={totalMatches}
+              onPrevMatch={goToPrevMatch}
+              onNextMatch={goToNextMatch}
+            />
           </div>
         </div>
 
         {/* Transcript Body */}
         <div className="transcript__body">
-          {data.segments.length > 0 ? (
-            data.segments.map((segment, i) => (
-              <Segment
-                key={segment.id}
-                segment={segment}
-                searchQuery={debouncedQuery}
-                activeMatchIndex={activeMatchIndex}
-                matchStartIndex={segmentMatchStarts[i] ?? 0}
-                matchRefs={matchRefs}
-                segmentRefs={segmentRefs}
-                highlightedSegmentId={highlightedSegmentId}
-              />
-            ))
-          ) : (
-            <div className="transcript__empty">
-              <svg
-                className="transcript__empty-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                width="48"
-                height="48"
-              >
-                <path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2z" />
-                <path d="M7 7h10M7 12h10M7 17h6" />
-              </svg>
-              <p className="transcript__empty-title">
-                No transcript segments
-              </p>
-              <p className="transcript__empty-subtitle">
-                This call hasn't been transcribed yet.
-              </p>
-            </div>
-          )}
+          <TranscriptBody
+            segments={data.segments}
+            searchQuery={debouncedQuery}
+            activeMatchIndex={activeMatchIndex}
+            segmentMatchStarts={segmentMatchStarts}
+            matchRefs={matchRefs}
+            segmentRefs={segmentRefs}
+            highlightedSegmentId={highlightedSegmentId}
+          />
         </div>
       </div>
 
       {/* Sidebar */}
-      <Sidebar
+      <TranscriptSidebar
         meta={data.meta}
         participants={data.participants}
         entity={data.entity}
         collapsed={sidebarCollapsed}
         onToggle={toggleSidebar}
       />
-
     </div>
   );
 }

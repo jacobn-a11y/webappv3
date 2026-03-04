@@ -5,14 +5,11 @@ import {
   STORY_LENGTHS,
   STORY_OUTLINES,
   STORY_TYPES,
-  type StoryContextSettings,
-  type StoryPromptDefaults,
 } from "../../types/story-generation.js";
 import { STORY_FORMATS } from "../../types/taxonomy.js";
 import { requirePermission, type PermissionManager } from "../../middleware/permissions.js";
 import type { AuditLogService } from "../../services/audit-log.js";
-import logger from "../../lib/logger.js";
-import { decodeDataGovernancePolicy } from "../../types/json-boundaries.js";
+import { AdminSettingsService } from "../../services/admin-settings.js";
 import { sendSuccess, sendNotFound, sendConflict } from "../_shared/responses.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
@@ -109,6 +106,8 @@ export function registerAdminSettingsRoutes({
   auditLogs,
   deleteGovernedTarget,
 }: RegisterAdminSettingsRoutesOptions): void {
+  const settingsService = new AdminSettingsService(prisma);
+
   // ── Admin: Org Settings ─────────────────────────────────────────────
 
   /**
@@ -121,9 +120,7 @@ export function registerAdminSettingsRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const settings = await prisma.orgSettings.findUnique({
-      where: { organizationId: req.organizationId },
-      });
+      const settings = await settingsService.getOrgSettings(req.organizationId);
 
       sendSuccess(res, {
       settings: settings ?? {
@@ -135,7 +132,7 @@ export function registerAdminSettingsRoutes({
         company_name_replacements: {},
       },
       });
-      
+
     }
   ));
 
