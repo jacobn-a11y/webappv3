@@ -9,6 +9,7 @@ import {
   type MyQueueCounts,
 } from "../lib/api";
 import { badgeClass, formatEnumLabel } from "../lib/format";
+import { TableSkeleton } from "../components/PageSkeleton";
 
 const EMPTY_BUCKETS: MyQueueBuckets = {
   draft: [],
@@ -148,10 +149,7 @@ export function MyQueuePage() {
       </div>
 
       {loading ? (
-        <div className="state-view" role="status" aria-live="polite">
-          <div className="spinner" />
-          <div className="state-view__title">Loading your queue...</div>
-        </div>
+        <TableSkeleton rows={6} />
       ) : error ? (
         <div className="state-view state-view--error" role="alert">
           <div className="state-view__title">Failed to load your queue</div>

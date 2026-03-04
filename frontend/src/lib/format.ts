@@ -12,6 +12,7 @@ const SPECIAL_LABELS: Record<string, string> = {
   PII: "PII",
   RTO: "RTO",
   RPO: "RPO",
+  IN_REVIEW: "In Review",
   SHARED_WITH_LINK: "Shared",
   FIELD_UPDATE: "Field Update",
   TIMELINE_EVENT: "Timeline Event",
@@ -23,6 +24,10 @@ const SPECIAL_LABELS: Record<string, string> = {
   SINGLE_ACCOUNT: "Single Account",
   ACCOUNT_LIST: "Account List",
   CRM_REPORT: "CRM Report",
+  ALL_REQUIRED: "All Require Approval",
+  ANON_NO_APPROVAL: "Anonymous — No Approval",
+  NAMED_NO_APPROVAL: "Named — No Approval",
+  ALL_NO_APPROVAL: "All — No Approval",
   CREATE_LANDING_PAGE: "Create Page",
   PUBLISH_LANDING_PAGE: "Publish Page",
   PUBLISH_NAMED_LANDING_PAGE: "Publish Named Page",
@@ -103,13 +108,16 @@ export function badgeClass(status: string): string {
     case "OWNER":
     case "MONITORING":
       return "badge badge--draft";
+    case "IN_REVIEW":
+      return "badge badge--warning";
+    case "APPROVED":
+      return "badge badge--success";
     case "PUBLISHED":
     case "ACTIVE":
     case "SUCCESS":
-    case "APPROVED":
     case "COMPLETED":
     case "OK":
-      return "badge badge--success";
+      return "badge badge--published";
     case "ARCHIVED":
     case "INACTIVE":
     case "PRIVATE":

@@ -12,6 +12,45 @@
   gap: 6px;
 }
 
+.story-library__search-mode {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.story-library__search-mode-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  min-height: 36px;
+}
+
+.story-library__search-mode-btn:hover {
+  background: var(--color-accent-light);
+  color: var(--color-text);
+}
+
+.story-library__search-mode-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.story-library__search-mode-btn--active {
+  background: var(--color-accent);
+  color: var(--white);
+}
+
+.story-library__search-mode-btn--active:hover {
+  background: var(--color-accent);
+  color: var(--white);
+}
+
 .story-library__count {
   color: var(--color-text-muted);
   font-size: 13px;
@@ -240,7 +279,70 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  align-items: center;
 }
+
+/* ─── Overflow Menu ─────────────────────────────────────────────────────── */
+
+.story-library__overflow {
+  position: relative;
+  display: inline-flex;
+}
+
+.story-library__overflow-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 50;
+  min-width: 180px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 4px 0;
+}
+
+.story-library__overflow-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--color-text);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.story-library__overflow-item:hover:not(:disabled) {
+  background: var(--color-accent-light);
+}
+
+.story-library__overflow-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.story-library__overflow-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.story-library__overflow-item--danger {
+  color: var(--color-error);
+}
+
+.story-library__overflow-item--danger:hover:not(:disabled) {
+  background: var(--color-error-light);
+}
+
+.story-library__overflow-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 4px 0;
+}
+
 /* ─── Story Card ─────────────────────────────────────────────────────────── */
 
 .story-card {

@@ -6,6 +6,7 @@
 import { useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import type { DashboardPageSummary } from "../../lib/api";
+import { badgeClass, formatEnumLabel } from "../../lib/format";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -51,21 +52,9 @@ function formatDate(dateStr: string): string {
 }
 
 function renderStatusBadge(status: string) {
-  const labels: Record<string, string> = {
-    DRAFT: "Draft",
-    IN_REVIEW: "In Review",
-    APPROVED: "Approved",
-    PUBLISHED: "Published",
-  };
-  const classes: Record<string, string> = {
-    DRAFT: "dash-pages__badge--draft",
-    IN_REVIEW: "dash-pages__badge--warning",
-    APPROVED: "dash-pages__badge--success",
-    PUBLISHED: "dash-pages__badge--published",
-  };
   return (
-    <span className={`dash-pages__badge ${classes[status] || ""}`}>
-      {labels[status] || status}
+    <span className={badgeClass(status)}>
+      {formatEnumLabel(status)}
     </span>
   );
 }

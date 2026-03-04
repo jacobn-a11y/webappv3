@@ -1062,6 +1062,15 @@
 .page-editor__modal-footer-left {
   font-size: 12px;
   color: var(--color-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.page-editor__policy-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-style: italic;
 }
 
 .page-editor__modal-footer-right {

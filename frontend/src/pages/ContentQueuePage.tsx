@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getContentQueue, type ContentQueueItem } from "../lib/api";
-import { formatEnumLabel } from "../lib/format";
+import { badgeClass, formatEnumLabel } from "../lib/format";
+import { TableSkeleton } from "../components/PageSkeleton";
 
 const STAGES = ["DRAFT", "IN_REVIEW", "APPROVED", "PUBLISHED"] as const;
 
@@ -92,18 +93,16 @@ export function ContentQueuePage() {
       </div>
 
       {loading ? (
-        <div className="state-view" role="status" aria-live="polite">
-          <div className="spinner" />
-          <div className="state-view__title">Loading content queue...</div>
-        </div>
+        <TableSkeleton rows={8} />
       ) : error ? (
         <div className="state-view state-view--error" role="alert">
           <div className="state-view__title">Failed to load content queue</div>
           <div className="state-view__message">{error}</div>
+          <button type="button" className="btn btn--sm btn--secondary" onClick={() => void load()} style={{ marginTop: 12 }}>Retry</button>
         </div>
       ) : (
         <div className="table-container">
-          <table className="data-table">
+          <table className="data-table" aria-label="Content queue items">
             <thead>
               <tr>
                 <th>Title</th>
@@ -122,7 +121,7 @@ export function ContentQueuePage() {
                   <td>{item.account.name}</td>
                   <td>{formatEnumLabel(item.asset_type)}</td>
                   <td>
-                    <span className="badge">{formatEnumLabel(item.stage)}</span>
+                    <span className={badgeClass(item.stage)}>{formatEnumLabel(item.stage)}</span>
                   </td>
                   <td>{item.creator?.name || item.creator?.email || "-"}</td>
                   <td>{new Date(item.updated_at).toLocaleString()}</td>
@@ -148,7 +147,9 @@ export function ContentQueuePage() {
               ))}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={7}>No items found.</td>
+                  <td colSpan={7} className="data-table__empty">
+                    No items found. Try broadening your filters or check back later.
+                  </td>
                 </tr>
               )}
             </tbody>

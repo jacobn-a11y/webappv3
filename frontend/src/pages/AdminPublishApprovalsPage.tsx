@@ -9,6 +9,7 @@ import {
 import { badgeClass, formatEnumLabel } from "../lib/format";
 import { AdminErrorState } from "../components/admin/AdminErrorState";
 import { AdminSection } from "../components/admin/AdminLayoutPrimitives";
+import { TableSkeleton } from "../components/PageSkeleton";
 
 export function AdminPublishApprovalsPage() {
   const [rows, setRows] = useState<PublishApprovalRequestRow[]>([]);
@@ -105,8 +106,8 @@ export function AdminPublishApprovalsPage() {
 
       {slackSettingsVisible && (
         <AdminSection
-          title="Slack Integration"
-          subtitle="Send approval requests to approvers and decision updates to creators."
+          title="Slack Notifications"
+          subtitle="Send notification-only messages when approval requests are created or decisions are made. Approve and reject actions are handled in this dashboard, not in Slack."
         >
           <div className="form-grid" style={{ gridTemplateColumns: "220px 1fr 1fr auto" }}>
             <label className="form-group">
@@ -161,11 +162,9 @@ export function AdminPublishApprovalsPage() {
         subtitle={`${rows.length} request${rows.length === 1 ? "" : "s"}`}
       >
         {loading ? (
-          <div className="state-view" style={{ minHeight: 120 }} role="status" aria-live="polite">
-            <div className="spinner spinner--sm" />
-          </div>
+          <TableSkeleton rows={5} />
         ) : (
-          <table className="data-table">
+          <table className="data-table" aria-label="Publish approval requests">
             <thead>
               <tr>
                 <th>Created</th>
@@ -189,16 +188,16 @@ export function AdminPublishApprovalsPage() {
                     <td>{r.requested_by.name || r.requested_by.email}</td>
                     <td>
                       {r.status === "PENDING" ? (
-                        <>
-                          <button className="btn btn--secondary" onClick={() => review(r.id, "APPROVE")}>
+                        <div className="table-actions">
+                          <button className="btn btn--sm btn--success" onClick={() => review(r.id, "APPROVE")} aria-label={`Approve request for ${r.title}`}>
                             Approve
-                          </button>{" "}
-                          <button className="btn btn--secondary" onClick={() => review(r.id, "REJECT")}>
+                          </button>
+                          <button className="btn btn--sm btn--danger" onClick={() => review(r.id, "REJECT")} aria-label={`Reject request for ${r.title}`}>
                             Reject
                           </button>
-                        </>
+                        </div>
                       ) : (
-                        "-"
+                        <span className="text-muted">-</span>
                       )}
                     </td>
                   </tr>

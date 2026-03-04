@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getAccountsList, type AccountsListResponse } from "../lib/api";
+import { TableSkeleton } from "../components/PageSkeleton";
 
 export function AccountsIndexPage() {
   const [loading, setLoading] = useState(true);
@@ -12,6 +13,8 @@ export function AccountsIndexPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const resolveAccounts = useCallback(async () => {
     setLoading(true);
@@ -39,6 +42,24 @@ export function AccountsIndexPage() {
     }, 250);
     return () => window.clearTimeout(id);
   }, [searchDraft]);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpenMenuId(null);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenMenuId(null);
+    };
+    document.addEventListener("click", handleClick);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("click", handleClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [openMenuId]);
 
   useEffect(() => {
     void resolveAccounts();
@@ -90,10 +111,7 @@ export function AccountsIndexPage() {
       </div>
 
       {loading && (
-        <div className="state-view" role="status" aria-live="polite">
-          <div className="spinner" />
-          <div className="state-view__title">Loading your accounts...</div>
-        </div>
+        <TableSkeleton rows={pageSize} />
       )}
 
       {!loading && error && (
@@ -162,9 +180,36 @@ export function AccountsIndexPage() {
                         <Link className="btn btn--sm btn--ghost" to={`/accounts/${account.id}`}>
                           Open
                         </Link>
-                        <Link className="btn btn--sm btn--ghost" to={`/accounts/${account.id}/journey`}>
-                          Journey
-                        </Link>
+                        <div
+                          className="account-list-actions__overflow"
+                          ref={openMenuId === account.id ? menuRef : undefined}
+                        >
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--ghost account-list-actions__overflow-toggle"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenMenuId(openMenuId === account.id ? null : account.id);
+                            }}
+                            aria-label={`More actions for ${account.name}`}
+                            aria-haspopup="menu"
+                            aria-expanded={openMenuId === account.id}
+                          >
+                            &#8943;
+                          </button>
+                          {openMenuId === account.id && (
+                            <div className="account-list-actions__menu" role="menu">
+                              <Link
+                                className="account-list-actions__menu-item"
+                                role="menuitem"
+                                to={`/accounts/${account.id}/journey`}
+                                onClick={() => setOpenMenuId(null)}
+                              >
+                                Journey
+                              </Link>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </td>
                   </tr>
