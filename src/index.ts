@@ -13,7 +13,10 @@ initOtel();
 
 // ─── Environment validation (fail fast) ───────────────────────────────────────
 
-const requiredEnv = ["DATABASE_URL", "REDIS_URL", "WORKOS_API_KEY", "WORKOS_CLIENT_ID"] as const;
+const baseRequiredEnv = ["DATABASE_URL", "REDIS_URL", "WORKOS_API_KEY", "WORKOS_CLIENT_ID"] as const;
+const requiredEnv = process.env.NODE_ENV === "production"
+  ? [...baseRequiredEnv, "CSRF_SECRET"] as const
+  : baseRequiredEnv;
 const missing = requiredEnv.filter((k) => !process.env[k]?.trim());
 if (missing.length > 0) {
   console.error(

@@ -2,6 +2,7 @@ import { type Response, type Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import type { LandingPageEditor } from "../../services/landing-page-editor.js";
 import type { ResponseCache } from "../../lib/response-cache.js";
+import { DashboardOverviewService } from "../../services/dashboard-overview.js";
 import logger from "../../lib/logger.js";
 import { Sentry } from "../../lib/sentry.js";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
@@ -21,6 +22,7 @@ export function registerDashboardOverviewRoutes({
   editor,
   homeCache,
 }: RegisterDashboardOverviewRoutesOptions): void {
+  const overviewService = new DashboardOverviewService(prisma);
   const clamp = (value: number, min: number, max: number): number =>
     Math.max(min, Math.min(max, value));
 
@@ -34,41 +36,11 @@ export function registerDashboardOverviewRoutes({
 
       const cacheKey = `${req.organizationId}:${req.userId}:${req.userRole ?? "MEMBER"}`;
       const payload = await homeCache.getOrSet(cacheKey, async () => {
-        const [assignment, user, stories30d, pages30d, failedIntegrations, pendingApprovals] =
-          await Promise.all([
-            prisma.userRoleAssignment.findUnique({
-              where: { userId: req.userId },
-              include: { roleProfile: true },
-            }),
-            prisma.user.findUnique({
-              where: { id: req.userId },
-              select: { name: true, email: true, role: true },
-            }),
-            prisma.story.count({
-              where: {
-                organizationId: req.organizationId,
-                generatedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-              },
-            }),
-            prisma.landingPage.count({
-              where: {
-                organizationId: req.organizationId,
-                createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-              },
-            }),
-            prisma.integrationConfig.count({
-              where: {
-                organizationId: req.organizationId,
-                status: "ERROR",
-              },
-            }),
-            prisma.approvalRequest.count({
-              where: {
-                organizationId: req.organizationId,
-                status: "PENDING",
-              },
-            }),
-          ]);
+        const homeData = await overviewService.getHomePageData(
+          req.organizationId as string,
+          req.userId as string
+        );
+        const { assignment, user, stories30d, pages30d, failedIntegrations, pendingApprovals } = homeData;
 
         const roleKey = assignment?.roleProfile?.key ?? null;
         const baseRole = req.userRole ?? user?.role ?? "MEMBER";
@@ -89,33 +61,8 @@ export function registerDashboardOverviewRoutes({
           persona = "MARKETING_ANALYST";
         }
 
-        const [postSaleStories, mofuStories, bofuStories, pageViewsSum] = await Promise.all([
-          prisma.story.count({
-            where: {
-              organizationId: req.organizationId,
-              funnelStages: { has: "POST_SALE" },
-              generatedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-            },
-          }),
-          prisma.story.count({
-            where: {
-              organizationId: req.organizationId,
-              funnelStages: { has: "MOFU" },
-              generatedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-            },
-          }),
-          prisma.story.count({
-            where: {
-              organizationId: req.organizationId,
-              funnelStages: { has: "BOFU" },
-              generatedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-            },
-          }),
-          prisma.landingPage.aggregate({
-            where: { organizationId: req.organizationId },
-            _sum: { viewCount: true },
-          }),
-        ]);
+        const funnelCounts = await overviewService.getFunnelCounts(req.organizationId as string);
+        const { postSaleStories, mofuStories, bofuStories, totalPageViews } = funnelCounts;
 
         return {
           user: {
@@ -135,7 +82,7 @@ export function registerDashboardOverviewRoutes({
             post_sale_stories_30d: postSaleStories,
             mofu_stories_30d: mofuStories,
             bofu_stories_30d: bofuStories,
-            total_page_views: pageViewsSum._sum.viewCount ?? 0,
+            total_page_views: totalPageViews,
           },
           recommended_actions:
             persona === "REVOPS_ADMIN"
@@ -181,12 +128,10 @@ export function registerDashboardOverviewRoutes({
     }
 
     const orgId = req.organizationId;
-    const now = Date.now();
-    const days30 = new Date(now - 30 * 24 * 60 * 60 * 1000);
-
-    const [
+    const csData = await overviewService.getCustomerSuccessRawData(orgId);
+    const {
     totalUsers,
-    activeUsers30dRows,
+    activeUsers30dCount: activeUsers30d,
     stories30d,
     pages30d,
     failedIntegrations,
@@ -195,48 +140,7 @@ export function registerDashboardOverviewRoutes({
     assignments,
     teamWorkspaceCounts,
     sharedAssetCounts,
-    ] = await Promise.all([
-    prisma.user.count({ where: { organizationId: orgId } }),
-    prisma.aIUsageRecord.findMany({
-      where: {
-        organizationId: orgId,
-        createdAt: { gte: days30 },
-      },
-      distinct: ["userId"],
-      select: { userId: true },
-    }),
-    prisma.story.count({
-      where: { organizationId: orgId, generatedAt: { gte: days30 } },
-    }),
-    prisma.landingPage.count({
-      where: { organizationId: orgId, createdAt: { gte: days30 } },
-    }),
-    prisma.integrationConfig.count({
-      where: { organizationId: orgId, status: "ERROR" },
-    }),
-    prisma.approvalRequest.count({
-      where: { organizationId: orgId, status: "PENDING" },
-    }),
-    prisma.setupWizard.findUnique({
-      where: { organizationId: orgId },
-    }),
-    prisma.userRoleAssignment.findMany({
-      where: { roleProfile: { organizationId: orgId } },
-      include: { roleProfile: { select: { key: true } } },
-    }),
-    prisma.teamWorkspace.groupBy({
-      by: ["team"],
-      where: { organizationId: orgId },
-      _count: true,
-    }),
-    prisma.sharedAsset.groupBy({
-      by: ["visibility"],
-      where: { organizationId: orgId },
-      _count: true,
-    }),
-    ]);
-
-    const activeUsers30d = activeUsers30dRows.length;
+    } = csData;
     const adoptionRatePct =
     totalUsers > 0 ? Math.round((activeUsers30d / totalUsers) * 100) : 0;
 
@@ -357,66 +261,21 @@ export function registerDashboardOverviewRoutes({
       }
 
       const orgId = req.organizationId;
-      const now = Date.now();
-      const days90 = new Date(now - 90 * 24 * 60 * 60 * 1000);
-      const days30 = new Date(now - 30 * 24 * 60 * 60 * 1000);
-
-      const [
+      const renewalData = await overviewService.getRenewalValueRawData(orgId);
+      const {
       usage90d,
       storyCount90d,
       pageCount90d,
       publishedPages90d,
-      activeUsers30dRows,
+      activeUsers30dCount: activeUsers30d,
       totalUsers,
       subscription,
       topTopics,
-      ] = await Promise.all([
-      prisma.usageRecord.groupBy({
-        by: ["metric"],
-        where: {
-          organizationId: orgId,
-          periodStart: { gte: days90 },
-        },
-        _sum: { quantity: true },
-      }),
-      prisma.story.count({
-        where: { organizationId: orgId, generatedAt: { gte: days90 } },
-      }),
-      prisma.landingPage.count({
-        where: { organizationId: orgId, createdAt: { gte: days90 } },
-      }),
-      prisma.landingPage.count({
-        where: {
-          organizationId: orgId,
-          status: "PUBLISHED",
-          publishedAt: { gte: days90 },
-        },
-      }),
-      prisma.aIUsageRecord.findMany({
-        where: { organizationId: orgId, createdAt: { gte: days30 } },
-        distinct: ["userId"],
-        select: { userId: true },
-      }),
-      prisma.user.count({ where: { organizationId: orgId } }),
-      prisma.subscription.findFirst({
-        where: { organizationId: orgId },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.callTag.groupBy({
-        by: ["topic"],
-        where: {
-          call: { organizationId: orgId },
-        },
-        _count: true,
-        orderBy: { _count: { topic: "desc" } },
-        take: 5,
-      }),
-      ]);
+      } = renewalData;
 
       const usage_by_metric = Object.fromEntries(
       usage90d.map((row) => [row.metric, row._sum.quantity ?? 0])
       );
-      const activeUsers30d = activeUsers30dRows.length;
       const adoptionRatePct =
       totalUsers > 0 ? Math.round((activeUsers30d / totalUsers) * 100) : 0;
 

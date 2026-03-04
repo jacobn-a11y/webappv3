@@ -5,14 +5,11 @@ import {
   STORY_LENGTHS,
   STORY_OUTLINES,
   STORY_TYPES,
-  type StoryContextSettings,
-  type StoryPromptDefaults,
 } from "../../types/story-generation.js";
 import { STORY_FORMATS } from "../../types/taxonomy.js";
 import { requirePermission, type PermissionManager } from "../../middleware/permissions.js";
 import type { AuditLogService } from "../../services/audit-log.js";
-import logger from "../../lib/logger.js";
-import { decodeDataGovernancePolicy } from "../../types/json-boundaries.js";
+import { AdminSettingsService } from "../../services/admin-settings.js";
 import { sendSuccess, sendNotFound, sendConflict } from "../_shared/responses.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
@@ -109,6 +106,8 @@ export function registerAdminSettingsRoutes({
   auditLogs,
   deleteGovernedTarget,
 }: RegisterAdminSettingsRoutesOptions): void {
+  const settingsService = new AdminSettingsService(prisma);
+
   // ── Admin: Org Settings ─────────────────────────────────────────────
 
   /**
@@ -121,9 +120,7 @@ export function registerAdminSettingsRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const settings = await prisma.orgSettings.findUnique({
-      where: { organizationId: req.organizationId },
-      });
+      const settings = await settingsService.getOrgSettings(req.organizationId);
 
       sendSuccess(res, {
       settings: settings ?? {
@@ -135,7 +132,7 @@ export function registerAdminSettingsRoutes({
         company_name_replacements: {},
       },
       });
-      
+
     }
   ));
 
@@ -174,13 +171,7 @@ export function registerAdminSettingsRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const settings = await prisma.orgSettings.findUnique({
-      where: { organizationId: req.organizationId },
-      select: { storyContext: true, storyPromptDefaults: true },
-      });
-
-      const context = (settings?.storyContext ?? {}) as StoryContextSettings;
-      const defaults = (settings?.storyPromptDefaults ?? {}) as StoryPromptDefaults;
+      const { context, defaults } = await settingsService.getStoryContext(req.organizationId);
       const branding = context.publishedBranding ?? {};
 
       sendSuccess(res, {
@@ -205,7 +196,7 @@ export function registerAdminSettingsRoutes({
       default_story_format: defaults.storyFormat ?? null,
       default_story_type: defaults.storyType ?? "FULL_ACCOUNT_JOURNEY",
       });
-      
+
     }
   ));
 
@@ -220,62 +211,7 @@ export function registerAdminSettingsRoutes({
 
       const d = payload;
 
-      await prisma.orgSettings.upsert({
-      where: { organizationId: req.organizationId },
-      create: {
-        organizationId: req.organizationId,
-        storyContext: {
-          companyOverview: d.company_overview ?? "",
-          products: d.products ?? [],
-          targetPersonas: d.target_personas ?? [],
-          targetIndustries: d.target_industries ?? [],
-          differentiators: d.differentiators ?? [],
-          proofPoints: d.proof_points ?? [],
-          bannedClaims: d.banned_claims ?? [],
-          writingStyleGuide: d.writing_style_guide ?? "",
-          approvedTerminology: d.approved_terminology ?? [],
-          publishedBranding: {
-            brandName: d.published_branding?.brand_name?.trim() || undefined,
-            logoUrl: d.published_branding?.logo_url?.trim() || undefined,
-            primaryColor: d.published_branding?.primary_color || undefined,
-            accentColor: d.published_branding?.accent_color || undefined,
-            surfaceColor: d.published_branding?.surface_color || undefined,
-          },
-        },
-        storyPromptDefaults: {
-          storyLength: d.default_story_length ?? "MEDIUM",
-          storyOutline: d.default_story_outline ?? "CHRONOLOGICAL_JOURNEY",
-          storyFormat: d.default_story_format ?? null,
-          storyType: d.default_story_type ?? "FULL_ACCOUNT_JOURNEY",
-        },
-      },
-      update: {
-        storyContext: {
-          companyOverview: d.company_overview ?? "",
-          products: d.products ?? [],
-          targetPersonas: d.target_personas ?? [],
-          targetIndustries: d.target_industries ?? [],
-          differentiators: d.differentiators ?? [],
-          proofPoints: d.proof_points ?? [],
-          bannedClaims: d.banned_claims ?? [],
-          writingStyleGuide: d.writing_style_guide ?? "",
-          approvedTerminology: d.approved_terminology ?? [],
-          publishedBranding: {
-            brandName: d.published_branding?.brand_name?.trim() || undefined,
-            logoUrl: d.published_branding?.logo_url?.trim() || undefined,
-            primaryColor: d.published_branding?.primary_color || undefined,
-            accentColor: d.published_branding?.accent_color || undefined,
-            surfaceColor: d.published_branding?.surface_color || undefined,
-          },
-        },
-        storyPromptDefaults: {
-          storyLength: d.default_story_length ?? "MEDIUM",
-          storyOutline: d.default_story_outline ?? "CHRONOLOGICAL_JOURNEY",
-          storyFormat: d.default_story_format ?? null,
-          storyType: d.default_story_type ?? "FULL_ACCOUNT_JOURNEY",
-        },
-      },
-      });
+      await settingsService.upsertStoryContext(req.organizationId, d);
       await auditLogs.record({
       organizationId: req.organizationId,
       actorUserId: req.userId,
@@ -300,11 +236,7 @@ export function registerAdminSettingsRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const settings = await prisma.orgSettings.findUnique({
-      where: { organizationId: req.organizationId },
-      select: { dataGovernancePolicy: true },
-      });
-      const policy = decodeDataGovernancePolicy(settings?.dataGovernancePolicy);
+      const policy = await settingsService.getDataGovernancePolicy(req.organizationId);
       sendSuccess(res, {
       retention_days: policy.retention_days ?? 365,
       audit_log_retention_days: policy.audit_log_retention_days ?? 365,
@@ -330,36 +262,7 @@ export function registerAdminSettingsRoutes({
 
       const d = payload;
 
-      await prisma.orgSettings.upsert({
-      where: { organizationId: req.organizationId },
-      create: {
-        organizationId: req.organizationId,
-        dataGovernancePolicy: {
-          retention_days: d.retention_days ?? 365,
-          audit_log_retention_days: d.audit_log_retention_days ?? 365,
-          legal_hold_enabled: d.legal_hold_enabled ?? false,
-          pii_export_enabled: d.pii_export_enabled ?? true,
-          deletion_requires_approval:
-            d.deletion_requires_approval ?? true,
-          allow_named_story_exports: d.allow_named_story_exports ?? false,
-          rto_target_minutes: d.rto_target_minutes ?? 240,
-          rpo_target_minutes: d.rpo_target_minutes ?? 60,
-        },
-      },
-      update: {
-        dataGovernancePolicy: {
-          retention_days: d.retention_days ?? 365,
-          audit_log_retention_days: d.audit_log_retention_days ?? 365,
-          legal_hold_enabled: d.legal_hold_enabled ?? false,
-          pii_export_enabled: d.pii_export_enabled ?? true,
-          deletion_requires_approval:
-            d.deletion_requires_approval ?? true,
-          allow_named_story_exports: d.allow_named_story_exports ?? false,
-          rto_target_minutes: d.rto_target_minutes ?? 240,
-          rpo_target_minutes: d.rpo_target_minutes ?? 60,
-        },
-      },
-      });
+      await settingsService.upsertDataGovernancePolicy(req.organizationId, d);
       await auditLogs.record({
       organizationId: req.organizationId,
       actorUserId: req.userId,
@@ -382,39 +285,11 @@ export function registerAdminSettingsRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const status = (req.query.status as string | undefined)?.trim().toUpperCase();
-      const isKnownStatus =
-        status === "PENDING" ||
-        status === "APPROVED" ||
-        status === "REJECTED" ||
-        status === "COMPLETED";
 
-        const requests = await prisma.approvalRequest.findMany({
-          where: isKnownStatus
-            ? {
-                organizationId: req.organizationId,
-                requestType: "DATA_DELETION",
-                status,
-              }
-            : {
-                organizationId: req.organizationId,
-                requestType: "DATA_DELETION",
-              },
-          orderBy: { createdAt: "desc" },
-          take: 200,
-          select: {
-            id: true,
-            status: true,
-            targetType: true,
-            targetId: true,
-            requestPayload: true,
-            requestedByUserId: true,
-            reviewerUserId: true,
-            reviewNotes: true,
-            reviewedAt: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        });
+        const requests = await settingsService.listDeletionRequests(
+          req.organizationId,
+          status
+        );
         sendSuccess(res, {
           requests: requests.map((r) => ({
             id: r.id,
@@ -444,11 +319,7 @@ export function registerAdminSettingsRoutes({
       }
 
         const orgId = req.organizationId;
-        const settings = await prisma.orgSettings.findUnique({
-          where: { organizationId: orgId },
-          select: { dataGovernancePolicy: true },
-        });
-        const policy = decodeDataGovernancePolicy(settings?.dataGovernancePolicy);
+        const policy = await settingsService.getDataGovernancePolicy(orgId);
 
         if (policy.legal_hold_enabled) {
           res.status(423).json({
@@ -458,21 +329,14 @@ export function registerAdminSettingsRoutes({
           return;
         }
 
-        const requestPayload = {
-          reason: payload.reason ?? null,
-        };
         if (policy.deletion_requires_approval !== false) {
-          const request = await prisma.approvalRequest.create({
-            data: {
-              organizationId: orgId,
-              requestType: "DATA_DELETION",
-              targetType: payload.target_type,
-              targetId: payload.target_id,
-              requestedByUserId: req.userId,
-              status: "PENDING",
-              requestPayload,
-            },
-          });
+          const request = await settingsService.createDeletionRequest(
+            orgId,
+            payload.target_type,
+            payload.target_id,
+            req.userId,
+            payload.reason ?? null
+          );
 
           await auditLogs.record({
             organizationId: orgId,
@@ -531,13 +395,10 @@ export function registerAdminSettingsRoutes({
       }
 
       const requestId = String(req.params.requestId);
-      const request = await prisma.approvalRequest.findFirst({
-      where: {
-        id: requestId,
-        organizationId: req.organizationId,
-        requestType: "DATA_DELETION",
-      },
-      });
+      const request = await settingsService.findDeletionRequest(
+      requestId,
+      req.organizationId
+      );
       if (!request) {
       sendNotFound(res, "Deletion request not found");
       return;
@@ -548,15 +409,11 @@ export function registerAdminSettingsRoutes({
       }
 
       if (payload.decision === "REJECT") {
-      const updated = await prisma.approvalRequest.update({
-        where: { id: request.id },
-        data: {
-          status: "REJECTED",
-          reviewerUserId: req.userId,
-          reviewNotes: payload.review_notes ?? null,
-          reviewedAt: new Date(),
-        },
-      });
+      const updated = await settingsService.rejectDeletionRequest(
+        request.id,
+        req.userId,
+        payload.review_notes ?? null
+      );
       await auditLogs.record({
         organizationId: req.organizationId,
         actorUserId: req.userId,
@@ -579,15 +436,11 @@ export function registerAdminSettingsRoutes({
       targetType,
       request.targetId
       );
-      const updated = await prisma.approvalRequest.update({
-      where: { id: request.id },
-      data: {
-        status: "COMPLETED",
-        reviewerUserId: req.userId,
-        reviewNotes: payload.review_notes ?? null,
-        reviewedAt: new Date(),
-      },
-      });
+      const updated = await settingsService.completeDeletionRequest(
+      request.id,
+      req.userId,
+      payload.review_notes ?? null
+      );
       await auditLogs.record({
       organizationId: req.organizationId,
       actorUserId: req.userId,

@@ -23,6 +23,7 @@ import type { SyncEngine } from "../integrations/sync-engine.js";
 import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.js";
 import { parseBoundedLimit, PAGINATION_LIMITS } from "../lib/pagination.js";
 import { AuditLogService } from "../services/audit-log.js";
+import { IntegrationConfigService } from "../services/integration-config.js";
 import {
   DIRECT_INTEGRATION_PROVIDERS,
   parseDirectIntegrationProvider,
@@ -94,6 +95,7 @@ export function createIntegrationRoutes(
 ): Router {
   const router = Router();
   const auditLogs = new AuditLogService(prisma);
+  const integrationService = new IntegrationConfigService(prisma);
   const resolveOrgId = (req: Request, res: Response): string | null => {
     try {
       return getOrganizationIdOrThrow(req);
@@ -136,25 +138,11 @@ export function createIntegrationRoutes(
     const organizationId = resolveOrgId(req, res);
     if (!organizationId) return;
 
-    const configs = await prisma.integrationConfig.findMany({
-      where: { organizationId },
-      select: {
-        id: true,
-        provider: true,
-        enabled: true,
-        status: true,
-        lastSyncAt: true,
-        lastError: true,
-        settings: true,
-        createdAt: true,
-        updatedAt: true,
-        // Never return raw credentials in list view
-      },
-    });
+    const configs = await integrationService.listConfigs(organizationId);
 
     // Return available providers with their status
     const available = DIRECT_INTEGRATION_PROVIDERS.map((provider) => {
-      const config = configs.find((c: { provider: string }) => c.provider === provider);
+      const config = configs.find((c) => c.provider === provider);
       return {
         provider,
         configured: !!config,
@@ -175,14 +163,7 @@ export function createIntegrationRoutes(
     const provider = resolveProviderParam(req.params.provider, res);
     if (!provider) return;
 
-    const config = await prisma.integrationConfig.findUnique({
-      where: {
-        organizationId_provider: {
-          organizationId,
-          provider: provider as IntegrationProvider,
-        },
-      },
-    });
+    const config = await integrationService.getConfig(organizationId, provider as IntegrationProvider);
 
     if (!config) {
       sendNotFound(res, "Integration not configured");
@@ -222,29 +203,19 @@ export function createIntegrationRoutes(
     const { provider, credentials, settings, webhookSecret } = parsed.data;
 
     // Check if already exists
-    const existing = await prisma.integrationConfig.findUnique({
-      where: {
-        organizationId_provider: {
-          organizationId,
-          provider: provider as IntegrationProvider,
-        },
-      },
-    });
+    const existing = await integrationService.getConfig(organizationId, provider as IntegrationProvider);
 
     if (existing) {
       sendConflict(res, "Integration already configured. Use PATCH to update.");
       return;
     }
 
-    const config = await prisma.integrationConfig.create({
-      data: {
-        organizationId,
-        provider: provider as IntegrationProvider,
-        credentials: credentials as object,
-        settings: settings as object | undefined,
-        webhookSecret,
-        status: "PENDING_SETUP",
-      },
+    const config = await integrationService.createConfig({
+      organizationId,
+      provider: provider as IntegrationProvider,
+      credentials: credentials as object,
+      settings: settings as object | undefined,
+      webhookSecret,
     });
     await auditLogs.record({
       organizationId,
@@ -280,14 +251,7 @@ export function createIntegrationRoutes(
       return;
     }
 
-    const config = await prisma.integrationConfig.findUnique({
-      where: {
-        organizationId_provider: {
-          organizationId,
-          provider: provider as IntegrationProvider,
-        },
-      },
-    });
+    const config = await integrationService.getConfig(organizationId, provider as IntegrationProvider);
 
     if (!config) {
       sendNotFound(res, "Integration not configured");
@@ -313,15 +277,7 @@ export function createIntegrationRoutes(
       updateData.webhookSecret = parsed.data.webhookSecret;
     }
 
-    const updated = await prisma.integrationConfig.update({
-      where: {
-        organizationId_provider: {
-          organizationId,
-          provider: provider as IntegrationProvider,
-        },
-      },
-      data: updateData,
-    });
+    const updated = await integrationService.updateConfig(organizationId, provider as IntegrationProvider, updateData);
     await auditLogs.record({
       organizationId,
       actorUserId: (req as { userId?: string }).userId,
@@ -350,28 +306,14 @@ export function createIntegrationRoutes(
     const provider = resolveProviderParam(req.params.provider, res);
     if (!provider) return;
 
-    const config = await prisma.integrationConfig.findUnique({
-      where: {
-        organizationId_provider: {
-          organizationId,
-          provider: provider as IntegrationProvider,
-        },
-      },
-    });
+    const config = await integrationService.getConfig(organizationId, provider as IntegrationProvider);
 
     if (!config) {
       sendNotFound(res, "Integration not configured");
       return;
     }
 
-    await prisma.integrationConfig.delete({
-      where: {
-        organizationId_provider: {
-          organizationId,
-          provider: provider as IntegrationProvider,
-        },
-      },
-    });
+    await integrationService.deleteConfig(organizationId, provider as IntegrationProvider);
     await auditLogs.record({
       organizationId,
       actorUserId: (req as { userId?: string }).userId,
@@ -395,14 +337,7 @@ export function createIntegrationRoutes(
     const provider = resolveProviderParam(req.params.provider, res);
     if (!provider) return;
 
-    const config = await prisma.integrationConfig.findUnique({
-      where: {
-        organizationId_provider: {
-          organizationId,
-          provider: provider as IntegrationProvider,
-        },
-      },
-    });
+    const config = await integrationService.getConfig(organizationId, provider as IntegrationProvider);
 
     if (!config) {
       sendNotFound(res, "Integration not configured");
@@ -415,10 +350,7 @@ export function createIntegrationRoutes(
     const selection = resolveIntegrationProviderSelection(provider, registry);
     if (!selection.supportsCredentialValidation) {
       if (selection.kind === "webhook_only") {
-        await prisma.integrationConfig.update({
-          where: { id: config.id },
-          data: { status: "ACTIVE", lastError: null },
-        });
+        await integrationService.setConfigStatus(config.id, "ACTIVE", null);
         await auditLogs.record({
           organizationId,
           actorUserId: (req as { userId?: string }).userId,
@@ -444,10 +376,7 @@ export function createIntegrationRoutes(
       );
 
       if (valid) {
-        await prisma.integrationConfig.update({
-          where: { id: config.id },
-          data: { status: "ACTIVE", lastError: null },
-        });
+        await integrationService.setConfigStatus(config.id, "ACTIVE", null);
         await auditLogs.record({
           organizationId,
           actorUserId: (req as { userId?: string }).userId,
@@ -462,13 +391,7 @@ export function createIntegrationRoutes(
         });
         sendSuccess(res, { valid: true, message: "Credentials validated successfully" });
       } else {
-        await prisma.integrationConfig.update({
-          where: { id: config.id },
-          data: {
-            status: "ERROR",
-            lastError: "Credential validation failed",
-          },
-        });
+        await integrationService.setConfigStatus(config.id, "ERROR", "Credential validation failed");
         await auditLogs.record({
           organizationId,
           actorUserId: (req as { userId?: string }).userId,
@@ -486,10 +409,7 @@ export function createIntegrationRoutes(
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Validation error";
-      await prisma.integrationConfig.update({
-        where: { id: config.id },
-        data: { status: "ERROR", lastError: errorMessage },
-      });
+      await integrationService.setConfigStatus(config.id, "ERROR", errorMessage);
       await auditLogs.record({
         organizationId,
         actorUserId: (req as { userId?: string }).userId,
@@ -522,14 +442,7 @@ export function createIntegrationRoutes(
       return;
     }
 
-    const config = await prisma.integrationConfig.findUnique({
-      where: {
-        organizationId_provider: {
-          organizationId,
-          provider: provider as IntegrationProvider,
-        },
-      },
-    });
+    const config = await integrationService.getConfig(organizationId, provider as IntegrationProvider);
 
     if (!config) {
       sendNotFound(res, "Integration not configured");
@@ -587,15 +500,14 @@ export function createIntegrationRoutes(
       max: PAGINATION_LIMITS.INTEGRATION_MAX,
     });
 
-    const runs = await prisma.integrationRun.findMany({
-      where: {
-        organizationId,
-        ...(status ? { status } : {}),
-        ...(provider ? { provider: provider as IntegrationProvider } : {}),
+    const runs = await integrationService.listRuns(
+      organizationId,
+      {
+        status,
+        provider: provider as IntegrationProvider | undefined,
       },
-      orderBy: { startedAt: "desc" },
-      take: limit,
-    });
+      limit
+    );
 
     sendSuccess(res, {
       runs: runs.map((r) => ({
@@ -665,15 +577,11 @@ export function createIntegrationRoutes(
       max: PAGINATION_LIMITS.INTEGRATION_MAX,
     });
 
-    const failedRuns = await prisma.integrationRun.findMany({
-      where: {
-        organizationId,
-        status: "FAILED",
-        ...(provider ? { provider: provider as IntegrationProvider } : {}),
-      },
-      orderBy: { startedAt: "desc" },
-      take: limit,
-    });
+    const failedRuns = await integrationService.listFailedRuns(
+      organizationId,
+      provider as IntegrationProvider | undefined,
+      limit
+    );
 
     sendSuccess(res, {
       failed_runs: failedRuns.map((r) => ({
@@ -745,15 +653,11 @@ export function createIntegrationRoutes(
       max: PAGINATION_LIMITS.INTEGRATION_MAX,
     });
 
-    const runs = await prisma.integrationRun.findMany({
-      where: {
-        organizationId,
-        runType: "BACKFILL",
-        ...(provider ? { provider: provider as IntegrationProvider } : {}),
-      },
-      orderBy: { startedAt: "desc" },
-      take: limit,
-    });
+    const runs = await integrationService.listBackfillRuns(
+      organizationId,
+      provider as IntegrationProvider | undefined,
+      limit
+    );
 
     sendSuccess(res, {
       backfills: runs.map((r) => ({
@@ -781,9 +685,7 @@ export function createIntegrationRoutes(
     }
 
     const provider = parsed.data.provider as IntegrationProvider;
-    const config = await prisma.integrationConfig.findUnique({
-      where: { organizationId_provider: { organizationId, provider } },
-    });
+    const config = await integrationService.getConfig(organizationId, provider);
     if (!config) {
       sendNotFound(res, "Integration not configured");
       return;

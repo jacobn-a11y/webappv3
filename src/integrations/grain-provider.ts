@@ -81,7 +81,7 @@ function asGrainCredentials(creds: ProviderCredentials): GrainCredentials {
 export class GrainProvider implements CallRecordingProvider {
   readonly name: IntegrationProvider = "GRAIN";
   readonly callProvider: CallProvider = "GRAIN";
-  private rateLimiter = new OutboundRateLimiter(5, 5);
+  private rateLimiter = new OutboundRateLimiter(5, 5, "grain");
 
   private baseUrl(creds: GrainCredentials): string {
     return (creds.baseUrl ?? "https://api.grain.com/_/public-api").replace(

@@ -15,6 +15,7 @@ import type { PrismaClient, UserRole } from "@prisma/client";
 import { Resend } from "resend";
 import { requirePermission } from "../middleware/permissions.js";
 import { buildPublicAppUrl } from "../lib/public-app-url.js";
+import { OrgSettingsService } from "../services/org-settings.js";
 import type { OrgRequest } from "../types/authenticated-request.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import logger from "../lib/logger.js";
@@ -66,6 +67,7 @@ function renderInviteEmailHtml(options: {
 
 export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
   const router = Router();
+  const orgSettings = new OrgSettingsService(prisma);
   const resendApiKey = process.env.RESEND_API_KEY ?? "";
   const resend = resendApiKey ? new Resend(resendApiKey) : null;
   const inviteFromAddress =
@@ -89,10 +91,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         return;
       }
 
-      const org = await prisma.organization.findUnique({
-        where: { id: req.organizationId },
-        include: { _count: { select: { users: true } } },
-      });
+      const org = await orgSettings.getOrgDetails(req.organizationId);
 
       if (!org) {
         sendNotFound(res, "Organization not found");
@@ -104,7 +103,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
           id: org.id,
           name: org.name,
           plan: org.plan,
-          member_count: org._count.users,
+          member_count: org.memberCount,
           created_at: org.createdAt,
         },
       });
@@ -127,13 +126,10 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         return;
       }
 
-      const settings = await prisma.orgSettings.findUnique({
-        where: { organizationId: req.organizationId },
-        select: { anonymizationEnabled: true },
-      });
+      const enabled = await orgSettings.getAnonymizationSetting(req.organizationId);
 
       sendSuccess(res, {
-        anonymization_enabled: settings?.anonymizationEnabled ?? true,
+        anonymization_enabled: enabled,
       });
     })
   );
@@ -162,16 +158,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         return;
       }
 
-      await prisma.orgSettings.upsert({
-        where: { organizationId: req.organizationId },
-        create: {
-          organizationId: req.organizationId,
-          anonymizationEnabled: parse.data.enabled,
-        },
-        update: {
-          anonymizationEnabled: parse.data.enabled,
-        },
-      });
+      await orgSettings.setAnonymizationSetting(req.organizationId, parse.data.enabled);
 
       sendSuccess(res, {
         updated: true,
@@ -197,10 +184,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         return;
       }
 
-      await prisma.organization.update({
-        where: { id: req.organizationId },
-        data: { name: parse.data.name },
-      });
+      await orgSettings.updateOrgName(req.organizationId, parse.data.name);
 
       sendSuccess(res, { updated: true });
     })
@@ -217,17 +201,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/members",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      const members = await prisma.user.findMany({
-        where: { organizationId: req.organizationId },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          createdAt: true,
-        },
-        orderBy: { createdAt: "asc" },
-      });
+      const members = await orgSettings.listMembers(req.organizationId);
 
       sendSuccess(res, { members });
     })
@@ -253,9 +227,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
       const memberId = req.params.memberId as string;
       const newRole = parse.data.role as UserRole;
 
-      const targetUser = await prisma.user.findFirst({
-        where: { id: memberId, organizationId: req.organizationId },
-      });
+      const targetUser = await orgSettings.findMember(memberId, req.organizationId);
 
       if (!targetUser) {
         sendNotFound(res, "Member not found");
@@ -271,19 +243,14 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
       }
 
       if (targetUser.role === "OWNER" && newRole !== "OWNER") {
-        const ownerCount = await prisma.user.count({
-          where: { organizationId: req.organizationId, role: "OWNER" },
-        });
+        const ownerCount = await orgSettings.countOwners(req.organizationId);
         if (ownerCount <= 1) {
           sendBadRequest(res, "Cannot remove the last owner. Transfer ownership first.");
           return;
         }
       }
 
-      await prisma.user.update({
-        where: { id: memberId },
-        data: { role: newRole },
-      });
+      await orgSettings.updateMemberRole(memberId, newRole);
 
       sendSuccess(res, { updated: true, role: newRole });
     })
@@ -302,9 +269,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     asyncHandler(async (req: AuthReq, res: Response) => {
       const memberId = req.params.memberId as string;
 
-      const targetUser = await prisma.user.findFirst({
-        where: { id: memberId, organizationId: req.organizationId },
-      });
+      const targetUser = await orgSettings.findMember(memberId, req.organizationId);
 
       if (!targetUser) {
         sendNotFound(res, "Member not found");
@@ -317,16 +282,14 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
       }
 
       if (targetUser.role === "OWNER") {
-        const ownerCount = await prisma.user.count({
-          where: { organizationId: req.organizationId, role: "OWNER" },
-        });
+        const ownerCount = await orgSettings.countOwners(req.organizationId);
         if (ownerCount <= 1) {
           sendBadRequest(res, "Cannot remove the last owner.");
           return;
         }
       }
 
-      await prisma.user.delete({ where: { id: memberId } });
+      await orgSettings.removeMember(memberId);
       sendSuccess(res, { removed: true });
     })
   );
@@ -350,12 +313,10 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         return;
       }
 
-      const existingUser = await prisma.user.findFirst({
-          where: {
-            email: parse.data.email,
-            organizationId: req.organizationId,
-          },
-        });
+      const existingUser = await orgSettings.findExistingUserByEmail(
+          parse.data.email,
+          req.organizationId
+        );
 
         if (existingUser) {
           sendConflict(res, "This email is already a member of the organization.");
@@ -365,28 +326,13 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         const token = crypto.randomBytes(32).toString("hex");
         const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-        const invite = await prisma.orgInvite.upsert({
-          where: {
-            organizationId_email: {
-              organizationId: req.organizationId,
-              email: parse.data.email,
-            },
-          },
-          create: {
-            organizationId: req.organizationId,
-            email: parse.data.email,
-            role: parse.data.role as UserRole,
-            invitedById: req.userId,
-            token,
-            expiresAt,
-          },
-          update: {
-            role: parse.data.role as UserRole,
-            invitedById: req.userId,
-            token,
-            expiresAt,
-            acceptedAt: null,
-          },
+        const invite = await orgSettings.upsertInvite({
+          organizationId: req.organizationId,
+          email: parse.data.email,
+          role: parse.data.role as UserRole,
+          invitedById: req.userId,
+          token,
+          expiresAt,
         });
 
         const inviteUrl = buildPublicAppUrl(`/invite/${token}`);
@@ -395,16 +341,10 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
 
         if (resend) {
           try {
-            const [org, inviter] = await Promise.all([
-              prisma.organization.findUnique({
-                where: { id: req.organizationId },
-                select: { name: true },
-              }),
-              prisma.user.findUnique({
-                where: { id: req.userId },
-                select: { name: true, email: true },
-              }),
-            ]);
+            const { org, inviter } = await orgSettings.getOrgAndInviter(
+              req.organizationId,
+              req.userId
+            );
 
             await resend.emails.send({
               from: inviteFromAddress,
@@ -450,20 +390,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/invites",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      const invites = await prisma.orgInvite.findMany({
-        where: {
-          organizationId: req.organizationId,
-          acceptedAt: null,
-        },
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          expiresAt: true,
-          createdAt: true,
-        },
-        orderBy: { createdAt: "desc" },
-      });
+      const invites = await orgSettings.listPendingInvites(req.organizationId);
 
       sendSuccess(res, {
         invites: invites.map((inv) => ({
@@ -485,19 +412,17 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/invites/:inviteId",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      const invite = await prisma.orgInvite.findFirst({
-        where: {
-          id: req.params.inviteId as string,
-          organizationId: req.organizationId,
-        },
-      });
+      const invite = await orgSettings.findInvite(
+        req.params.inviteId as string,
+        req.organizationId
+      );
 
       if (!invite) {
         sendNotFound(res, "Invite not found");
         return;
       }
 
-      await prisma.orgInvite.delete({ where: { id: invite.id } });
+      await orgSettings.deleteInvite(invite.id);
       sendSuccess(res, { revoked: true });
     })
   );

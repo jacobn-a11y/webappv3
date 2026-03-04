@@ -1,13 +1,10 @@
 import { Router, type Request, type Response } from "express";
-import type { PrismaClient, UserRole } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import crypto from "crypto";
+import { ScimService } from "../services/scim.js";
 import { sendSuccess, sendCreated, sendNoContent } from "./_shared/responses.js";
 
-interface ScimAuthContext {
-  organizationId: string;
-  provisioningId: string;
-}
+// ─── Validation Schemas ─────────────────────────────────────────────────────
 
 const ScimCreateUserSchema = z.object({
   externalId: z.string().min(1),
@@ -31,28 +28,18 @@ const ScimPatchSchema = z.object({
     .optional(),
 });
 
-function hashScimToken(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex");
-}
+// ─── Route Factory ──────────────────────────────────────────────────────────
 
 export function createScimRoutes(prisma: PrismaClient): Router {
   const router = Router();
+  const scimService = new ScimService(prisma);
 
-  async function authenticate(req: Request): Promise<ScimAuthContext | null> {
+  async function extractBearerToken(req: Request): Promise<string | null> {
     const auth = req.headers.authorization;
     if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
     const token = auth.slice("bearer ".length).trim();
     if (!token) return null;
-    const tokenHash = hashScimToken(token);
-    const provisioning = await prisma.scimProvisioning.findFirst({
-      where: { tokenHash, enabled: true },
-      select: { id: true, organizationId: true },
-    });
-    if (!provisioning) return null;
-    return {
-      organizationId: provisioning.organizationId,
-      provisioningId: provisioning.id,
-    };
+    return token;
   }
 
   router.get("/ServiceProviderConfig", (_req, res) => {
@@ -74,7 +61,12 @@ export function createScimRoutes(prisma: PrismaClient): Router {
   });
 
   router.post("/Users", async (req: Request, res: Response) => {
-    const auth = await authenticate(req);
+    const bearerToken = await extractBearerToken(req);
+    if (!bearerToken) {
+      res.status(401).json({ detail: "Invalid SCIM bearer token." });
+      return;
+    }
+    const auth = await scimService.authenticateToken(bearerToken);
     if (!auth) {
       res.status(401).json({ detail: "Invalid SCIM bearer token." });
       return;
@@ -90,64 +82,37 @@ export function createScimRoutes(prisma: PrismaClient): Router {
     const fullName =
       [name?.givenName, name?.familyName].filter(Boolean).join(" ") || null;
 
-    const normalizedEmail = userName.toLowerCase();
-    const existingByEmail = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-      select: { id: true, organizationId: true },
-    });
-    if (existingByEmail && existingByEmail.organizationId !== auth.organizationId) {
-      res.status(409).json({
-        detail:
-          "A user with this email exists in a different organization. SCIM create denied.",
+    try {
+      const result = await scimService.createOrUpdateUser(auth, {
+        externalId,
+        email: userName,
+        fullName,
+        active,
       });
-      return;
+
+      sendCreated(res, {
+        id: result.id,
+        externalId: result.externalId,
+        userName: result.userName,
+        active: result.active,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "SCIM create failed";
+      if (message.includes("different organization")) {
+        res.status(409).json({ detail: message });
+      } else {
+        res.status(400).json({ detail: message });
+      }
     }
-    const user =
-      existingByEmail && existingByEmail.organizationId === auth.organizationId
-        ? await prisma.user.update({
-            where: { id: existingByEmail.id },
-            data: { name: fullName },
-          })
-        : await prisma.user.create({
-            data: {
-              email: normalizedEmail,
-              name: fullName,
-              organizationId: auth.organizationId,
-              role: "MEMBER" as UserRole,
-            },
-          });
-
-    await prisma.scimIdentity.upsert({
-      where: { userId: user.id },
-      create: {
-        organizationId: auth.organizationId,
-        userId: user.id,
-        externalId,
-        active,
-        lastSyncedAt: new Date(),
-      },
-      update: {
-        externalId,
-        active,
-        lastSyncedAt: new Date(),
-      },
-    });
-
-    await prisma.scimProvisioning.updateMany({
-      where: { id: auth.provisioningId },
-      data: { lastSyncAt: new Date() },
-    });
-
-    sendCreated(res, {
-      id: user.id,
-      externalId,
-      userName: user.email,
-      active,
-    });
   });
 
   router.patch("/Users/:userId", async (req: Request, res: Response) => {
-    const auth = await authenticate(req);
+    const bearerToken = await extractBearerToken(req);
+    if (!bearerToken) {
+      res.status(401).json({ detail: "Invalid SCIM bearer token." });
+      return;
+    }
+    const auth = await scimService.authenticateToken(bearerToken);
     if (!auth) {
       res.status(401).json({ detail: "Invalid SCIM bearer token." });
       return;
@@ -162,65 +127,40 @@ export function createScimRoutes(prisma: PrismaClient): Router {
       ? (req.params.userId[0] ?? "")
       : (req.params.userId ?? "");
 
-    const scimIdentity = await prisma.scimIdentity.findFirst({
-      where: {
-        organizationId: auth.organizationId,
-        OR: [{ externalId: scopedUserId }, { userId: scopedUserId }],
-      },
-    });
-    if (!scimIdentity) {
-      res.status(404).json({ detail: "SCIM identity not found." });
-      return;
-    }
-
-    const localUser = await prisma.user.findUnique({
-      where: { id: scimIdentity.userId },
-      select: { name: true },
-    });
-
     const updatedName =
       parsed.data.name &&
       [parsed.data.name.givenName, parsed.data.name.familyName]
         .filter(Boolean)
         .join(" ");
 
-    await prisma.$transaction([
-      prisma.scimIdentity.update({
-        where: { id: scimIdentity.id },
-        data: {
-          active: parsed.data.active ?? scimIdentity.active,
-          lastSyncedAt: new Date(),
-        },
-      }),
-      prisma.user.update({
-        where: { id: scimIdentity.userId },
-        data: {
-          name: updatedName ? updatedName : localUser?.name ?? null,
-        },
-      }),
-    ]);
-
-    if (parsed.data.active === false) {
-      await prisma.userSession.updateMany({
-        where: { userId: scimIdentity.userId, revokedAt: null },
-        data: { revokedAt: new Date() },
+    try {
+      const result = await scimService.patchUser(auth, scopedUserId, {
+        active: parsed.data.active,
+        name: updatedName || undefined,
       });
+
+      sendSuccess(res, {
+        id: result.id,
+        externalId: result.externalId,
+        active: result.active,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "SCIM patch failed";
+      if (message.includes("not found")) {
+        res.status(404).json({ detail: message });
+      } else {
+        res.status(400).json({ detail: message });
+      }
     }
-
-    await prisma.scimProvisioning.updateMany({
-      where: { id: auth.provisioningId },
-      data: { lastSyncAt: new Date() },
-    });
-
-    sendSuccess(res, {
-      id: scimIdentity.userId,
-      externalId: scimIdentity.externalId,
-      active: parsed.data.active ?? scimIdentity.active,
-    });
   });
 
   router.delete("/Users/:userId", async (req: Request, res: Response) => {
-    const auth = await authenticate(req);
+    const bearerToken = await extractBearerToken(req);
+    if (!bearerToken) {
+      res.status(401).json({ detail: "Invalid SCIM bearer token." });
+      return;
+    }
+    const auth = await scimService.authenticateToken(bearerToken);
     if (!auth) {
       res.status(401).json({ detail: "Invalid SCIM bearer token." });
       return;
@@ -228,32 +168,8 @@ export function createScimRoutes(prisma: PrismaClient): Router {
     const scopedUserId = Array.isArray(req.params.userId)
       ? (req.params.userId[0] ?? "")
       : (req.params.userId ?? "");
-    const scimIdentity = await prisma.scimIdentity.findFirst({
-      where: {
-        organizationId: auth.organizationId,
-        OR: [{ externalId: scopedUserId }, { userId: scopedUserId }],
-      },
-    });
-    if (!scimIdentity) {
-      sendNoContent(res);
-      return;
-    }
 
-    await prisma.scimIdentity.update({
-      where: { id: scimIdentity.id },
-      data: { active: false, lastSyncedAt: new Date() },
-    });
-
-    await prisma.userSession.updateMany({
-      where: { userId: scimIdentity.userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-
-    await prisma.scimProvisioning.updateMany({
-      where: { id: auth.provisioningId },
-      data: { lastSyncAt: new Date() },
-    });
-
+    await scimService.deactivateUser(auth, scopedUserId);
     sendNoContent(res);
   });
 

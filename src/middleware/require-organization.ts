@@ -1,21 +1,12 @@
-import type { Response, NextFunction } from "express";
-import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import type { NextFunction, Response } from "express";
+import type { AuthenticatedRequest } from "./auth.js";
+import { sendUnauthorized } from "../api/_shared/responses.js";
 
-/**
- * Middleware that narrows AuthenticatedRequest to OrgRequest by
- * verifying organizationId and userId are present. Must be placed
- * after requireAuth in the middleware chain.
- */
-export function requireOrganization(
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction
-): void {
-  if (!req.organizationId || !req.userId) {
-    res.status(401).json({
-      error: "unauthorized",
-      message: "Organization context required.",
-    });
+export type OrgRequest = AuthenticatedRequest & { organizationId: string; userId: string };
+
+export function requireOrganization(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  if (!req.organizationId) {
+    sendUnauthorized(res, "Organization context required");
     return;
   }
   next();

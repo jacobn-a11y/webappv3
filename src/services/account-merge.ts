@@ -14,7 +14,7 @@
  */
 
 import Fuse from "fuse.js";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, Prisma } from "@prisma/client";
 import { normalizeCompanyName } from "./entity-resolution.js";
 import {
   decodeJsonObject,
@@ -591,6 +591,96 @@ export class AccountMergeService {
         landingPages: run.movedLandingPageIds.length,
       },
     }));
+  }
+
+  // ─── Merge Approval Requests ─────────────────────────────────────────
+
+  async createMergeRequest(
+    organizationId: string,
+    primaryAccountId: string,
+    secondaryAccountId: string,
+    requestedByUserId: string,
+    notes: string | null,
+    preview: MergePreview
+  ): Promise<{ id: string; status: string }> {
+    return this.prisma.approvalRequest.create({
+      data: {
+        organizationId,
+        requestType: "ACCOUNT_MERGE",
+        targetType: "account",
+        targetId: secondaryAccountId,
+        requestedByUserId,
+        status: "PENDING",
+        requestPayload: {
+          primary_account_id: primaryAccountId,
+          secondary_account_id: secondaryAccountId,
+          notes,
+          preview,
+        } as unknown as Prisma.InputJsonValue,
+      },
+      select: { id: true, status: true },
+    });
+  }
+
+  async listMergeRequests(
+    organizationId: string,
+    status: string
+  ) {
+    return this.prisma.approvalRequest.findMany({
+      where: {
+        organizationId,
+        requestType: "ACCOUNT_MERGE",
+        status,
+      },
+      include: {
+        requestedBy: { select: { id: true, name: true, email: true } },
+        reviewer: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
+  }
+
+  async findMergeRequest(requestId: string, organizationId: string) {
+    return this.prisma.approvalRequest.findFirst({
+      where: {
+        id: requestId,
+        organizationId,
+        requestType: "ACCOUNT_MERGE",
+      },
+    });
+  }
+
+  async rejectMergeRequest(
+    requestId: string,
+    reviewerUserId: string,
+    notes: string | null
+  ): Promise<void> {
+    await this.prisma.approvalRequest.update({
+      where: { id: requestId },
+      data: {
+        status: "REJECTED",
+        reviewerUserId,
+        reviewNotes: notes,
+        reviewedAt: new Date(),
+      },
+    });
+  }
+
+  async approveMergeRequest(
+    requestId: string,
+    reviewerUserId: string,
+    notes: string | null
+  ): Promise<void> {
+    await this.prisma.approvalRequest.update({
+      where: { id: requestId },
+      data: {
+        status: "APPROVED",
+        reviewerUserId,
+        reviewNotes: notes,
+        reviewedAt: new Date(),
+      },
+    });
   }
 
   // ─── Private ────────────────────────────────────────────────────────

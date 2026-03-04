@@ -13,7 +13,6 @@
 
 import { Router, type Response } from "express";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { AccountMergeService } from "../services/account-merge.js";
@@ -173,22 +172,14 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
           parse.data.secondary_account_id
         );
 
-        const request = await prisma.approvalRequest.create({
-          data: {
-            organizationId: req.organizationId,
-            requestType: "ACCOUNT_MERGE",
-            targetType: "account",
-            targetId: parse.data.secondary_account_id,
-            requestedByUserId: req.userId,
-            status: "PENDING",
-            requestPayload: {
-              primary_account_id: parse.data.primary_account_id,
-              secondary_account_id: parse.data.secondary_account_id,
-              notes: parse.data.notes ?? null,
-              preview,
-            } as unknown as Prisma.InputJsonValue,
-          },
-        });
+        const request = await mergeService.createMergeRequest(
+          req.organizationId,
+          parse.data.primary_account_id,
+          parse.data.secondary_account_id,
+          req.userId,
+          parse.data.notes ?? null,
+          preview
+        );
 
         res.status(202).json({
           queued_for_approval: true,
@@ -216,19 +207,10 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
       }
       const status = typeof req.query.status === "string" ? req.query.status : "PENDING";
 
-      const rows = await prisma.approvalRequest.findMany({
-      where: {
-        organizationId: req.organizationId,
-        requestType: "ACCOUNT_MERGE",
-        status,
-      },
-      include: {
-        requestedBy: { select: { id: true, name: true, email: true } },
-        reviewer: { select: { id: true, name: true, email: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 200,
-      });
+      const rows = await mergeService.listMergeRequests(
+      req.organizationId,
+      status
+      );
       sendSuccess(res, {
       requests: rows.map((r) => ({
         id: r.id,
@@ -261,13 +243,10 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
       }
 
       try {
-        const request = await prisma.approvalRequest.findFirst({
-          where: {
-            id: req.params.requestId as string,
-            organizationId: req.organizationId,
-            requestType: "ACCOUNT_MERGE",
-          },
-        });
+        const request = await mergeService.findMergeRequest(
+          req.params.requestId as string,
+          req.organizationId
+        );
         if (!request) {
           sendNotFound(res, "Merge request not found");
           return;
@@ -278,15 +257,11 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
         }
 
         if (parse.data.decision === "REJECT") {
-          await prisma.approvalRequest.update({
-            where: { id: request.id },
-            data: {
-              status: "REJECTED",
-              reviewerUserId: req.userId,
-              reviewNotes: parse.data.notes ?? null,
-              reviewedAt: new Date(),
-            },
-          });
+          await mergeService.rejectMergeRequest(
+            request.id,
+            req.userId,
+            parse.data.notes ?? null
+          );
           sendSuccess(res, { status: "REJECTED" });
           return;
         }
@@ -312,15 +287,11 @@ export function createAccountMergeRoutes(prisma: PrismaClient): Router {
           payload.notes ?? undefined
         );
 
-        await prisma.approvalRequest.update({
-          where: { id: request.id },
-          data: {
-            status: "APPROVED",
-            reviewerUserId: req.userId,
-            reviewNotes: parse.data.notes ?? null,
-            reviewedAt: new Date(),
-          },
-        });
+        await mergeService.approveMergeRequest(
+          request.id,
+          req.userId,
+          parse.data.notes ?? null
+        );
 
         sendSuccess(res, {
           status: "APPROVED",

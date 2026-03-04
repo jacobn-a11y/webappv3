@@ -7,18 +7,47 @@
  *   3. Slack — Posts the story summary + top 3 callout boxes to a Slack channel
  */
 
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { Worker } from "node:worker_threads";
 import type { PrismaClient } from "@prisma/client";
-import puppeteer from "puppeteer-core";
 import { google } from "googleapis";
 import { renderLandingPageHtml } from "../api/public-page-renderer.js";
 import type { CalloutBox } from "./landing-page-editor.js";
 import { decodeCalloutBoxes } from "../types/json-boundaries.js";
 import type { StoryContextSettings } from "../types/story-generation.js";
+import type { PdfWorkerRequest } from "../workers/pdf-export-worker.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+/**
+ * Resolve the worker script path.  In the compiled build the layout is
+ *   dist/services/landing-page-exports.js   (this file)
+ *   dist/workers/pdf-export-worker.js       (the worker)
+ * During development with tsx the source layout mirrors this.
+ */
+const PDF_WORKER_PATH = join(__dirname, "..", "workers", "pdf-export-worker.js");
 
 // ─── PDF Concurrency Limiter ─────────────────────────────────────────────────
 
-let activePdfJobs = 0;
 const MAX_PDF_CONCURRENCY = 3;
+
+class Semaphore {
+  private queue: (() => void)[] = [];
+  private active = 0;
+  constructor(private readonly max: number) {}
+  async acquire(): Promise<void> {
+    if (this.active < this.max) { this.active++; return; }
+    return new Promise<void>((resolve) => this.queue.push(resolve));
+  }
+  release(): void {
+    const next = this.queue.shift();
+    if (next) { next(); } else { this.active--; }
+  }
+}
+
+const pdfSemaphore = new Semaphore(MAX_PDF_CONCURRENCY);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -61,49 +90,31 @@ export class LandingPageExporter {
     const page = await this.getExportablePage(pageId);
     const html = renderLandingPageHtml(page);
 
-    while (activePdfJobs >= MAX_PDF_CONCURRENCY) {
-      await new Promise(r => setTimeout(r, 500));
-    }
-    activePdfJobs++;
+    await pdfSemaphore.acquire();
 
     try {
-      const executablePath =
-        process.env.PUPPETEER_EXECUTABLE_PATH ??
-        "/usr/bin/chromium-browser";
-
-      const browser = await puppeteer.launch({
-        executablePath,
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
-      });
-
-      try {
-        const browserPage = await browser.newPage();
-        await browserPage.setContent(html, { waitUntil: "networkidle0" });
-
-        const pdfBuffer = await browserPage.pdf({
-          format: "A4",
-          printBackground: true,
-          margin: { top: "0.5in", bottom: "0.5in", left: "0.5in", right: "0.5in" },
-          displayHeaderFooter: true,
-          headerTemplate: `<div style="font-size:8px;width:100%;text-align:center;color:#999;padding:0 0.5in;">
+      const pdfOptions: PdfWorkerRequest["pdfOptions"] = {
+        format: "A4",
+        printBackground: true,
+        margin: { top: "0.5in", bottom: "0.5in", left: "0.5in", right: "0.5in" },
+        displayHeaderFooter: true,
+        headerTemplate: `<div style="font-size:8px;width:100%;text-align:center;color:#999;padding:0 0.5in;">
             <span>${page.title.replace(/"/g, "&quot;")}</span>
           </div>`,
-          footerTemplate: `<div style="font-size:8px;width:100%;text-align:center;color:#999;padding:0 0.5in;">
+        footerTemplate: `<div style="font-size:8px;width:100%;text-align:center;color:#999;padding:0 0.5in;">
             <span>Compiled by AI from ${page.totalCallHours} hours of call recordings</span>
             <span style="float:right;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
           </div>`,
-        });
+      };
 
-        const slug = await this.getPageSlug(pageId);
-        const filename = `${slug}.pdf`;
+      const pdfBuffer = await runPdfWorker({ html, pdfOptions });
 
-        return { buffer: Buffer.from(pdfBuffer), filename };
-      } finally {
-        await browser.close();
-      }
+      const slug = await this.getPageSlug(pageId);
+      const filename = `${slug}.pdf`;
+
+      return { buffer: Buffer.from(pdfBuffer), filename };
     } finally {
-      activePdfJobs--;
+      pdfSemaphore.release();
     }
   }
 
@@ -469,6 +480,44 @@ export class LandingPageExporter {
     const baseUrl = process.env.APP_URL ?? "http://localhost:3000";
     return `${baseUrl}/s/${page.slug}`;
   }
+}
+
+// ─── Worker Thread Helper ────────────────────────────────────────────────────
+
+/**
+ * Spawns a `worker_threads` Worker that runs Puppeteer in an isolated thread,
+ * keeping the main event loop free.  Returns a Promise that resolves with the
+ * PDF buffer or rejects on error / unexpected worker exit.
+ */
+function runPdfWorker(request: PdfWorkerRequest): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const worker = new Worker(PDF_WORKER_PATH);
+
+    worker.on("message", (msg: { buffer?: Uint8Array; error?: string }) => {
+      if (msg.error) {
+        reject(new Error(`PDF worker error: ${msg.error}`));
+      } else if (msg.buffer) {
+        resolve(Buffer.from(msg.buffer));
+      } else {
+        reject(new Error("PDF worker returned an unexpected message"));
+      }
+      // The worker will exit naturally after the message handler returns,
+      // but terminate explicitly to free resources promptly.
+      void worker.terminate();
+    });
+
+    worker.on("error", (err) => {
+      reject(new Error(`PDF worker thread error: ${err.message}`));
+    });
+
+    worker.on("exit", (code) => {
+      if (code !== 0) {
+        reject(new Error(`PDF worker exited with code ${code}`));
+      }
+    });
+
+    worker.postMessage(request);
+  });
 }
 
 // ─── Utilities ──────────────────────────────────────────────────────────────

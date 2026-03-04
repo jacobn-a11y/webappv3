@@ -1,12 +1,6 @@
 /**
- * Dashboard Pages
- *
- * Admin/user dashboard for managing landing pages with:
- *   - 4 stat cards (Total Pages, Published, Drafts, Total Views)
- *   - Filter bar with search, status/visibility/creator dropdowns, sort columns
- *   - Table of landing pages with row actions
- *   - Confirm dialog for destructive actions (unpublish, archive, delete)
- *   - Client-side filtering and sorting
+ * Dashboard Pages — Layout shell + data fetching.
+ * Sub-components decomposed into ./dashboard-pages/
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
@@ -20,19 +14,16 @@ import {
   type DashboardPageSummary,
   type DashboardCreator,
 } from "../lib/api";
+import { PageStatsCards } from "./dashboard-pages/PageStatsCards";
+import { PageFilters } from "./dashboard-pages/PageFilters";
+import { PageTable, type SortField, type SortDir } from "./dashboard-pages/PageTable";
+
+// Re-export sub-components for backward compatibility
+export { PageStatsCards } from "./dashboard-pages/PageStatsCards";
+export { PageFilters } from "./dashboard-pages/PageFilters";
+export { PageTable } from "./dashboard-pages/PageTable";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-type SortField =
-  | "title"
-  | "status"
-  | "visibility"
-  | "viewCount"
-  | "createdById"
-  | "publishedAt"
-  | "updatedAt";
-
-type SortDir = "asc" | "desc";
 
 interface ConfirmAction {
   action: "unpublish" | "archive" | "delete";
@@ -63,23 +54,6 @@ const CONFIRM_MESSAGES: Record<
     label: "Delete",
   },
 };
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatNumber(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
-  if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, "") + "K";
-  return n.toString();
-}
-
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr);
-  const months = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-  ];
-  return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
-}
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
@@ -113,7 +87,6 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
 
   // Action menu state
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
 
   // Inline error state (replaces native alert)
   const [actionError, setActionError] = useState<string | null>(null);
@@ -141,10 +114,8 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
 
   // Close menus on outside click
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (openMenuId && menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpenMenuId(null);
-      }
+    const handleClick = () => {
+      if (openMenuId) setOpenMenuId(null);
     };
     document.addEventListener("click", handleClick);
     return () => document.removeEventListener("click", handleClick);
@@ -166,30 +137,20 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
   const filteredPages = useMemo(() => {
     let result = [...pages];
 
-    // Search by title
     if (search.trim()) {
       const lowerSearch = search.toLowerCase();
-      result = result.filter((p) =>
-        p.title.toLowerCase().includes(lowerSearch)
-      );
+      result = result.filter((p) => p.title.toLowerCase().includes(lowerSearch));
     }
-
-    // Status filter
     if (statusFilter) {
       result = result.filter((p) => p.status === statusFilter);
     }
-
-    // Visibility filter
     if (visibilityFilter) {
       result = result.filter((p) => p.visibility === visibilityFilter);
     }
-
-    // Creator filter
     if (creatorFilter) {
       result = result.filter((p) => p.createdByEmail === creatorFilter);
     }
 
-    // Sorting
     result.sort((a, b) => {
       let aVal: string | number;
       let bVal: string | number;
@@ -260,7 +221,6 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
   // Row actions
   const handleAction = (action: ConfirmAction["action"], page: DashboardPageSummary) => {
     setOpenMenuId(null);
-
     if (action === "unpublish" || action === "archive" || action === "delete") {
       setConfirmAction({ action, pageId: page.id, pageTitle: page.title });
     }
@@ -284,7 +244,6 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
       }
       setConfirmAction(null);
       setActionError(null);
-      // Reload data after action
       await loadData();
     } catch (err) {
       setConfirmAction(null);
@@ -295,65 +254,6 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
     } finally {
       setActionLoading(false);
     }
-  };
-
-  // Sort arrow renderer – uses SVG chevrons instead of Unicode triangles
-  const renderSortArrow = (field: SortField) => {
-    const isActive = sortBy === field;
-    if (isActive) {
-      return (
-        <span className="dash-pages__sort-icon dash-pages__sort-icon--active">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            {sortDir === "asc"
-              ? <path d="M3 8l3-4 3 4" />
-              : <path d="M3 4l3 4 3-4" />}
-          </svg>
-        </span>
-      );
-    }
-    return (
-      <span className="dash-pages__sort-icon">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-          <path d="M3 4.5l3-3 3 3" /><path d="M3 7.5l3 3 3-3" />
-        </svg>
-      </span>
-    );
-  };
-
-  // Status badge
-  const renderStatusBadge = (status: string) => {
-    const labels: Record<string, string> = {
-      DRAFT: "Draft",
-      PUBLISHED: "Published",
-      ARCHIVED: "Archived",
-    };
-    const classes: Record<string, string> = {
-      DRAFT: "dash-pages__badge--draft",
-      PUBLISHED: "dash-pages__badge--published",
-      ARCHIVED: "dash-pages__badge--archived",
-    };
-    return (
-      <span className={`dash-pages__badge ${classes[status] || ""}`}>
-        {labels[status] || status}
-      </span>
-    );
-  };
-
-  // Visibility badge
-  const renderVisibilityBadge = (visibility: string) => {
-    const labels: Record<string, string> = {
-      PRIVATE: "Private",
-      SHARED_WITH_LINK: "Shared",
-    };
-    const classes: Record<string, string> = {
-      PRIVATE: "dash-pages__badge--private",
-      SHARED_WITH_LINK: "dash-pages__badge--shared",
-    };
-    return (
-      <span className={`dash-pages__badge ${classes[visibility] || ""}`}>
-        {labels[visibility] || visibility}
-      </span>
-    );
   };
 
   // ─── Loading State ──────────────────────────────────────────────────────────
@@ -408,166 +308,22 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
         )}
       </div>
 
-      {/* Stat Cards */}
-      <div className="dash-pages__stats">
-        <div className="dash-pages__stat-card dash-pages__stat-card--total">
-          <div className="dash-pages__stat-icon">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              width="20"
-              height="20"
-              aria-hidden="true"
-            >
-              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-              <polyline points="14,2 14,8 20,8" />
-              <line x1="16" y1="13" x2="8" y2="13" />
-              <line x1="16" y1="17" x2="8" y2="17" />
-              <polyline points="10,9 9,9 8,9" />
-            </svg>
-          </div>
-          <div className="dash-pages__stat-label">Total Pages</div>
-          <div className="dash-pages__stat-value">{stats.totalPages}</div>
-        </div>
+      <PageStatsCards stats={stats} />
 
-        <div className="dash-pages__stat-card dash-pages__stat-card--published">
-          <div className="dash-pages__stat-icon">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              width="20"
-              height="20"
-              aria-hidden="true"
-            >
-              <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-              <polyline points="22,4 12,14.01 9,11.01" />
-            </svg>
-          </div>
-          <div className="dash-pages__stat-label">Published</div>
-          <div className="dash-pages__stat-value">{stats.publishedPages}</div>
-        </div>
-
-        <div className="dash-pages__stat-card dash-pages__stat-card--drafts">
-          <div className="dash-pages__stat-icon">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              width="20"
-              height="20"
-              aria-hidden="true"
-            >
-              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-            </svg>
-          </div>
-          <div className="dash-pages__stat-label">Drafts</div>
-          <div className="dash-pages__stat-value">{stats.draftPages}</div>
-        </div>
-
-        <div className="dash-pages__stat-card dash-pages__stat-card--views">
-          <div className="dash-pages__stat-icon">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              width="20"
-              height="20"
-              aria-hidden="true"
-            >
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-          </div>
-          <div className="dash-pages__stat-label">Total Views</div>
-          <div className="dash-pages__stat-value">
-            {formatNumber(stats.totalViews)}
-          </div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="dash-pages__filters">
-        <div className="dash-pages__search">
-          <span className="dash-pages__search-icon">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              width="16"
-              height="16"
-              aria-hidden="true"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-          </span>
-          <input
-            type="text"
-            className="dash-pages__search-input"
-            placeholder="Search by title..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="Search landing pages by title"
-          />
-        </div>
-
-        <select
-          className="dash-pages__select"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          aria-label="Filter by status"
-        >
-          <option value="">All Statuses</option>
-          <option value="DRAFT">Draft</option>
-          <option value="PUBLISHED">Published</option>
-          <option value="ARCHIVED">Archived</option>
-        </select>
-
-        <select
-          className="dash-pages__select"
-          value={visibilityFilter}
-          onChange={(e) => setVisibilityFilter(e.target.value)}
-          aria-label="Filter by visibility"
-        >
-          <option value="">All Visibility</option>
-          <option value="PRIVATE">Private</option>
-          <option value="SHARED_WITH_LINK">Shared</option>
-        </select>
-
-        {isAdmin && creators.length > 0 && (
-          <select
-            className="dash-pages__select"
-            value={creatorFilter}
-            onChange={(e) => setCreatorFilter(e.target.value)}
-            aria-label="Filter by creator"
-          >
-            <option value="">All Creators</option>
-            {creators.map((c) => (
-              <option key={c.userId} value={c.email}>
-                {c.name || c.email}
-              </option>
-            ))}
-          </select>
-        )}
-
-        {hasActiveFilters && (
-          <button
-            type="button"
-            className="dash-pages__clear-btn"
-            onClick={clearFilters}
-          >
-            Clear filters
-          </button>
-        )}
-      </div>
+      <PageFilters
+        search={search}
+        setSearch={setSearch}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        visibilityFilter={visibilityFilter}
+        setVisibilityFilter={setVisibilityFilter}
+        creatorFilter={creatorFilter}
+        setCreatorFilter={setCreatorFilter}
+        isAdmin={isAdmin}
+        creators={creators}
+        hasActiveFilters={hasActiveFilters}
+        onClearFilters={clearFilters}
+      />
 
       {/* Accessible result count announcement */}
       <div className="sr-only" aria-live="polite" role="status">
@@ -591,217 +347,18 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
         </div>
       )}
 
-      {/* Table */}
-      <div className="dash-pages__table-wrap">
-        <table className="dash-pages__table">
-          <thead>
-            <tr>
-              <th>
-                <button
-                  type="button"
-                  className="dash-pages__sort-btn"
-                  onClick={() => handleSort("title")}
-                >
-                  Title {renderSortArrow("title")}
-                </button>
-              </th>
-              <th>Account</th>
-              <th>
-                <button
-                  type="button"
-                  className="dash-pages__sort-btn"
-                  onClick={() => handleSort("status")}
-                >
-                  Status {renderSortArrow("status")}
-                </button>
-              </th>
-              <th>
-                <button
-                  type="button"
-                  className="dash-pages__sort-btn"
-                  onClick={() => handleSort("visibility")}
-                >
-                  Visibility {renderSortArrow("visibility")}
-                </button>
-              </th>
-              <th>
-                <button
-                  type="button"
-                  className="dash-pages__sort-btn"
-                  onClick={() => handleSort("viewCount")}
-                >
-                  Views {renderSortArrow("viewCount")}
-                </button>
-              </th>
-              <th>
-                {isAdmin ? (
-                  <button
-                    type="button"
-                    className="dash-pages__sort-btn"
-                    onClick={() => handleSort("createdById")}
-                  >
-                    Created By {renderSortArrow("createdById")}
-                  </button>
-                ) : (
-                  "Created By"
-                )}
-              </th>
-              <th>
-                <button
-                  type="button"
-                  className="dash-pages__sort-btn"
-                  onClick={() => handleSort("publishedAt")}
-                >
-                  Published {renderSortArrow("publishedAt")}
-                </button>
-              </th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredPages.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="dash-pages__empty-state">
-                  <div className="dash-pages__empty-content">
-                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-border)" strokeWidth="1.5" aria-hidden="true">
-                      <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-                    </svg>
-                    <span className="dash-pages__empty-title">
-                      {hasActiveFilters ? "No pages match your filters" : "No landing pages yet"}
-                    </span>
-                    <span className="dash-pages__empty-subtitle">
-                      {hasActiveFilters
-                        ? "Try adjusting your search or filter criteria."
-                        : "Create your first landing page to get started."}
-                    </span>
-                    {hasActiveFilters && (
-                      <button type="button" className="btn btn--ghost btn--sm" onClick={clearFilters}>
-                        Clear all filters
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ) : (
-              filteredPages.map((page) => (
-                <tr key={page.id}>
-                  <td>
-                    <div className="dash-pages__cell-title">{page.title}</div>
-                  </td>
-                  <td>
-                    <span className="dash-pages__cell-account">
-                      {page.accountName}
-                    </span>
-                  </td>
-                  <td>{renderStatusBadge(page.status)}</td>
-                  <td>{renderVisibilityBadge(page.visibility)}</td>
-                  <td>{formatNumber(page.viewCount)}</td>
-                  <td>{page.createdByName || page.createdByEmail}</td>
-                  <td>
-                    {page.publishedAt ? formatDate(page.publishedAt) : "\u2014"}
-                  </td>
-                  <td>
-                    <div className="dash-pages__actions">
-                      {page.status === "PUBLISHED" &&
-                        page.visibility === "SHARED_WITH_LINK" && (
-                          <a
-                            href={`/s/${page.slug}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="dash-pages__action-btn"
-                            title="View public page"
-                          >
-                            View
-                          </a>
-                        )}
-                      <div
-                        className={`dash-pages__action-menu ${
-                          openMenuId === page.id
-                            ? "dash-pages__action-menu--open"
-                            : ""
-                        }`}
-                        ref={openMenuId === page.id ? menuRef : undefined}
-                      >
-                        <button
-                          type="button"
-                          className="dash-pages__menu-toggle"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenMenuId(
-                              openMenuId === page.id ? null : page.id
-                            );
-                          }}
-                          aria-label={`More actions for ${page.title}`}
-                          aria-haspopup="menu"
-                          aria-expanded={openMenuId === page.id}
-                        >
-                          &#8943;
-                        </button>
-                        {openMenuId === page.id && (
-                          <div className="dash-pages__dropdown">
-                            <button
-                              type="button"
-                              className="dash-pages__dropdown-item"
-                              onClick={() => {
-                                setOpenMenuId(null);
-                                navigate(`/pages/${page.id}/edit`);
-                              }}
-                            >
-                              Edit
-                            </button>
-                            {page.status === "PUBLISHED" &&
-                              page.visibility === "SHARED_WITH_LINK" && (
-                                <a
-                                  href={`/s/${page.slug}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="dash-pages__dropdown-item"
-                                  onClick={() => setOpenMenuId(null)}
-                                >
-                                  View public page
-                                </a>
-                              )}
-                            {page.status === "PUBLISHED" && (
-                              <button
-                                type="button"
-                                className="dash-pages__dropdown-item"
-                                onClick={() => handleAction("unpublish", page)}
-                              >
-                                Unpublish
-                              </button>
-                            )}
-                            {page.status !== "ARCHIVED" && (
-                              <button
-                                type="button"
-                                className="dash-pages__dropdown-item"
-                                onClick={() => handleAction("archive", page)}
-                              >
-                                Archive
-                              </button>
-                            )}
-                            {isAdmin && (
-                              <>
-                                <div className="dash-pages__dropdown-divider" />
-                                <button
-                                  type="button"
-                                  className="dash-pages__dropdown-item dash-pages__dropdown-item--danger"
-                                  onClick={() => handleAction("delete", page)}
-                                >
-                                  Delete
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      <PageTable
+        filteredPages={filteredPages}
+        isAdmin={isAdmin}
+        sortBy={sortBy}
+        sortDir={sortDir}
+        hasActiveFilters={hasActiveFilters}
+        openMenuId={openMenuId}
+        setOpenMenuId={setOpenMenuId}
+        onSort={handleSort}
+        onClearFilters={clearFilters}
+        onAction={handleAction}
+      />
 
       {/* Confirm Dialog */}
       {confirmAction && (
@@ -844,7 +401,6 @@ function ConfirmDialog({
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  // Capture previous focus, auto-focus cancel button, and trap focus
   useEffect(() => {
     previousFocusRef.current = document.activeElement as HTMLElement;
     cancelBtnRef.current?.focus();
