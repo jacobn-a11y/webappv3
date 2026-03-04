@@ -18,7 +18,7 @@
 import { Router, type Request, type Response } from "express";
 import type { PrismaClient, IntegrationProvider } from "@prisma/client";
 import { z } from "zod";
-import type { ProviderRegistry } from "../integrations/types.js";
+import type { ProviderCredentials, ProviderRegistry } from "../integrations/types.js";
 import type { SyncEngine } from "../integrations/sync-engine.js";
 import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.js";
 import { parseBoundedLimit, PAGINATION_LIMITS } from "../lib/pagination.js";
@@ -32,7 +32,14 @@ import {
 } from "../services/provider-policy.js";
 import { decodeCredentials } from "../types/json-boundaries.js";
 import logger from "../lib/logger.js";
-import { sendSuccess, sendCreated, sendBadRequest, sendNotFound, sendConflict, sendError } from "./_shared/responses.js";
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendConflict,
+  sendError,
+} from "./_shared/responses.js";
 
 // ─── Validation Schemas ─────────────────────────────────────────────────────
 
@@ -57,19 +64,24 @@ const credentialsByProvider = {
   SALESFORCE: salesforceCredentialsSchema,
 } as const;
 
-const createIntegrationSchema = z.object({
-  provider: z.enum(DIRECT_INTEGRATION_PROVIDERS),
-  credentials: z.record(z.unknown()),
-  settings: z.record(z.unknown()).optional(),
-  webhookSecret: z.string().optional(),
-}).refine((data) => {
-  const schema = credentialsByProvider[data.provider as keyof typeof credentialsByProvider];
-  if (!schema) return true;
-  return schema.safeParse(data.credentials).success;
-}, {
-  message: "Invalid credentials for the specified provider",
-  path: ["credentials"],
-});
+const createIntegrationSchema = z
+  .object({
+    provider: z.enum(DIRECT_INTEGRATION_PROVIDERS),
+    credentials: z.record(z.unknown()),
+    settings: z.record(z.unknown()).optional(),
+    webhookSecret: z.string().optional(),
+  })
+  .refine(
+    (data) => {
+      const schema = credentialsByProvider[data.provider as keyof typeof credentialsByProvider];
+      if (!schema) return true;
+      return schema.safeParse(data.credentials).success;
+    },
+    {
+      message: "Invalid credentials for the specified provider",
+      path: ["credentials"],
+    }
+  );
 
 const updateIntegrationSchema = z.object({
   credentials: z.record(z.unknown()).optional(),
@@ -163,7 +175,10 @@ export function createIntegrationRoutes(
     const provider = resolveProviderParam(req.params.provider, res);
     if (!provider) return;
 
-    const config = await integrationService.getConfig(organizationId, provider as IntegrationProvider);
+    const config = await integrationService.getConfig(
+      organizationId,
+      provider as IntegrationProvider
+    );
 
     if (!config) {
       sendNotFound(res, "Integration not configured");
@@ -171,9 +186,7 @@ export function createIntegrationRoutes(
     }
 
     // Redact sensitive fields from credentials
-    const redactedCredentials = redactCredentials(
-      decodeCredentials(config.credentials)
-    );
+    const redactedCredentials = redactCredentials(decodeCredentials(config.credentials));
 
     sendSuccess(res, {
       id: config.id,
@@ -203,7 +216,10 @@ export function createIntegrationRoutes(
     const { provider, credentials, settings, webhookSecret } = parsed.data;
 
     // Check if already exists
-    const existing = await integrationService.getConfig(organizationId, provider as IntegrationProvider);
+    const existing = await integrationService.getConfig(
+      organizationId,
+      provider as IntegrationProvider
+    );
 
     if (existing) {
       sendConflict(res, "Integration already configured. Use PATCH to update.");
@@ -251,7 +267,10 @@ export function createIntegrationRoutes(
       return;
     }
 
-    const config = await integrationService.getConfig(organizationId, provider as IntegrationProvider);
+    const config = await integrationService.getConfig(
+      organizationId,
+      provider as IntegrationProvider
+    );
 
     if (!config) {
       sendNotFound(res, "Integration not configured");
@@ -277,7 +296,11 @@ export function createIntegrationRoutes(
       updateData.webhookSecret = parsed.data.webhookSecret;
     }
 
-    const updated = await integrationService.updateConfig(organizationId, provider as IntegrationProvider, updateData);
+    const updated = await integrationService.updateConfig(
+      organizationId,
+      provider as IntegrationProvider,
+      updateData
+    );
     await auditLogs.record({
       organizationId,
       actorUserId: (req as { userId?: string }).userId,
@@ -306,7 +329,10 @@ export function createIntegrationRoutes(
     const provider = resolveProviderParam(req.params.provider, res);
     if (!provider) return;
 
-    const config = await integrationService.getConfig(organizationId, provider as IntegrationProvider);
+    const config = await integrationService.getConfig(
+      organizationId,
+      provider as IntegrationProvider
+    );
 
     if (!config) {
       sendNotFound(res, "Integration not configured");
@@ -337,7 +363,10 @@ export function createIntegrationRoutes(
     const provider = resolveProviderParam(req.params.provider, res);
     if (!provider) return;
 
-    const config = await integrationService.getConfig(organizationId, provider as IntegrationProvider);
+    const config = await integrationService.getConfig(
+      organizationId,
+      provider as IntegrationProvider
+    );
 
     if (!config) {
       sendNotFound(res, "Integration not configured");
@@ -372,7 +401,7 @@ export function createIntegrationRoutes(
 
     try {
       const valid = await (selection.callProvider ?? selection.crmProvider)!.validateCredentials(
-        credentials as any
+        credentials as ProviderCredentials
       );
 
       if (valid) {
@@ -391,7 +420,11 @@ export function createIntegrationRoutes(
         });
         sendSuccess(res, { valid: true, message: "Credentials validated successfully" });
       } else {
-        await integrationService.setConfigStatus(config.id, "ERROR", "Credential validation failed");
+        await integrationService.setConfigStatus(
+          config.id,
+          "ERROR",
+          "Credential validation failed"
+        );
         await auditLogs.record({
           organizationId,
           actorUserId: (req as { userId?: string }).userId,
@@ -407,8 +440,7 @@ export function createIntegrationRoutes(
         sendSuccess(res, { valid: false, message: "Credential validation failed" });
       }
     } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Validation error";
+      const errorMessage = err instanceof Error ? err.message : "Validation error";
       await integrationService.setConfigStatus(config.id, "ERROR", errorMessage);
       await auditLogs.record({
         organizationId,
@@ -442,7 +474,10 @@ export function createIntegrationRoutes(
       return;
     }
 
-    const config = await integrationService.getConfig(organizationId, provider as IntegrationProvider);
+    const config = await integrationService.getConfig(
+      organizationId,
+      provider as IntegrationProvider
+    );
 
     if (!config) {
       sendNotFound(res, "Integration not configured");
@@ -467,8 +502,8 @@ export function createIntegrationRoutes(
         idempotencyKey,
       })
       .catch((err) => {
-      logger.error(`On-demand sync failed for ${provider}`, { error: err });
-    });
+        logger.error(`On-demand sync failed for ${provider}`, { error: err });
+      });
     await auditLogs.record({
       organizationId,
       actorUserId: (req as { userId?: string }).userId,
@@ -561,8 +596,7 @@ export function createIntegrationRoutes(
         replay_window_hours: replay.replayWindowHours,
       });
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to replay integration run";
+      const message = err instanceof Error ? err.message : "Failed to replay integration run";
       sendBadRequest(res, message);
     }
   });
@@ -635,8 +669,7 @@ export function createIntegrationRoutes(
         replay_window_hours: replay.replayWindowHours,
       });
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to replay dead-letter run";
+      const message = err instanceof Error ? err.message : "Failed to replay dead-letter run";
       sendBadRequest(res, message);
     }
   });
@@ -691,9 +724,7 @@ export function createIntegrationRoutes(
       return;
     }
 
-    const sinceOverride = parsed.data.start_date
-      ? new Date(parsed.data.start_date)
-      : null;
+    const sinceOverride = parsed.data.start_date ? new Date(parsed.data.start_date) : null;
     const rawIdempotency =
       parsed.data.idempotency_key ??
       `backfill:${config.id}:${parsed.data.start_date ?? "none"}:${parsed.data.cursor ?? "none"}:${Date.now()}`;
@@ -729,12 +760,16 @@ export function createIntegrationRoutes(
       userAgent: req.get("user-agent"),
     });
 
-    sendSuccess(res, {
-      started: true,
-      provider,
-      idempotency_key: idempotencyKey,
-      message: "Backfill run started. Track via GET /api/integrations/ops/backfills",
-    }, 202);
+    sendSuccess(
+      res,
+      {
+        started: true,
+        provider,
+        idempotency_key: idempotencyKey,
+        message: "Backfill run started. Track via GET /api/integrations/ops/backfills",
+      },
+      202
+    );
   });
 
   return router;
@@ -746,9 +781,7 @@ export function createIntegrationRoutes(
  * Redacts sensitive fields from credentials before sending to the client.
  * Shows the first 2 chars of API keys/tokens so the user can identify them.
  */
-function redactCredentials(
-  creds: Record<string, unknown>
-): Record<string, unknown> {
+function redactCredentials(creds: Record<string, unknown>): Record<string, unknown> {
   const redacted: Record<string, unknown> = {};
   const sensitiveKeys = new Set([
     "accessKey",
@@ -764,8 +797,7 @@ function redactCredentials(
 
   for (const [key, value] of Object.entries(creds)) {
     if (sensitiveKeys.has(key) && typeof value === "string") {
-      redacted[key] =
-        value.length > 2 ? `${value.slice(0, 2)}${"*".repeat(12)}` : "****";
+      redacted[key] = value.length > 2 ? `${value.slice(0, 2)}${"*".repeat(12)}` : "****";
     } else {
       redacted[key] = value;
     }

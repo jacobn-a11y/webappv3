@@ -16,10 +16,7 @@
 import Fuse from "fuse.js";
 import type { PrismaClient, Prisma } from "@prisma/client";
 import { normalizeCompanyName } from "./entity-resolution.js";
-import {
-  decodeJsonObject,
-  encodeJsonValue,
-} from "../types/json-boundaries.js";
+import { decodeJsonObject, encodeJsonValue } from "../types/json-boundaries.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -473,19 +470,13 @@ export class AccountMergeService {
       const preview = decodeJsonObject(run.mergePreview);
       const secondaryRecord = decodeJsonObject(preview.secondary);
       const secondary =
-        typeof secondaryRecord.id === "string" &&
-        typeof secondaryRecord.name === "string"
+        typeof secondaryRecord.id === "string" && typeof secondaryRecord.name === "string"
           ? {
               id: secondaryRecord.id,
               name: secondaryRecord.name,
-              domain:
-                typeof secondaryRecord.domain === "string"
-                  ? secondaryRecord.domain
-                  : null,
+              domain: typeof secondaryRecord.domain === "string" ? secondaryRecord.domain : null,
               industry:
-                typeof secondaryRecord.industry === "string"
-                  ? secondaryRecord.industry
-                  : null,
+                typeof secondaryRecord.industry === "string" ? secondaryRecord.industry : null,
               employeeCount:
                 typeof secondaryRecord.employeeCount === "number"
                   ? secondaryRecord.employeeCount
@@ -616,16 +607,13 @@ export class AccountMergeService {
           secondary_account_id: secondaryAccountId,
           notes,
           preview,
-        } as unknown as Prisma.InputJsonValue,
+        } satisfies Record<string, unknown> as Prisma.InputJsonValue,
       },
       select: { id: true, status: true },
     });
   }
 
-  async listMergeRequests(
-    organizationId: string,
-    status: string
-  ) {
+  async listMergeRequests(organizationId: string, status: string) {
     return this.prisma.approvalRequest.findMany({
       where: {
         organizationId,

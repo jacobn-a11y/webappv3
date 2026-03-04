@@ -78,7 +78,7 @@ export function createGrainWebhookHandler(deps: { prisma: PrismaClient; processi
     const validConfigs = grainConfigs.filter(
       (c: { webhookSecret: string | null }) => c.webhookSecret
     );
-    if (validConfigs.length === 0) {
+    if (validConfigs.length !== grainConfigs.length) {
       res.status(500).json({
         error: "All active Grain integrations must configure webhookSecret",
       });

@@ -26,10 +26,7 @@ import { metrics } from "../lib/metrics.js";
 import { Sentry } from "../lib/sentry.js";
 import { enqueueProcessCallJob } from "../lib/queue-policy.js";
 import { markWebhookEventIfNew } from "../lib/webhook-idempotency.js";
-import {
-  pickFirstHeaderValue,
-  validateWebhookTimestamp,
-} from "../lib/webhook-security.js";
+import { pickFirstHeaderValue, validateWebhookTimestamp } from "../lib/webhook-security.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -84,15 +81,8 @@ interface MergeCRMOpportunity {
 
 // ─── Webhook Signature Verification ──────────────────────────────────────────
 
-function verifyMergeSignature(
-  payload: string,
-  signature: string,
-  secret: string
-): boolean {
-  const expected = crypto
-    .createHmac("sha256", secret)
-    .update(payload)
-    .digest("hex");
+function verifyMergeSignature(payload: string, signature: string, secret: string): boolean {
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex");
   const sigBuffer = Buffer.from(signature, "utf8");
   const expectedBuffer = Buffer.from(expected, "utf8");
   if (sigBuffer.length !== expectedBuffer.length) {
@@ -109,7 +99,7 @@ function mapIntegrationToProvider(integration: string): CallProvider {
     chorus: "CHORUS",
     zoom: "ZOOM",
     "google-meet": "GOOGLE_MEET",
-    "google_meet": "GOOGLE_MEET",
+    google_meet: "GOOGLE_MEET",
     teams: "TEAMS",
     "microsoft-teams": "TEAMS",
     fireflies: "FIREFLIES",
@@ -124,10 +114,7 @@ function mapIntegrationToProvider(integration: string): CallProvider {
 
 // ─── Webhook Handler Factory ─────────────────────────────────────────────────
 
-export function createMergeWebhookHandler(deps: {
-  prisma: PrismaClient;
-  processingQueue: Queue;
-}) {
+export function createMergeWebhookHandler(deps: { prisma: PrismaClient; processingQueue: Queue }) {
   const { prisma, processingQueue } = deps;
   const resolver = new EntityResolver(prisma);
 
@@ -206,10 +193,7 @@ export function createMergeWebhookHandler(deps: {
     }
 
     const orgId = linkedAccount.organizationId;
-    if (
-      payload.linked_account.organization &&
-      payload.linked_account.organization !== orgId
-    ) {
+    if (payload.linked_account.organization && payload.linked_account.organization !== orgId) {
       logger.warn("Merge webhook organization mismatch", {
         linkedAccountId: payload.linked_account.id,
         payloadOrganizationId: payload.linked_account.organization,
@@ -241,13 +225,7 @@ export function createMergeWebhookHandler(deps: {
       switch (eventType) {
         case "recording.created":
         case "recording.updated":
-          await handleRecordingEvent(
-            prisma,
-            resolver,
-            processingQueue,
-            orgId,
-            payload
-          );
+          await handleRecordingEvent(prisma, resolver, processingQueue, orgId, payload);
           break;
 
         case "contact.created":
@@ -285,10 +263,9 @@ async function handleRecordingEvent(
   organizationId: string,
   payload: MergeWebhookPayload
 ): Promise<void> {
-  const recording = payload.data as unknown as MergeRecording;
-  const provider = mapIntegrationToProvider(
-    payload.linked_account.integration
-  );
+  const rawData: unknown = payload.data;
+  const recording = rawData as MergeRecording;
+  const provider = mapIntegrationToProvider(payload.linked_account.integration);
 
   // ── Upsert the call record ──────────────────────────────────────────
   const call = await prisma.call.upsert({
@@ -301,9 +278,7 @@ async function handleRecordingEvent(
       externalId: recording.remote_id,
       recordingUrl: recording.recording_url ?? null,
       duration: recording.duration ?? null,
-      occurredAt: recording.start_time
-        ? new Date(recording.start_time)
-        : new Date(),
+      occurredAt: recording.start_time ? new Date(recording.start_time) : new Date(),
     },
     update: {
       title: recording.name ?? undefined,
@@ -403,7 +378,8 @@ async function handleCRMContactEvent(
   organizationId: string,
   payload: MergeWebhookPayload
 ): Promise<void> {
-  const contact = payload.data as unknown as MergeCRMContact;
+  const rawData: unknown = payload.data;
+  const contact = rawData as MergeCRMContact;
   const primaryEmail = contact.email_addresses?.[0]?.email_address;
   if (!primaryEmail) return;
 
@@ -433,9 +409,7 @@ async function handleCRMContactEvent(
           accountId: newAccount.id,
           email: primaryEmail.toLowerCase(),
           emailDomain: domain,
-          name:
-            [contact.first_name, contact.last_name].filter(Boolean).join(" ") ||
-            null,
+          name: [contact.first_name, contact.last_name].filter(Boolean).join(" ") || null,
           mergeContactId: contact.id,
         },
       });
@@ -444,8 +418,7 @@ async function handleCRMContactEvent(
   }
 
   // Upsert the contact under the matched account
-  const fullName =
-    [contact.first_name, contact.last_name].filter(Boolean).join(" ") || null;
+  const fullName = [contact.first_name, contact.last_name].filter(Boolean).join(" ") || null;
 
   await prisma.contact.upsert({
     where: { accountId_email: { accountId: account.id, email: primaryEmail.toLowerCase() } },
@@ -468,7 +441,8 @@ async function handleCRMOpportunityEvent(
   organizationId: string,
   payload: MergeWebhookPayload
 ): Promise<void> {
-  const opp = payload.data as unknown as MergeCRMOpportunity;
+  const rawData: unknown = payload.data;
+  const opp = rawData as MergeCRMOpportunity;
 
   if (!opp.account?.name) return;
 
