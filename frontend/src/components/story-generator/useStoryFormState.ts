@@ -11,6 +11,8 @@
  *   - generation trigger (builds the request and calls runStoryGeneration)
  *   - derived "org default" indicators
  *   - filtered story type options
+ *   - onboarding state + dismiss/share handlers
+ *   - completion / failure telemetry effects
  */
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
@@ -66,6 +68,12 @@ export interface UseStoryFormStateOptions {
   flowOpenedAt: number;
   onError: (message: string) => void;
   onPhaseError: () => void;
+  /** Current phase from useStoryGeneration (for completion telemetry). */
+  phase: "form" | "loading" | "preview" | "error";
+  /** Current error from useStoryGeneration (for failure telemetry). */
+  error: string;
+  /** Current result from useStoryGeneration (for completion telemetry). */
+  result: import("../../lib/api").BuildStoryResponse | null;
   runStoryGeneration: (body: BuildStoryRequest) => Promise<void>;
   trackSellerEvent: (
     eventType: string,
@@ -82,6 +90,7 @@ export interface UseStoryFormStateOptions {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PERSIST_KEY = "story_generator_preferences_v1";
+const ONBOARDING_KEY = "story_generator_onboarding_seen_v1";
 
 const STORY_LENGTH_VALUES = Object.keys(STORY_LENGTH_LABELS) as StoryLength[];
 const STORY_OUTLINE_VALUES = Object.keys(
@@ -204,9 +213,12 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
   const {
     accountId,
     accountName,
+    error: generationError,
     flowOpenedAt,
     onError,
     onPhaseError,
+    phase,
+    result,
     runStoryGeneration,
     trackSellerEvent,
   } = options;
@@ -408,6 +420,81 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
     );
     setActiveTemplateId(matched?.id ?? null);
   }, [allTemplates, selectedFormat, storyLength, storyOutline, storyType]);
+
+  // ── Onboarding state ──────────────────────────────────────────────────
+
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [firstStoryGenerated, setFirstStoryGenerated] = useState(false);
+  const [firstStoryShared, setFirstStoryShared] = useState(false);
+  const [onboardingElapsedSeconds, setOnboardingElapsedSeconds] = useState(0);
+  const onboardingWithinTarget = onboardingElapsedSeconds <= 60;
+
+  useEffect(() => {
+    try {
+      const seen = localStorage.getItem(ONBOARDING_KEY) === "1";
+      setShowOnboarding(!seen);
+      if (seen) {
+        setFirstStoryShared(true);
+      }
+    } catch {
+      setShowOnboarding(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    trackSellerEvent("modal_open", {
+      step: "opened",
+      metadata: { onboarding_visible: true },
+    });
+    // Intentionally once per modal mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!showOnboarding) return;
+    const interval = window.setInterval(() => {
+      const elapsed = Math.max(
+        0,
+        Math.floor((Date.now() - flowOpenedAt) / 1000),
+      );
+      setOnboardingElapsedSeconds(elapsed);
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [flowOpenedAt, showOnboarding]);
+
+  // ── Completion / failure telemetry effects ────────────────────────────
+
+  useEffect(() => {
+    if (phase === "preview" && result && !completionTelemetryRef.current.success) {
+      completionTelemetryRef.current.success = true;
+      setFirstStoryGenerated(true);
+      const generationDuration =
+        generationStartedAtRef.current != null
+          ? Date.now() - generationStartedAtRef.current
+          : undefined;
+      trackSellerEvent("story_generated", {
+        step: "preview",
+        story_id: result.story_id ?? undefined,
+        duration_ms: generationDuration,
+      });
+    }
+  }, [phase, result, trackSellerEvent]);
+
+  useEffect(() => {
+    if (phase === "error" && generationError && !completionTelemetryRef.current.failed) {
+      completionTelemetryRef.current.failed = true;
+      const generationDuration =
+        generationStartedAtRef.current != null
+          ? Date.now() - generationStartedAtRef.current
+          : undefined;
+      trackSellerEvent("generation_failed", {
+        step: "error",
+        action_name: "story_generation_error",
+        duration_ms: generationDuration,
+        metadata: { error_message: generationError },
+      });
+    }
+  }, [generationError, phase, trackSellerEvent]);
 
   // ── Generation trigger ──────────────────────────────────────────────────
 
@@ -636,7 +723,30 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
     [loadSavedTemplates, onError, onPhaseError, showToast],
   );
 
-  // ── Telemetry refs ──────────────────────────────────────────────────────
+  // ── Onboarding handlers ────────────────────────────────────────────────
+
+  const handleDismissOnboarding = useCallback(() => {
+    setShowOnboarding(false);
+    trackSellerEvent("library_action", {
+      action_name: "dismiss_onboarding",
+      step: "onboarding",
+    });
+    try {
+      localStorage.setItem(ONBOARDING_KEY, "1");
+    } catch {
+      // Ignore storage errors in restricted environments.
+    }
+  }, [trackSellerEvent]);
+
+  const handleShareAction = useCallback(() => {
+    setFirstStoryShared(true);
+    setShowOnboarding(false);
+    try {
+      localStorage.setItem(ONBOARDING_KEY, "1");
+    } catch {
+      // Ignore storage errors in restricted environments.
+    }
+  }, []);
 
   return {
     // Quote selection
@@ -684,11 +794,16 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
     isTypeDefault,
     isFormatDefault,
 
+    // Onboarding
+    showOnboarding,
+    onboardingElapsedSeconds,
+    onboardingWithinTarget,
+    firstStoryGenerated,
+    firstStoryShared,
+
     // Generation
     triggerGeneration,
     runGeneration,
-    generationStartedAtRef,
-    completionTelemetryRef,
 
     // Handlers
     handleVisibilityModeChange,
@@ -696,5 +811,7 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
     handleSaveCurrentTemplate,
     handleApplyDealStagePreset,
     handleDeleteSavedTemplate,
+    handleDismissOnboarding,
+    handleShareAction,
   };
 }

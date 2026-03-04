@@ -1,13 +1,35 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+/**
+ * StoryGeneratorModal -- thin modal shell with step routing and state machine.
+ *
+ * Delegates all domain logic to extracted hooks and step components:
+ *   - useStoryGeneration  -> phase, loading, streaming, result
+ *   - useStoryFormState   -> form fields, templates, onboarding, telemetry
+ *   - StoryFormStep       -> form UI
+ *   - StoryPreviewStep    -> preview UI (uses StoryPublishStep internally)
+ *   - StoryLoadingSection -> loading UI
+ *   - StoryErrorSection   -> error UI
+ */
+
+import { useCallback, useEffect, useRef } from "react";
 import {
   StoryErrorSection,
   StoryLoadingSection,
 } from "./story-generator/StoryModalSections";
 import { StoryPreviewStep } from "./story-generator/StoryPreviewStep";
+import { StoryFormStep } from "./story-generator/StoryFormStep";
 import { useStoryGeneration } from "./story-generator/useStoryGeneration";
 import { useStoryFormState } from "./story-generator/useStoryFormState";
-import { StoryFormStep } from "./story-generator/StoryFormStep";
-import { trackSellerAdoptionEvent } from "../lib/api";
+import {
+  trackSellerAdoptionEvent,
+  type SellerAdoptionEventType,
+} from "../lib/api";
+
+// Re-export sub-modules used by StoryPreviewStep so downstream consumers
+// that previously imported publish-related symbols from the modal barrel can
+// still reach them.
+export { useStoryPublishFlow } from "./story-generator/StoryPublishStep";
+export type { PackagingTemplate } from "./story-generator/StoryPublishStep";
+export { usePublishFlow } from "./story-generator/usePublishFlow";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -17,10 +39,6 @@ interface StoryGeneratorModalProps {
   onClose: () => void;
   onLandingPageCreated?: (pageId: string, slug: string) => void;
 }
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const ONBOARDING_KEY = "story_generator_onboarding_seen_v1";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -42,7 +60,12 @@ export function StoryGeneratorModal({
   const flowIdRef = useRef<string>(createFlowId());
   const flowOpenedAtRef = useRef<number>(Date.now());
 
-  // ── Story generation hook ───────────────────────────────────────────────
+  // ── Modal chrome refs ─────────────────────────────────────────────────
+
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  // ── Story generation hook ─────────────────────────────────────────────
 
   const {
     abortGeneration,
@@ -63,9 +86,12 @@ export function StoryGeneratorModal({
     stream: streamedMarkdown,
   } = useStoryGeneration(onClose);
 
-  // ── Telemetry (ref-based to break circular dep with form state) ──────
+  // ── Telemetry (ref-based to stay stable across renders) ───────────────
 
-  const telemetryContextRef = useRef({ stageLabel: "Evaluation", visibilityMode: "ANONYMOUS" as string });
+  const telemetryContextRef = useRef({
+    stageLabel: "Evaluation",
+    visibilityMode: "ANONYMOUS" as "ANONYMOUS" | "NAMED",
+  });
 
   const trackSellerEvent = useCallback(
     (
@@ -76,10 +102,10 @@ export function StoryGeneratorModal({
         action_name?: string;
         duration_ms?: number;
         metadata?: Record<string, unknown>;
-      }
+      },
     ) => {
       void trackSellerAdoptionEvent({
-        event_type: eventType,
+        event_type: eventType as SellerAdoptionEventType,
         flow_id: flowIdRef.current,
         account_id: accountId,
         story_id: metadata?.story_id,
@@ -96,39 +122,29 @@ export function StoryGeneratorModal({
     [accountId],
   );
 
-  // ── Form state hook ─────────────────────────────────────────────────────
+  // ── Form state hook (owns all form, onboarding, and telemetry logic) ──
 
   const form = useStoryFormState({
     accountId,
     accountName,
+    error,
     flowOpenedAt: flowOpenedAtRef.current,
     onError: setError,
     onPhaseError: () => setPhase("error"),
+    phase,
+    result,
     runStoryGeneration,
     trackSellerEvent,
   });
 
-  // Keep telemetry context in sync with form state.
+  // Keep telemetry context in sync with form-derived values.
   telemetryContextRef.current.stageLabel = form.stageLabel;
   telemetryContextRef.current.visibilityMode = form.visibilityMode;
-
-  // ── Onboarding state ────────────────────────────────────────────────────
-
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [firstStoryGenerated, setFirstStoryGenerated] = useState(false);
-  const [firstStoryShared, setFirstStoryShared] = useState(false);
-  const [onboardingElapsedSeconds, setOnboardingElapsedSeconds] = useState(0);
-  const onboardingWithinTarget = onboardingElapsedSeconds <= 60;
-
-  // ── Modal refs ──────────────────────────────────────────────────────────
-
-  const modalRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   const loadingStep =
     loadingProgress < 34 ? 0 : loadingProgress < 67 ? 1 : 2;
 
-  // ─── Effects ────────────────────────────────────────────────────────────
+  // ─── Modal chrome effects (escape, focus trap, cleanup) ───────────────
 
   useEffect(() => {
     previousFocusRef.current = document.activeElement as HTMLElement;
@@ -143,7 +159,7 @@ export function StoryGeneratorModal({
       }
       if (e.key === "Tab" && modalRef.current) {
         const focusable = modalRef.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
         );
         if (focusable.length === 0) return;
         const first = focusable[0];
@@ -174,97 +190,7 @@ export function StoryGeneratorModal({
     };
   }, [abortGeneration, onClose, phase]);
 
-  useEffect(() => {
-    try {
-      const seen = localStorage.getItem(ONBOARDING_KEY) === "1";
-      setShowOnboarding(!seen);
-      if (seen) {
-        setFirstStoryShared(true);
-      }
-    } catch {
-      setShowOnboarding(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    trackSellerEvent("modal_open", {
-      step: "opened",
-      metadata: { onboarding_visible: true },
-    });
-    // Intentionally once per modal mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!showOnboarding) return;
-    const interval = window.setInterval(() => {
-      const elapsed = Math.max(
-        0,
-        Math.floor((Date.now() - flowOpenedAtRef.current) / 1000),
-      );
-      setOnboardingElapsedSeconds(elapsed);
-    }, 1000);
-    return () => window.clearInterval(interval);
-  }, [showOnboarding]);
-
-  useEffect(() => {
-    if (phase === "preview" && result && !form.completionTelemetryRef.current.success) {
-      form.completionTelemetryRef.current.success = true;
-      setFirstStoryGenerated(true);
-      const generationDuration =
-        form.generationStartedAtRef.current != null
-          ? Date.now() - form.generationStartedAtRef.current
-          : undefined;
-      trackSellerEvent("story_generated", {
-        step: "preview",
-        story_id: result.story_id ?? undefined,
-        duration_ms: generationDuration,
-      });
-    }
-  }, [phase, result, trackSellerEvent, form.completionTelemetryRef, form.generationStartedAtRef]);
-
-  useEffect(() => {
-    if (phase === "error" && error && !form.completionTelemetryRef.current.failed) {
-      form.completionTelemetryRef.current.failed = true;
-      const generationDuration =
-        form.generationStartedAtRef.current != null
-          ? Date.now() - form.generationStartedAtRef.current
-          : undefined;
-      trackSellerEvent("generation_failed", {
-        step: "error",
-        action_name: "story_generation_error",
-        duration_ms: generationDuration,
-        metadata: { error_message: error },
-      });
-    }
-  }, [error, phase, trackSellerEvent, form.completionTelemetryRef, form.generationStartedAtRef]);
-
-  // ── Onboarding handlers ─────────────────────────────────────────────────
-
-  const handleDismissOnboarding = useCallback(() => {
-    setShowOnboarding(false);
-    trackSellerEvent("library_action", {
-      action_name: "dismiss_onboarding",
-      step: "onboarding",
-    });
-    try {
-      localStorage.setItem(ONBOARDING_KEY, "1");
-    } catch {
-      // Ignore storage errors in restricted environments.
-    }
-  }, [trackSellerEvent]);
-
-  const handleShareAction = useCallback(() => {
-    setFirstStoryShared(true);
-    setShowOnboarding(false);
-    try {
-      localStorage.setItem(ONBOARDING_KEY, "1");
-    } catch {
-      // Ignore storage errors in restricted environments.
-    }
-  }, []);
-
-  // ─── Render ─────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────
 
   return (
     <div className="modal-overlay" role="presentation" onClick={onClose}>
@@ -285,7 +211,15 @@ export function StoryGeneratorModal({
             <p className="modal__subtitle">{accountName}</p>
           </div>
           <button className="modal__close" onClick={onClose} aria-label="Close">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 20 20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
               <path d="M5 5l10 10M15 5l-10 10" />
             </svg>
           </button>
@@ -299,11 +233,11 @@ export function StoryGeneratorModal({
               visibilityMode={form.visibilityMode}
               namedPermissionConfirmed={form.namedPermissionConfirmed}
               namedModeBlocked={form.namedModeBlocked}
-              showOnboarding={showOnboarding}
-              onboardingElapsedSeconds={onboardingElapsedSeconds}
-              onboardingWithinTarget={onboardingWithinTarget}
-              firstStoryGenerated={firstStoryGenerated}
-              firstStoryShared={firstStoryShared}
+              showOnboarding={form.showOnboarding}
+              onboardingElapsedSeconds={form.onboardingElapsedSeconds}
+              onboardingWithinTarget={form.onboardingWithinTarget}
+              firstStoryGenerated={form.firstStoryGenerated}
+              firstStoryShared={form.firstStoryShared}
               allTemplates={form.allTemplates}
               activeTemplateId={form.activeTemplateId}
               savingTemplate={form.savingTemplate}
@@ -328,7 +262,7 @@ export function StoryGeneratorModal({
               handleApplyDealStagePreset={form.handleApplyDealStagePreset}
               handleApplyTemplate={form.handleApplyTemplate}
               handleSaveCurrentTemplate={() => void form.handleSaveCurrentTemplate()}
-              handleDismissOnboarding={handleDismissOnboarding}
+              handleDismissOnboarding={form.handleDismissOnboarding}
               handleVisibilityModeChange={form.handleVisibilityModeChange}
               handleStagesChange={form.handleStagesChange}
               setAudienceMode={form.setAudienceMode}
@@ -342,7 +276,9 @@ export function StoryGeneratorModal({
               setStoryTypeMode={form.setStoryTypeMode}
               setStoryTypeSearch={form.setStoryTypeSearch}
               setSelectedTopics={form.setSelectedTopics}
-              handleDeleteSavedTemplate={(assetId) => void form.handleDeleteSavedTemplate(assetId)}
+              handleDeleteSavedTemplate={(assetId) =>
+                void form.handleDeleteSavedTemplate(assetId)
+              }
               trackSellerEvent={trackSellerEvent}
             />
           )}
@@ -366,7 +302,7 @@ export function StoryGeneratorModal({
               namedPermissionConfirmed={form.namedPermissionConfirmed}
               onClose={onClose}
               onLandingPageCreated={onLandingPageCreated}
-              onShareAction={handleShareAction}
+              onShareAction={form.handleShareAction}
               previewMarkdown={previewMarkdown}
               result={result}
               setEditMode={setEditMode}

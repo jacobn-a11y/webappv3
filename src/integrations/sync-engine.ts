@@ -819,24 +819,6 @@ export class SyncEngine {
       }
     }
 
-    // Batch update existing accounts
-    await Promise.all(
-      toUpdate.map(({ account, existingId }) => {
-        const normalized = normalizeCompanyName(account.name);
-        return this.prisma.account.update({
-          where: { id: existingId },
-          data: {
-            name: account.name,
-            normalizedName: normalized,
-            domain: account.domain ?? undefined,
-            industry: account.industry ?? undefined,
-            employeeCount: account.employeeCount ?? undefined,
-            annualRevenue: account.annualRevenue ?? undefined,
-          },
-        });
-      })
-    );
-
     // For new accounts, check for conflicts individually (requires per-record logic)
     for (const account of toConflictCheck) {
       const normalized = normalizeCompanyName(account.name);
@@ -870,22 +852,42 @@ export class SyncEngine {
       }
     }
 
-    // Batch create new accounts using createMany with skipDuplicates
-    if (toCreate.length > 0) {
-      await this.prisma.account.createMany({
-        data: toCreate.map((account) => ({
-          organizationId,
-          name: account.name,
-          normalizedName: normalizeCompanyName(account.name),
-          domain: account.domain,
-          salesforceId: account.externalId,
-          industry: account.industry,
-          employeeCount: account.employeeCount,
-          annualRevenue: account.annualRevenue,
-        })),
-        skipDuplicates: true,
-      });
-    }
+    await this.prisma.$transaction(async (tx) => {
+      // Batch update existing accounts
+      await Promise.all(
+        toUpdate.map(({ account, existingId }) => {
+          const normalized = normalizeCompanyName(account.name);
+          return tx.account.update({
+            where: { id: existingId },
+            data: {
+              name: account.name,
+              normalizedName: normalized,
+              domain: account.domain ?? undefined,
+              industry: account.industry ?? undefined,
+              employeeCount: account.employeeCount ?? undefined,
+              annualRevenue: account.annualRevenue ?? undefined,
+            },
+          });
+        })
+      );
+
+      // Batch create new accounts using createMany with skipDuplicates
+      if (toCreate.length > 0) {
+        await tx.account.createMany({
+          data: toCreate.map((account) => ({
+            organizationId,
+            name: account.name,
+            normalizedName: normalizeCompanyName(account.name),
+            domain: account.domain,
+            salesforceId: account.externalId,
+            industry: account.industry,
+            employeeCount: account.employeeCount,
+            annualRevenue: account.annualRevenue,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    });
   }
 
   private async persistAccount(
@@ -1039,7 +1041,15 @@ export class SyncEngine {
       salesforceId: string | null;
     }> = [];
 
-    const upsertOps: Promise<unknown>[] = [];
+    const toUpsert: Array<{
+      accountId: string;
+      email: string;
+      emailDomain: string;
+      name: string | null;
+      title: string | null;
+      phone: string | null;
+      externalId: string | null;
+    }> = [];
 
     for (const { contact, domain } of validContacts) {
       // Resolve account
@@ -1074,28 +1084,15 @@ export class SyncEngine {
 
       // If existing contact belongs to same account, upsert to update
       if (existingElsewhere && existingElsewhere.accountId === account.id) {
-        upsertOps.push(
-          this.prisma.contact.upsert({
-            where: {
-              accountId_email: { accountId: account.id, email },
-            },
-            create: {
-              accountId: account.id,
-              email,
-              emailDomain: domain,
-              name: contact.name,
-              title: contact.title,
-              phone: contact.phone,
-              salesforceId: contact.externalId,
-            },
-            update: {
-              name: contact.name ?? undefined,
-              title: contact.title ?? undefined,
-              phone: contact.phone ?? undefined,
-              salesforceId: contact.externalId,
-            },
-          })
-        );
+        toUpsert.push({
+          accountId: account.id,
+          email,
+          emailDomain: domain,
+          name: contact.name,
+          title: contact.title,
+          phone: contact.phone,
+          externalId: contact.externalId,
+        });
       } else {
         // New contact — collect for batch createMany
         toCreate.push({
@@ -1110,18 +1107,43 @@ export class SyncEngine {
       }
     }
 
-    // Execute upserts in parallel
-    if (upsertOps.length > 0) {
-      await Promise.all(upsertOps);
-    }
+    await this.prisma.$transaction(async (tx) => {
+      // Execute upserts in parallel
+      if (toUpsert.length > 0) {
+        await Promise.all(
+          toUpsert.map((item) =>
+            tx.contact.upsert({
+              where: {
+                accountId_email: { accountId: item.accountId, email: item.email },
+              },
+              create: {
+                accountId: item.accountId,
+                email: item.email,
+                emailDomain: item.emailDomain,
+                name: item.name,
+                title: item.title,
+                phone: item.phone,
+                salesforceId: item.externalId,
+              },
+              update: {
+                name: item.name ?? undefined,
+                title: item.title ?? undefined,
+                phone: item.phone ?? undefined,
+                salesforceId: item.externalId,
+              },
+            })
+          )
+        );
+      }
 
-    // Batch create new contacts
-    if (toCreate.length > 0) {
-      await this.prisma.contact.createMany({
-        data: toCreate,
-        skipDuplicates: true,
-      });
-    }
+      // Batch create new contacts
+      if (toCreate.length > 0) {
+        await tx.contact.createMany({
+          data: toCreate,
+          skipDuplicates: true,
+        });
+      }
+    });
   }
 
   private async persistContact(
