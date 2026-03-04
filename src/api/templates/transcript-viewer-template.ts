@@ -10,6 +10,8 @@
 
 import { TOPIC_LABELS, type TaxonomyTopic } from "../../types/taxonomy.js";
 import { escapeHtml } from "../../lib/html-utils.js";
+import { getTranscriptViewerStyles } from "./transcript-viewer-styles.js";
+import { getTranscriptViewerScripts } from "./transcript-viewer-scripts.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
