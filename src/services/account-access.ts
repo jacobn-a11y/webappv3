@@ -13,7 +13,7 @@
  */
 
 import type { PrismaClient, AccountScopeType, CRMProvider, UserRole } from "@prisma/client";
-import logger from "../lib/logger.js";
+import { decodeDataGovernancePolicy } from "../types/json-boundaries.js";
 import logger from "../lib/logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -378,6 +378,143 @@ export class AccountAccessService {
     });
 
     return linkedAccount?.accountToken ?? null;
+  }
+
+  // ─── Org Users ──────────────────────────────────────────────────────
+
+  async listOrgUsers(organizationId: string) {
+    return this.prisma.user.findMany({
+      where: { organizationId },
+      select: { id: true, name: true, email: true, role: true },
+    });
+  }
+
+  // ─── Grant Lookup ──────────────────────────────────────────────────
+
+  async findGrantById(grantId: string, organizationId: string) {
+    return this.prisma.userAccountAccess.findFirst({
+      where: { id: grantId, organizationId },
+      select: { id: true, userId: true, scopeType: true },
+    });
+  }
+
+  // ─── Audit Logs ────────────────────────────────────────────────────
+
+  async queryAuditLogs(
+    organizationId: string,
+    filters: {
+      category?: string;
+      actorUserId?: string;
+      action?: string;
+      severity?: string;
+      targetType?: string;
+      targetId?: string;
+      cursorCreatedAt?: Date | null;
+    },
+    take: number
+  ) {
+    return this.prisma.auditLog.findMany({
+      where: {
+        organizationId,
+        ...(filters.category ? { category: filters.category } : {}),
+        ...(filters.actorUserId ? { actorUserId: filters.actorUserId } : {}),
+        ...(filters.action ? { action: filters.action } : {}),
+        ...(filters.severity ? { severity: filters.severity } : {}),
+        ...(filters.targetType ? { targetType: filters.targetType } : {}),
+        ...(filters.targetId ? { targetId: filters.targetId } : {}),
+        ...(filters.cursorCreatedAt ? { createdAt: { lt: filters.cursorCreatedAt } } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take,
+    });
+  }
+
+  async getDataGovernancePolicy(organizationId: string) {
+    const settings = await this.prisma.orgSettings.findUnique({
+      where: { organizationId },
+      select: { dataGovernancePolicy: true },
+    });
+    return decodeDataGovernancePolicy(settings?.dataGovernancePolicy);
+  }
+
+  async getAuditLogsByActor(
+    organizationId: string,
+    actorUserId: string
+  ): Promise<{
+    actor: { id: string; name: string | null; email: string; role: string } | null;
+    totalEvents: number;
+    recentEvents: Array<{
+      id: string;
+      createdAt: Date;
+      category: string;
+      action: string;
+      targetType: string;
+      targetId: string;
+      severity: string;
+    }>;
+  }> {
+    const [actor, totalEvents, recentEvents] = await Promise.all([
+      this.prisma.user.findFirst({
+        where: { id: actorUserId, organizationId },
+        select: { id: true, name: true, email: true, role: true },
+      }),
+      this.prisma.auditLog.count({
+        where: { organizationId, actorUserId },
+      }),
+      this.prisma.auditLog.findMany({
+        where: { organizationId, actorUserId },
+        select: {
+          id: true,
+          createdAt: true,
+          category: true,
+          action: true,
+          targetType: true,
+          targetId: true,
+          severity: true,
+        },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      }),
+    ]);
+
+    return { actor, totalEvents, recentEvents };
+  }
+
+  async getAuditLogsByResource(
+    organizationId: string,
+    targetType: string,
+    targetId: string
+  ): Promise<{
+    totalEvents: number;
+    recentEvents: Array<{
+      id: string;
+      createdAt: Date;
+      actorUserId: string | null;
+      category: string;
+      action: string;
+      severity: string;
+    }>;
+  }> {
+    const [totalEvents, recentEvents] = await Promise.all([
+      this.prisma.auditLog.count({
+        where: { organizationId, targetType, targetId },
+      }),
+      this.prisma.auditLog.findMany({
+        where: { organizationId, targetType, targetId },
+        select: {
+          id: true,
+          createdAt: true,
+          actorUserId: true,
+          category: true,
+          action: true,
+          severity: true,
+        },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      }),
+    ]);
+
+    return { totalEvents, recentEvents };
   }
 
   // ─── Private: CRM Integration ──────────────────────────────────────

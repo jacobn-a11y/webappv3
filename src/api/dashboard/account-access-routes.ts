@@ -10,7 +10,6 @@ import { requirePermission } from "../../middleware/permissions.js";
 import { AccountAccessService } from "../../services/account-access.js";
 import type { AuditLogService } from "../../services/audit-log.js";
 import logger from "../../lib/logger.js";
-import { decodeDataGovernancePolicy } from "../../types/json-boundaries.js";
 import { parsePaginationParams } from "../_shared/pagination.js";
 import { sendSuccess, sendError, sendNotFound, sendBadRequest, sendForbidden } from "../_shared/responses.js";
 import { parseRequestBody } from "../_shared/validators.js";
@@ -55,10 +54,7 @@ export function registerAccountAccessRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const orgUsers = await prisma.user.findMany({
-      where: { organizationId: req.organizationId },
-      select: { id: true, name: true, email: true, role: true },
-      });
+      const orgUsers = await accessService.listOrgUsers(req.organizationId);
 
       const users = await Promise.all(
       orgUsers.map(async (m: { id: string; name: string | null; email: string; role: string }) => {
@@ -205,13 +201,10 @@ export function registerAccountAccessRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const grant = await prisma.userAccountAccess.findFirst({
-      where: {
-        id: req.params.grantId as string,
-        organizationId: req.organizationId,
-      },
-      select: { id: true, userId: true, scopeType: true },
-      });
+      const grant = await accessService.findGrantById(
+      req.params.grantId as string,
+      req.organizationId
+      );
       if (!grant) {
       sendNotFound(res, "Access grant not found");
       return;
@@ -275,20 +268,19 @@ export function registerAccountAccessRoutes({
       const cursorCreatedAt = before ? new Date(before) : null;
       const hasCursor = !!cursorCreatedAt && !Number.isNaN(cursorCreatedAt.getTime());
 
-      const logs = await prisma.auditLog.findMany({
-      where: {
-        organizationId: req.organizationId,
-        ...(category ? { category } : {}),
-        ...(actorUserId ? { actorUserId } : {}),
-        ...(action ? { action } : {}),
-        ...(severity ? { severity } : {}),
-        ...(targetType ? { targetType } : {}),
-        ...(targetId ? { targetId } : {}),
-        ...(hasCursor ? { createdAt: { lt: cursorCreatedAt! } } : {}),
+      const logs = await accessService.queryAuditLogs(
+      req.organizationId,
+      {
+        category,
+        actorUserId,
+        action,
+        severity,
+        targetType,
+        targetId,
+        cursorCreatedAt: hasCursor ? cursorCreatedAt : null,
       },
-      orderBy: { createdAt: "desc" },
-      take: limit + 1,
-      });
+      limit + 1
+      );
 
       const hasMore = logs.length > limit;
       const page = hasMore ? logs.slice(0, limit) : logs;
@@ -326,11 +318,7 @@ export function registerAccountAccessRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const settings = await prisma.orgSettings.findUnique({
-      where: { organizationId: req.organizationId },
-      select: { dataGovernancePolicy: true },
-      });
-      const policy = decodeDataGovernancePolicy(settings?.dataGovernancePolicy);
+      const policy = await accessService.getDataGovernancePolicy(req.organizationId);
       if (policy.pii_export_enabled === false) {
       sendForbidden(res, "Exports are disabled by your organization's data governance policy.");
       return;
@@ -353,19 +341,11 @@ export function registerAccountAccessRoutes({
       const targetType = (req.query.target_type as string | undefined)?.trim();
       const targetId = (req.query.target_id as string | undefined)?.trim();
 
-      const logs = await prisma.auditLog.findMany({
-      where: {
-        organizationId: req.organizationId,
-        ...(category ? { category } : {}),
-        ...(actorUserId ? { actorUserId } : {}),
-        ...(action ? { action } : {}),
-        ...(severity ? { severity } : {}),
-        ...(targetType ? { targetType } : {}),
-        ...(targetId ? { targetId } : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      take: limit,
-      });
+      const logs = await accessService.queryAuditLogs(
+      req.organizationId,
+      { category, actorUserId, action, severity, targetType, targetId },
+      limit
+      );
 
       if (format === "json") {
       res.setHeader("Content-Type", "application/json");
@@ -465,29 +445,8 @@ export function registerAccountAccessRoutes({
       return;
       }
 
-      const [actor, totalEvents, recentEvents] = await Promise.all([
-      prisma.user.findFirst({
-        where: { id: actorUserId, organizationId },
-        select: { id: true, name: true, email: true, role: true },
-      }),
-      prisma.auditLog.count({
-        where: { organizationId, actorUserId },
-      }),
-      prisma.auditLog.findMany({
-        where: { organizationId, actorUserId },
-        select: {
-          id: true,
-          createdAt: true,
-          category: true,
-          action: true,
-          targetType: true,
-          targetId: true,
-          severity: true,
-        },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-      }),
-      ]);
+      const { actor, totalEvents, recentEvents } =
+      await accessService.getAuditLogsByActor(organizationId, actorUserId);
 
       sendSuccess(res, {
       actor: actor
@@ -526,24 +485,8 @@ export function registerAccountAccessRoutes({
       return;
       }
 
-      const [totalEvents, recentEvents] = await Promise.all([
-      prisma.auditLog.count({
-        where: { organizationId, targetType, targetId },
-      }),
-      prisma.auditLog.findMany({
-        where: { organizationId, targetType, targetId },
-        select: {
-          id: true,
-          createdAt: true,
-          actorUserId: true,
-          category: true,
-          action: true,
-          severity: true,
-        },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-      }),
-      ]);
+      const { totalEvents, recentEvents } =
+      await accessService.getAuditLogsByResource(organizationId, targetType, targetId);
 
       sendSuccess(res, {
       resource: {
