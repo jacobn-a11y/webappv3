@@ -213,6 +213,7 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - run: npm --prefix frontend ci
       - run: npx prisma generate
       - run: npx prisma migrate deploy
       - run: npm run test:reliability
