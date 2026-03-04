@@ -25,6 +25,7 @@ import type {
   SyncResult,
 } from "./types.js";
 import { OutboundRateLimiter } from "./outbound-rate-limiter.js";
+import { fetchWithTimeout } from "../lib/fetch-with-timeout.js";
 
 // ─── Salesforce API Response Types ──────────────────────────────────────────
 
@@ -121,7 +122,7 @@ export class SalesforceProvider implements CRMDataProvider {
     const creds = asSalesforceCredentials(credentials);
     try {
       await this.rateLimiter.acquire();
-      const res = await fetch(`${this.baseUrl(creds)}/limits`, {
+      const res = await fetchWithTimeout(`${this.baseUrl(creds)}/limits`, {
         method: "GET",
         headers: this.headers(creds),
       });
@@ -133,7 +134,7 @@ export class SalesforceProvider implements CRMDataProvider {
           await this.onTokenRefresh(refreshed);
         }
         await this.rateLimiter.acquire();
-        const retryRes = await fetch(`${this.baseUrl(creds)}/limits`, {
+        const retryRes = await fetchWithTimeout(`${this.baseUrl(creds)}/limits`, {
           method: "GET",
           headers: {
             Authorization: `Bearer ${refreshed}`,
@@ -244,7 +245,7 @@ export class SalesforceProvider implements CRMDataProvider {
     const url = `${base}/query?q=${encodeURIComponent(soql)}`;
 
     await this.rateLimiter.acquire();
-    let res = await fetch(url, {
+    let res = await fetchWithTimeout(url, {
       method: "GET",
       headers: this.headers(creds),
     });
@@ -259,7 +260,7 @@ export class SalesforceProvider implements CRMDataProvider {
         await this.onTokenRefresh(newToken);
       }
       await this.rateLimiter.acquire();
-      res = await fetch(url, {
+      res = await fetchWithTimeout(url, {
         method: "GET",
         headers: this.headers(creds),
       });
@@ -288,7 +289,7 @@ export class SalesforceProvider implements CRMDataProvider {
     const url = `${instanceBase}${nextRecordsUrl}`;
 
     await this.rateLimiter.acquire();
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       method: "GET",
       headers: this.headers(creds),
     });
@@ -325,7 +326,7 @@ export class SalesforceProvider implements CRMDataProvider {
         client_secret: creds.clientSecret,
       });
 
-      const res = await fetch(tokenUrl, {
+      const res = await fetchWithTimeout(tokenUrl, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: body.toString(),

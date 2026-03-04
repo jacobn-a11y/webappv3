@@ -58,6 +58,23 @@ export async function request<T>(
   return res.json();
 }
 
+/** Fetch binary response (e.g. PDF, CSV) with shared headers and error handling. */
+export async function requestBlob(path: string, options?: RequestInit): Promise<Blob> {
+  const headers = buildRequestHeaders(options?.headers);
+  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error ?? `Request failed: ${res.status}`);
+  }
+  return res.blob();
+}
+
+/** Fetch with shared headers; caller handles response (e.g. custom 409 handling). */
+export async function fetchApi(path: string, options?: RequestInit): Promise<Response> {
+  const headers = buildRequestHeaders(options?.headers);
+  return fetch(`${BASE_URL}${path}`, { ...options, headers });
+}
+
 export function buildRequestHeaders(existing?: HeadersInit): Headers {
   const headers = new Headers(existing ?? {});
   headers.set("Content-Type", "application/json");

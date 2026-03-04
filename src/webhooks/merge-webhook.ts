@@ -305,7 +305,7 @@ async function handleRecordingEvent(
     },
   });
 
-  // ── Store participants ──────────────────────────────────────────────
+  // ── Store participants (upsert when email present to avoid dedup race) ──
   const participants = recording.participants ?? [];
   const seenParticipantKeys = new Set<string>();
   for (const p of participants) {
@@ -319,27 +319,25 @@ async function handleRecordingEvent(
     }
     seenParticipantKeys.add(participantKey);
 
-    const existingParticipant = await prisma.callParticipant.findFirst({
-      where: {
-        callId: call.id,
-        email: p.email?.toLowerCase() ?? null,
-        name: p.name ?? null,
-        isHost: p.is_organizer ?? false,
-      },
-      select: { id: true },
-    });
-    if (existingParticipant) {
-      continue;
-    }
+    const email = p.email?.toLowerCase() ?? null;
+    const data = {
+      callId: call.id,
+      email,
+      name: p.name ?? null,
+      isHost: p.is_organizer ?? false,
+    };
 
-    await prisma.callParticipant.create({
-      data: {
-        callId: call.id,
-        email: p.email?.toLowerCase() ?? null,
-        name: p.name ?? null,
-        isHost: p.is_organizer ?? false,
-      },
-    });
+    if (email) {
+      await prisma.callParticipant.upsert({
+        where: {
+          call_participant_call_email: { callId: call.id, email },
+        },
+        create: data,
+        update: { name: data.name, isHost: data.isHost },
+      });
+    } else {
+      await prisma.callParticipant.create({ data });
+    }
   }
 
   // ── Entity Resolution — match to CRM Account ──────────────────────

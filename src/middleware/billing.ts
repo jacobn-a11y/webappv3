@@ -78,6 +78,11 @@ export function createTrialGate(prisma: PrismaClient, _stripe: Stripe) {
           plan: true,
           trialEndsAt: true,
           billingChannel: true,
+          subscriptions: {
+            orderBy: [{ currentPeriodEnd: "desc" }, { createdAt: "desc" }],
+            take: 1,
+            select: { status: true },
+          },
         },
       });
 
@@ -93,11 +98,7 @@ export function createTrialGate(prisma: PrismaClient, _stripe: Stripe) {
           return;
         }
 
-        const latestSubscription = await prisma.subscription.findFirst({
-          where: { organizationId: orgId },
-          orderBy: [{ currentPeriodEnd: "desc" }, { createdAt: "desc" }],
-          select: { status: true },
-        });
+        const latestSubscription = org.subscriptions[0];
 
         if (!latestSubscription) {
           res.status(402).json({

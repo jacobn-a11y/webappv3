@@ -41,7 +41,7 @@ import type {
   UpsertRoleProfileRequest,
   WritebackRequest,
 } from "./types";
-import { BASE_URL, buildRequestHeaders, request } from "./http";
+import { BASE_URL, buildRequestHeaders, request, requestBlob } from "./http";
 
 // ─── Admin Account Access ───────────────────────────────────────────────────
 
@@ -142,13 +142,7 @@ export async function exportAuditLogs(
   if (params?.severity) qs.set("severity", params.severity);
   if (params?.target_type) qs.set("target_type", params.target_type);
   if (params?.target_id) qs.set("target_id", params.target_id);
-  const response = await fetch(`/api/dashboard/audit-logs/export?${qs.toString()}`, {
-    credentials: "include",
-  });
-  if (!response.ok) {
-    throw new Error("Failed to export audit logs");
-  }
-  const blob = await response.blob();
+  const blob = await requestBlob(`/dashboard/audit-logs/export?${qs.toString()}`);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -511,19 +505,9 @@ export async function downloadAutomationReport(
   assetId: string,
   format: "csv" | "json"
 ): Promise<Blob> {
-  const headers = buildRequestHeaders();
-  const response = await fetch(
-    `${BASE_URL}/dashboard/automations/reports/${encodeURIComponent(assetId)}/export?format=${format}`,
-    {
-      method: "GET",
-      headers,
-    }
+  return requestBlob(
+    `/dashboard/automations/reports/${encodeURIComponent(assetId)}/export?format=${format}`
   );
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(body.error ?? `Request failed: ${response.status}`);
-  }
-  return response.blob();
 }
 
 // ─── Security Policy ────────────────────────────────────────────────────────

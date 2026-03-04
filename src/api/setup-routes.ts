@@ -39,6 +39,7 @@ export function createSetupRoutes(
   registerSetupStatusRoutes({
     router,
     wizardService,
+    requireSetupAdmin,
   });
 
   registerSetupQuickstartRoutes({
@@ -61,6 +62,8 @@ export function createSetupRoutes(
   registerSetupFirstValueRoutes({
     router,
     prisma,
+    wizardService,
+    requireSetupAdmin,
   });
 
   return router;

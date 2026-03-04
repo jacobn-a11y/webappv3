@@ -842,7 +842,7 @@ export function createIntegrationRoutes(
 
 /**
  * Redacts sensitive fields from credentials before sending to the client.
- * Shows the first 4 chars of API keys/tokens so the user can identify them.
+ * Shows the first 2 chars of API keys/tokens so the user can identify them.
  */
 function redactCredentials(
   creds: Record<string, unknown>
@@ -863,7 +863,7 @@ function redactCredentials(
   for (const [key, value] of Object.entries(creds)) {
     if (sensitiveKeys.has(key) && typeof value === "string") {
       redacted[key] =
-        value.length > 4 ? `${value.slice(0, 4)}${"*".repeat(12)}` : "****";
+        value.length > 2 ? `${value.slice(0, 2)}${"*".repeat(12)}` : "****";
     } else {
       redacted[key] = value;
     }

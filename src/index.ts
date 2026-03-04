@@ -91,11 +91,6 @@ const PORT = parseInt(process.env.PORT ?? "3000", 10);
 
 app.listen(PORT, () => {
   logger.info(`StoryEngine listening on port ${PORT}`);
-
-  // Start Merge.dev polling if API key is configured
-  if (mergeApiKey) {
-    services.mergeClient.startPolling();
-  }
 });
 
 // ─── Graceful Shutdown ───────────────────────────────────────────────────────
@@ -106,7 +101,6 @@ process.on("SIGTERM", async () => {
   workers.auditRetentionCron.stop();
   workers.dataRetentionCron.stop();
   workers.callProcessingDeadLetterReplayCron?.stop();
-  services.mergeClient.stopPolling();
   await workers.callWorker.close();
   await workers.transcriptFetchWorker.close();
   await workers.syncWorker.close();

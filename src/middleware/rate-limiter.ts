@@ -105,3 +105,13 @@ export const webhookRateLimiter = createRateLimiter({
   maxRequests: 200,
   windowMs: 60_000, // 1 minute
 });
+
+/**
+ * Export rate limiter.
+ * Stricter than API limit — PDF/DOCX export launches Puppeteer (heavyweight).
+ */
+export const exportRateLimiter = createRateLimiter({
+  maxRequests: 10,
+  windowMs: 60_000, // 1 minute
+  message: "Too many export requests. Please wait before trying again.",
+});

@@ -517,6 +517,7 @@ model CallParticipant {
   call    Call     @relation(fields: [callId], references: [id], onDelete: Cascade)
   contact Contact? @relation(fields: [contactId], references: [id])
 
+  @@unique([callId, email], name: "call_participant_call_email")
   @@index([callId])
   @@index([email])
   @@map("call_participants")
@@ -610,6 +611,7 @@ model SalesforceEvent {
 
   account Account @relation(fields: [accountId], references: [id])
 
+  @@unique([accountId, opportunityId, stageName], name: "salesforce_event_account_opp_stage")
   @@index([accountId, eventType])
   @@map("salesforce_events")
 }

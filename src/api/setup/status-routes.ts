@@ -7,15 +7,20 @@ import { asyncHandler } from "../../lib/async-handler.js";
 export function registerSetupStatusRoutes({
   router,
   wizardService,
-}: Pick<SetupRouteContext, "router" | "wizardService">): void {
+  requireSetupAdmin,
+}: Pick<SetupRouteContext, "router" | "wizardService" | "requireSetupAdmin">): void {
   router.get("/status", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
       sendUnauthorized(res);
       return;
     }
 
-      const status = await wizardService.getStatus(req.organizationId);
-      res.json(status);
-    
+    const status = await wizardService.getStatus(req.organizationId);
+    // Post-setup guard: once wizard is complete, only admins can access setup routes
+    if (status.completedAt && !requireSetupAdmin(req, res)) {
+      return;
+    }
+
+    res.json(status);
   }));
 }

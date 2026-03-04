@@ -11,7 +11,7 @@ import type {
   SavePageDraftResult,
   TranscriptData,
 } from "./types";
-import { BASE_URL, buildRequestHeaders, request } from "./http";
+import { BASE_URL, buildRequestHeaders, fetchApi, request } from "./http";
 
 export async function createLandingPage(
   req: CreateLandingPageRequest
@@ -31,15 +31,13 @@ export async function savePageDraft(
   body: string,
   options?: { expectedUpdatedAt?: string; allowConflict?: boolean }
 ): Promise<SavePageDraftResult> {
-  const headers = buildRequestHeaders();
   const payload: Record<string, unknown> = { editable_body: body };
   if (options?.expectedUpdatedAt) {
     payload.expected_updated_at = options.expectedUpdatedAt;
   }
 
-  const response = await fetch(`${BASE_URL}/pages/${encodeURIComponent(pageId)}`, {
+  const response = await fetchApi(`/pages/${encodeURIComponent(pageId)}`, {
     method: "PATCH",
-    headers,
     body: JSON.stringify(payload),
   });
 

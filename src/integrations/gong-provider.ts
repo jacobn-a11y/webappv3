@@ -19,6 +19,7 @@ import {
   gongCallMatchesSelectedAccounts,
 } from "./gong-account-utils.js";
 import { OutboundRateLimiter } from "./outbound-rate-limiter.js";
+import { fetchWithTimeout } from "../lib/fetch-with-timeout.js";
 import logger from "../lib/logger.js";
 
 const GONG_GLOBAL_HISTORY_START_ISO = "2000-01-01T00:00:00.000Z";
@@ -291,7 +292,7 @@ export class GongProvider implements CallRecordingProvider {
     try {
       const now = new Date().toISOString();
       await this.rateLimiter.acquire();
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         `${this.baseUrl(creds)}/v2/calls?fromDateTime=${now}&toDateTime=${now}`,
         {
           method: "GET",
@@ -517,7 +518,7 @@ export class GongProvider implements CallRecordingProvider {
     if (input.cursor) body.cursor = input.cursor;
 
     await this.rateLimiter.acquire();
-    const res = await fetch(`${this.baseUrl(creds)}/v2/calls/extensive`, {
+    const res = await fetchWithTimeout(`${this.baseUrl(creds)}/v2/calls/extensive`, {
       method: "POST",
       headers: {
         Authorization: this.buildAuthHeader(creds),
@@ -539,7 +540,7 @@ export class GongProvider implements CallRecordingProvider {
     callIds: string[]
   ): Promise<Map<string, string>> {
     await this.rateLimiter.acquire();
-    const res = await fetch(`${this.baseUrl(creds)}/v2/calls/transcript`, {
+    const res = await fetchWithTimeout(`${this.baseUrl(creds)}/v2/calls/transcript`, {
       method: "POST",
       headers: {
         Authorization: this.buildAuthHeader(creds),

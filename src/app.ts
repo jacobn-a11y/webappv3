@@ -73,6 +73,7 @@ import {
   apiRateLimiter,
   webhookRateLimiter,
   passwordRateLimiter,
+  exportRateLimiter,
 } from "./middleware/rate-limiter.js";
 import { createApiUsageLogger } from "./middleware/api-usage-logger.js";
 import { requirePermission } from "./middleware/permissions.js";
@@ -176,10 +177,10 @@ export function createApp(deps: AppDeps): express.Application {
   // Request ID tracing (before any route handlers)
   app.use(requestIdMiddleware);
 
-  // Stripe webhooks need raw body
+  // Stripe webhooks need raw body (limit to prevent large payload DoS)
   app.post(
     "/api/webhooks/stripe",
-    express.raw({ type: "application/json" }),
+    express.raw({ type: "application/json", limit: "1mb" }),
     webhookRateLimiter,
     createStripeWebhookHandler(prisma, stripe)
   );
@@ -200,21 +201,21 @@ export function createApp(deps: AppDeps): express.Application {
   // Webhook endpoints (authenticated by signature, not user auth)
   app.post(
     "/api/webhooks/merge",
-    express.raw({ type: "application/json" }),
+    express.raw({ type: "application/json", limit: "1mb" }),
     webhookRateLimiter,
     createMergeWebhookHandler({ prisma, processingQueue: queues.processingQueue })
   );
 
   app.post(
     "/api/webhooks/gong",
-    express.raw({ type: "application/json" }),
+    express.raw({ type: "application/json", limit: "1mb" }),
     webhookRateLimiter,
     createGongWebhookHandler({ prisma, processingQueue: queues.processingQueue })
   );
 
   app.post(
     "/api/webhooks/grain",
-    express.raw({ type: "application/json" }),
+    express.raw({ type: "application/json", limit: "1mb" }),
     webhookRateLimiter,
     createGrainWebhookHandler({ prisma, processingQueue: queues.processingQueue })
   );
@@ -313,8 +314,8 @@ export function createApp(deps: AppDeps): express.Application {
     })
   );
 
-  // Landing Page Exports — PDF, Google Doc, Slack (behind trial gate)
-  app.use("/api/pages", trialGate, createExportRoutes(prisma));
+  // Landing Page Exports — PDF, Google Doc, Slack (behind trial gate + export rate limit)
+  app.use("/api/pages", trialGate, exportRateLimiter, createExportRoutes(prisma));
 
   // Dashboard — stats, page list, admin settings, permissions, account access
   app.use(

@@ -29,7 +29,6 @@ import logger from "../lib/logger.js";
 // ─── Configuration ──────────────────────────────────────────────────────────
 
 const MERGE_BASE_URL = "https://api.merge.dev/api";
-const SYNC_POLL_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 const PAGE_SIZE = 100;
 
 // ─── Merge API Response Types ───────────────────────────────────────────────
@@ -143,7 +142,6 @@ export class MergeApiClient {
   private processingQueue: Queue;
   private resolver: EntityResolver;
   private apiKey: string;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(deps: {
     prisma: PrismaClient;
@@ -387,40 +385,14 @@ export class MergeApiClient {
     });
   }
 
-  // ─── CRM Polling Sync (15-minute fallback) ─────────────────────────
-
-  /**
-   * Start the 15-minute polling loop for all active CRM linked accounts.
-   * This serves as a fallback for webhook delivery failures.
-   */
-  startPolling(): void {
-    if (this.pollTimer) return;
-
-    logger.info(
-      `Merge CRM polling started (interval: ${SYNC_POLL_INTERVAL_MS / 1000}s)`
-    );
-
-    this.pollTimer = setInterval(() => {
-      this.pollAllLinkedAccounts().catch((err) => {
-        logger.error("CRM polling cycle failed", { error: err });
-      });
-    }, SYNC_POLL_INTERVAL_MS);
-  }
-
-  /**
-   * Stop the polling loop (for graceful shutdown).
-   */
-  stopPolling(): void {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
-  }
+  // ─── CRM Polling Sync ───────────────────────────────────────────────
 
   /**
    * Run a single polling cycle across all active CRM linked accounts.
+   * Scheduled via BullMQ integration-sync job (replaces legacy setInterval).
    */
   async pollAllLinkedAccounts(): Promise<void> {
+    if (!this.apiKey?.trim()) return;
     const activeAccounts = await this.prisma.linkedAccount.findMany({
       where: { status: "ACTIVE", category: "CRM" },
     });
@@ -696,28 +668,34 @@ export class MergeApiClient {
           eventType = "OPPORTUNITY_STAGE_CHANGE";
         }
 
-        // Upsert to avoid duplicates on repeated polls — use opportunityId + stageName
-        const existingEvent = await this.prisma.salesforceEvent.findFirst({
+        // Upsert to avoid dedup race; unique on (accountId, opportunityId, stageName)
+        if (!opp.remote_id) return;
+        const stageName = opp.stage ?? null;
+        const eventData = {
+          accountId: account.id,
+          eventType,
+          stageName,
+          opportunityId: opp.remote_id,
+          amount: opp.amount ?? null,
+          closeDate: opp.close_date ? new Date(opp.close_date) : null,
+          description: opp.name ?? null,
+        };
+        await this.prisma.salesforceEvent.upsert({
           where: {
-            accountId: account.id,
-            opportunityId: opp.remote_id,
-            stageName: opp.stage ?? null,
+            salesforce_event_account_opp_stage: {
+              accountId: account.id,
+              opportunityId: opp.remote_id,
+              stageName,
+            },
+          },
+          create: eventData,
+          update: {
+            eventType: eventData.eventType,
+            amount: eventData.amount,
+            closeDate: eventData.closeDate,
+            description: eventData.description,
           },
         });
-
-        if (!existingEvent) {
-          await this.prisma.salesforceEvent.create({
-            data: {
-              accountId: account.id,
-              eventType,
-              stageName: opp.stage ?? null,
-              opportunityId: opp.remote_id,
-              amount: opp.amount ?? null,
-              closeDate: opp.close_date ? new Date(opp.close_date) : null,
-              description: opp.name ?? null,
-            },
-          });
-        }
       }
     );
   }

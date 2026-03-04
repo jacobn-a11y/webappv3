@@ -235,11 +235,16 @@ export function createWorkers(
     }
   );
 
-  // Integration sync worker
+  // Integration sync worker (also runs Merge CRM poll — replaces setInterval)
   const syncWorker = new Worker(
     "integration-sync",
     async () => {
       await syncEngine.syncAll();
+      if (services.mergeClient) {
+        await services.mergeClient.pollAllLinkedAccounts().catch((err: Error) =>
+          logger.error("Merge CRM poll failed", { error: err.message })
+        );
+      }
     },
     {
       connection: { url: redisUrl },

@@ -58,14 +58,21 @@ function buildContextualPrompts(input: {
 export function registerSetupFirstValueRoutes({
   prisma,
   router,
-}: Pick<SetupRouteContext, "prisma" | "router">): void {
+  wizardService,
+  requireSetupAdmin,
+}: Pick<SetupRouteContext, "prisma" | "router" | "wizardService" | "requireSetupAdmin">): void {
   router.get("/first-value/recommendations", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
       sendUnauthorized(res);
       return;
     }
 
-      const [storyCount, pageCount, account] = await Promise.all([
+    const wizard = await wizardService.getOrCreateWizard(req.organizationId);
+    if (wizard.completedAt && !requireSetupAdmin(req, res)) {
+      return;
+    }
+
+    const [storyCount, pageCount, account] = await Promise.all([
         prisma.story.count({ where: { organizationId: req.organizationId } }),
         prisma.landingPage.count({
           where: { organizationId: req.organizationId, status: "PUBLISHED" },
