@@ -109,7 +109,11 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
   }, []);
 
   useEffect(() => {
-    loadData();
+    void loadData();
+    const intervalId = window.setInterval(() => {
+      void loadData();
+    }, 30_000);
+    return () => window.clearInterval(intervalId);
   }, [loadData]);
 
   // Close menus on outside click
@@ -142,7 +146,7 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
       result = result.filter((p) => p.title.toLowerCase().includes(lowerSearch));
     }
     if (statusFilter) {
-      result = result.filter((p) => p.status === statusFilter);
+      result = result.filter((p) => p.lifecycleStage === statusFilter);
     }
     if (visibilityFilter) {
       result = result.filter((p) => p.visibility === visibilityFilter);
@@ -161,8 +165,8 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
           bVal = b.title.toLowerCase();
           break;
         case "status":
-          aVal = a.status;
-          bVal = b.status;
+          aVal = a.lifecycleStage;
+          bVal = b.lifecycleStage;
           break;
         case "visibility":
           aVal = a.visibility;

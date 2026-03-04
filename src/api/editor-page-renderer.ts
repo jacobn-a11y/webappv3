@@ -43,10 +43,10 @@ export function createEditorPageRoutes(prisma: PrismaClient): Router {
         let canPublishNamed = false;
         if (req.userRole && ["OWNER", "ADMIN"].includes(req.userRole)) {
           canPublishNamed = true;
-        } else if (req.organizationId && req.userId) {
+        } else if (req.organizationId! && req.userId!) {
           const policy = await roleProfiles.getEffectivePolicy(
-            req.organizationId,
-            req.userId,
+            req.organizationId!,
+            req.userId!,
             req.userRole as UserRole | undefined
           );
           canPublishNamed =

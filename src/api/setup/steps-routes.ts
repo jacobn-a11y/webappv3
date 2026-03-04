@@ -36,13 +36,13 @@ export function registerSetupStepRoutes({
   "prisma" | "requireSetupAdmin" | "roleProfiles" | "router" | "stripe" | "wizardService"
 >): void {
   router.post("/step/recording-provider", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
-      const linkToken = await wizardService.initRecordingProviderLink(req.organizationId);
+      const linkToken = await wizardService.initRecordingProviderLink(req.organizationId!);
       sendSuccess(res, linkToken);
     
   }));
@@ -50,7 +50,7 @@ export function registerSetupStepRoutes({
   router.post(
     "/step/recording-provider/complete",
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
@@ -62,31 +62,31 @@ export function registerSetupStepRoutes({
       }
 
         await wizardService.completeRecordingProvider(
-          req.organizationId,
+          req.organizationId!,
           payload.provider as CallProvider,
           payload.merge_linked_account_id
         );
 
-        const status = await wizardService.getStatus(req.organizationId);
+        const status = await wizardService.getStatus(req.organizationId!);
         sendSuccess(res, { completed: true, status });
       
     }
   ));
 
   router.post("/step/crm", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
-      const linkToken = await wizardService.initCrmLink(req.organizationId);
+      const linkToken = await wizardService.initCrmLink(req.organizationId!);
       sendSuccess(res, linkToken);
     
   }));
 
   router.post("/step/crm/complete", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
@@ -98,30 +98,30 @@ export function registerSetupStepRoutes({
     }
 
       await wizardService.completeCrmConnection(
-        req.organizationId,
+        req.organizationId!,
         payload.crm_provider as CRMProvider,
         payload.merge_linked_account_id
       );
 
-      const status = await wizardService.getStatus(req.organizationId);
+      const status = await wizardService.getStatus(req.organizationId!);
       sendSuccess(res, { completed: true, status });
     
   }));
 
   router.get("/step/account-sync", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
-      const preview = await wizardService.getAccountSyncPreview(req.organizationId);
+      const preview = await wizardService.getAccountSyncPreview(req.organizationId!);
       sendSuccess(res, preview);
     
   }));
 
   router.post("/step/account-sync/resolve", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
@@ -133,7 +133,7 @@ export function registerSetupStepRoutes({
     }
 
       const result = await wizardService.applyEntityResolutionFixes(
-        req.organizationId,
+        req.organizationId!,
         payload.fixes.map((fix) => ({
           callId: fix.call_id,
           accountId: fix.account_id,
@@ -144,14 +144,14 @@ export function registerSetupStepRoutes({
   }));
 
   router.post("/step/account-sync/complete", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
-      await wizardService.completeAccountSyncReview(req.organizationId);
-      const status = await wizardService.getStatus(req.organizationId);
+      await wizardService.completeAccountSyncReview(req.organizationId!);
+      const status = await wizardService.getStatus(req.organizationId!);
       sendSuccess(res, { completed: true, status });
     
   }));
@@ -165,7 +165,7 @@ export function registerSetupStepRoutes({
   }));
 
   router.post("/step/plan", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
@@ -174,7 +174,7 @@ export function registerSetupStepRoutes({
     if (!isBillingEnabled()) {
 
       const result = await wizardService.completePlanSelection(
-      req.organizationId,
+      req.organizationId!,
       "FREE_TRIAL" as Plan,
       {
         createCheckoutSession: async () => null,
@@ -182,11 +182,11 @@ export function registerSetupStepRoutes({
       );
 
       await prisma.organization.update({
-      where: { id: req.organizationId },
+      where: { id: req.organizationId! },
       data: { trialEndsAt: null },
       });
 
-      const status = await wizardService.getStatus(req.organizationId);
+      const status = await wizardService.getStatus(req.organizationId!);
       sendSuccess(res, {
       completed: true,
       checkoutUrl: result.checkoutUrl,
@@ -204,7 +204,7 @@ export function registerSetupStepRoutes({
 
     try {
       const result = await wizardService.completePlanSelection(
-        req.organizationId,
+        req.organizationId!,
         payload.plan as Plan,
         {
           createCheckoutSession: async (orgId: string, plan: Plan) => {
@@ -246,7 +246,7 @@ export function registerSetupStepRoutes({
         }
       );
 
-      const status = await wizardService.getStatus(req.organizationId);
+      const status = await wizardService.getStatus(req.organizationId!);
       sendSuccess(res, {
         completed: true,
         checkoutUrl: result.checkoutUrl,
@@ -262,7 +262,7 @@ export function registerSetupStepRoutes({
   }));
 
   router.post("/step/permissions", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
@@ -273,19 +273,19 @@ export function registerSetupStepRoutes({
       return;
     }
 
-      await wizardService.completePermissionsSetup(req.organizationId, {
+      await wizardService.completePermissionsSetup(req.organizationId!, {
         defaultPageVisibility: payload.default_page_visibility,
         allowedPublishers: payload.allowed_publishers as UserRole[],
         requireApprovalToPublish: payload.require_approval_to_publish,
       });
 
-      const status = await wizardService.getStatus(req.organizationId);
+      const status = await wizardService.getStatus(req.organizationId!);
       sendSuccess(res, { completed: true, status });
     
   }));
 
   router.post("/step/org-profile", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
@@ -298,9 +298,9 @@ export function registerSetupStepRoutes({
 
       const data = payload;
       await prisma.orgSettings.upsert({
-        where: { organizationId: req.organizationId },
+        where: { organizationId: req.organizationId! },
         create: {
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           storyContext: {
             companyOverview: data.company_overview ?? "",
             products: data.products ?? [],
@@ -317,13 +317,13 @@ export function registerSetupStepRoutes({
           },
         },
       });
-      const status = await wizardService.getStatus(req.organizationId);
+      const status = await wizardService.getStatus(req.organizationId!);
       sendSuccess(res, { updated: true, status });
     
   }));
 
   router.post("/step/governance-defaults", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
@@ -336,9 +336,9 @@ export function registerSetupStepRoutes({
 
       const data = payload;
       await prisma.orgSettings.upsert({
-        where: { organizationId: req.organizationId },
+        where: { organizationId: req.organizationId! },
         create: {
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           dataGovernancePolicy: {
             retention_days: data.retention_days ?? 365,
             audit_log_retention_days: data.audit_log_retention_days ?? 365,
@@ -363,26 +363,26 @@ export function registerSetupStepRoutes({
           },
         },
       });
-      const status = await wizardService.getStatus(req.organizationId);
+      const status = await wizardService.getStatus(req.organizationId!);
       sendSuccess(res, { updated: true, status });
     
   }));
 
   router.post("/step/role-presets", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
-      await roleProfiles.ensurePresetRoles(req.organizationId);
-      const status = await wizardService.getStatus(req.organizationId);
+      await roleProfiles.ensurePresetRoles(req.organizationId!);
+      const status = await wizardService.getStatus(req.organizationId!);
       sendSuccess(res, { updated: true, status });
     
   }));
 
   router.post("/skip", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
@@ -393,8 +393,8 @@ export function registerSetupStepRoutes({
       return;
     }
 
-      await wizardService.skipStep(req.organizationId, payload.step);
-      const status = await wizardService.getStatus(req.organizationId);
+      await wizardService.skipStep(req.organizationId!, payload.step);
+      const status = await wizardService.getStatus(req.organizationId!);
       sendSuccess(res, { skipped: true, status });
     
   }));

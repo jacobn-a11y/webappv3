@@ -53,6 +53,10 @@ import { createSetupRoutes } from "./api/setup-routes.js";
 import { createNotificationRoutes } from "./api/notification-routes.js";
 import { createAnalyticsRoutes } from "./api/analytics-routes.js";
 import { createStatusRoutes } from "./api/status-routes.js";
+import { createLifecycleQueueRoutes } from "./api/lifecycle-queue-routes.js";
+import { createQuoteLibraryRoutes } from "./api/quote-library-routes.js";
+import { AccountAccessService } from "./services/account-access.js";
+import { RoleProfileService } from "./services/role-profiles.js";
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 import { requireAuth } from "./middleware/auth.js";
@@ -107,6 +111,8 @@ export function createApp(deps: AppDeps): express.Application {
     aiUsageTracker,
     notificationService,
   } = services;
+  const accountAccessService = new AccountAccessService(prisma);
+  const roleProfiles = new RoleProfileService(prisma);
 
   const app = express();
   configureTrustProxy(app);
@@ -368,6 +374,15 @@ export function createApp(deps: AppDeps): express.Application {
 
   // Analytics Dashboard
   app.use("/api/analytics", trialGate, createAnalyticsRoutes(prisma));
+
+  // vNext lifecycle queues
+  app.use("/api", trialGate, apiRateLimiter, createLifecycleQueueRoutes(prisma));
+  app.use(
+    "/api",
+    trialGate,
+    apiRateLimiter,
+    createQuoteLibraryRoutes(prisma, accountAccessService, roleProfiles)
+  );
 
   // Admin operational APIs (tenant scoped + privileged only)
   app.use(

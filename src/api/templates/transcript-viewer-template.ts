@@ -55,6 +55,7 @@ export interface CallMetadata {
   recordingUrl: string | null;
   language: string;
   wordCount: number;
+  viewMode?: "RAW" | "SCRUBBED";
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

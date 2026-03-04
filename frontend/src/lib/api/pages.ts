@@ -1,4 +1,5 @@
 import type {
+  ContentQueueItem,
   ArtifactVersion,
   CreateLandingPageRequest,
   CreateLandingPageResponse,
@@ -6,9 +7,14 @@ import type {
   DashboardPageSummary,
   DashboardStats,
   EditorPageData,
+  PublishPiiScanResult,
   PublishApprovalRequestRow,
+  MyApprovalRequestRow,
+  ApprovalSlackSettings,
   SavePageDraftConflict,
   SavePageDraftResult,
+  MyQueueBuckets,
+  MyQueueCounts,
   TranscriptData,
 } from "./types";
 import { BASE_URL, buildRequestHeaders, fetchApi, request } from "./http";
@@ -92,6 +98,12 @@ export async function getPreviewScrub(pageId: string): Promise<{
   );
 }
 
+export async function getPublishPiiScan(pageId: string): Promise<PublishPiiScanResult> {
+  return request<PublishPiiScanResult>(`/pages/${pageId}/pii-scan`, {
+    method: "POST",
+  });
+}
+
 export async function publishPage(pageId: string, options: {
   visibility: string;
   password?: string;
@@ -158,17 +170,40 @@ export async function rollbackPageVersion(pageId: string, versionId: string): Pr
 }
 
 export async function getPublishApprovals(status = "PENDING"): Promise<{ approvals: PublishApprovalRequestRow[] }> {
-  return request<{ approvals: PublishApprovalRequestRow[] }>(`/pages/approvals/publish?status=${encodeURIComponent(status)}`);
+  return request<{ approvals: PublishApprovalRequestRow[] }>(
+    `/publish-approvals?status=${encodeURIComponent(status)}`
+  );
 }
 
 export async function reviewPublishApproval(
   requestId: string,
   body: { decision: "APPROVE" | "REJECT"; notes?: string }
 ): Promise<{ status: string; published?: boolean; url?: string }> {
-  return request<{ status: string; published?: boolean; url?: string }>(`/pages/approvals/publish/${requestId}/review`, {
+  return request<{ status: string; published?: boolean; url?: string }>(
+    `/publish-approvals/${requestId}/review`,
+    {
     method: "POST",
     body: JSON.stringify(body),
-  });
+    }
+  );
+}
+
+export async function getApprovalSlackSettings(): Promise<ApprovalSlackSettings> {
+  return request<ApprovalSlackSettings>("/publish-approvals/slack-settings");
+}
+
+export async function saveApprovalSlackSettings(body: {
+  enabled: boolean;
+  approver_webhook_url?: string | null;
+  creator_webhook_url?: string | null;
+}): Promise<{ saved: boolean; enabled: boolean }> {
+  return request<{ saved: boolean; enabled: boolean }>(
+    "/publish-approvals/slack-settings",
+    {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }
+  );
 }
 
 export async function unpublishPage(pageId: string): Promise<void> {
@@ -207,6 +242,79 @@ export async function getDashboardPagesData(params?: {
     creators: DashboardCreator[];
     isAdmin: boolean;
   }>(`/dashboard/pages/data${query ? `?${query}` : ""}`);
+}
+
+export async function getContentQueue(params?: {
+  asset_type?: "story" | "landing_page" | "all";
+  stage?: "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED";
+  account_id?: string;
+  creator_id?: string;
+  include_archived?: boolean;
+  search?: string;
+  page?: number;
+  limit?: number;
+}): Promise<{
+  items: ContentQueueItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    totalCount: number;
+    totalPages: number;
+  };
+}> {
+  const qs = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (typeof v === "boolean") {
+        qs.set(k, v ? "true" : "false");
+        return;
+      }
+      if (v !== undefined && v !== null && v !== "") {
+        qs.set(k, String(v));
+      }
+    });
+  }
+  const query = qs.toString();
+  return request<{
+    items: ContentQueueItem[];
+    pagination: {
+      page: number;
+      limit: number;
+      totalCount: number;
+      totalPages: number;
+    };
+  }>(`/content-queue${query ? `?${query}` : ""}`);
+}
+
+export async function getMyQueue(): Promise<{
+  counts: MyQueueCounts;
+  buckets: MyQueueBuckets;
+}> {
+  return request<{
+    counts: MyQueueCounts;
+    buckets: MyQueueBuckets;
+  }>("/my-queue");
+}
+
+export async function getMyApprovalRequests(params?: {
+  status?: "PENDING" | "APPROVED" | "REJECTED" | "ALL";
+  asset_type?: "story" | "landing_page" | "all";
+  limit?: number;
+}): Promise<{
+  requests: MyApprovalRequestRow[];
+}> {
+  const qs = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) {
+        qs.set(k, String(v));
+      }
+    });
+  }
+  const query = qs.toString();
+  return request<{ requests: MyApprovalRequestRow[] }>(
+    `/my-queue/requests${query ? `?${query}` : ""}`
+  );
 }
 
 export async function getTranscriptData(callId: string): Promise<TranscriptData> {

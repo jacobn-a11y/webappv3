@@ -39,6 +39,30 @@ function readStoredAuthUser(): AuthUser | null {
   }
 }
 
+function formatApiError(
+  status: number,
+  body: { error?: unknown; message?: unknown; permission?: unknown; reason?: unknown }
+): string {
+  const rawError =
+    typeof body.error === "string"
+      ? body.error
+      : typeof body.message === "string"
+        ? body.message
+        : "";
+  if (status === 403) {
+    const detail =
+      typeof body.permission === "string"
+        ? body.permission
+        : typeof body.reason === "string"
+          ? body.reason
+          : rawError;
+    return detail
+      ? `Permission denied: ${detail}. Contact your admin.`
+      : "Permission denied. Contact your admin.";
+  }
+  return rawError || `Request failed: ${status}`;
+}
+
 export async function request<T>(
   path: string,
   options?: RequestInit
@@ -49,8 +73,15 @@ export async function request<T>(
     headers,
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error ?? `Request failed: ${res.status}`);
+    const body = await res
+      .json()
+      .catch(() => ({ error: res.statusText })) as {
+      error?: unknown;
+      message?: unknown;
+      permission?: unknown;
+      reason?: unknown;
+    };
+    throw new Error(formatApiError(res.status, body));
   }
   if (res.status === 204 || res.headers.get("content-length") === "0") {
     return undefined as T;
@@ -63,8 +94,15 @@ export async function requestBlob(path: string, options?: RequestInit): Promise<
   const headers = buildRequestHeaders(options?.headers);
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error ?? `Request failed: ${res.status}`);
+    const body = await res
+      .json()
+      .catch(() => ({ error: res.statusText })) as {
+      error?: unknown;
+      message?: unknown;
+      permission?: unknown;
+      reason?: unknown;
+    };
+    throw new Error(formatApiError(res.status, body));
   }
   return res.blob();
 }

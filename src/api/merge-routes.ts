@@ -31,7 +31,7 @@ export function createMergeRoutes(
    */
   router.post("/link", async (req: Request, res: Response) => {
     const authReq = req as AuthenticatedRequest;
-    const organizationId = authReq.organizationId;
+    const organizationId = authReq.organizationId!;
 
     if (!organizationId) {
       sendUnauthorized(res, "Missing organization context");
@@ -71,7 +71,7 @@ export function createMergeRoutes(
    */
   router.get("/linked", async (req: Request, res: Response) => {
     const authReq = req as AuthenticatedRequest;
-    const organizationId = authReq.organizationId;
+    const organizationId = authReq.organizationId!;
 
     if (!organizationId) {
       sendUnauthorized(res, "Missing organization context");
@@ -103,7 +103,7 @@ export function createMergeRoutes(
    */
   router.post("/sync/:linkedAccountId", async (req: Request, res: Response) => {
     const authReq = req as AuthenticatedRequest;
-    const organizationId = authReq.organizationId;
+    const organizationId = authReq.organizationId!;
 
     if (!organizationId) {
       sendUnauthorized(res, "Missing organization context");

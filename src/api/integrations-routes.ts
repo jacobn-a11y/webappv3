@@ -57,14 +57,14 @@ export function createIntegrationsRoutes(
     "/",
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         res.status(401).json({ error: "Authentication required" });
         return;
       }
 
       try {
         const linkedAccounts = await prisma.linkedAccount.findMany({
-          where: { organizationId: req.organizationId },
+          where: { organizationId: req.organizationId! },
           orderBy: { createdAt: "asc" },
         });
 
@@ -101,7 +101,7 @@ export function createIntegrationsRoutes(
     "/link-token",
     requirePermission(prisma, "manage_permissions"),
     async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         res.status(401).json({ error: "Authentication required" });
         return;
       }
@@ -121,12 +121,12 @@ export function createIntegrationsRoutes(
       try {
         const [org, user] = await Promise.all([
           prisma.organization.findUnique({
-            where: { id: req.organizationId },
+            where: { id: req.organizationId! },
             select: { id: true, name: true },
           }),
-          req.userId
+          req.userId!
             ? prisma.user.findUnique({
-              where: { id: req.userId },
+              where: { id: req.userId! },
               select: { email: true },
             })
             : Promise.resolve(null),
@@ -139,7 +139,7 @@ export function createIntegrationsRoutes(
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            end_user_origin_id: req.organizationId,
+            end_user_origin_id: req.organizationId!,
             end_user_organization_name: org?.name ?? "StoryEngine Organization",
             end_user_email_address: user?.email ?? "admin@storyengine.local",
             categories: [parsed.data.category],
@@ -191,13 +191,13 @@ export function createIntegrationsRoutes(
       }
 
       try {
-        if (!req.organizationId) {
+        if (!req.organizationId!) {
           res.status(401).json({ error: "Authentication required" });
           return;
         }
 
         const linkedAccount = await mergeClient.exchangeLinkToken(
-          req.organizationId,
+          req.organizationId!,
           parse.data.public_token
         );
 
@@ -238,7 +238,7 @@ export function createIntegrationsRoutes(
         const linked = await prisma.linkedAccount.findFirst({
           where: {
             id: req.params.integrationId as string,
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
           },
         });
 
@@ -284,7 +284,7 @@ export function createIntegrationsRoutes(
         const linked = await prisma.linkedAccount.findFirst({
           where: {
             id: req.params.integrationId as string,
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
           },
         });
 
@@ -337,7 +337,7 @@ export function createIntegrationsRoutes(
         const linked = await prisma.linkedAccount.findFirst({
           where: {
             id: req.params.integrationId as string,
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
           },
         });
 

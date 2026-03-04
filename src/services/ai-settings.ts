@@ -1,10 +1,10 @@
-import type { PrismaClient, UserRole } from "@prisma/client";
+import type { AIProviderType, PrismaClient, UserRole } from "@prisma/client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface OrgAISettingsPayload {
-  default_provider: string;
-  default_model: string;
+  default_provider?: string | null;
+  default_model?: string | null;
   per_seat_token_budget_per_month?: number | null;
   per_seat_stories_per_month?: number | null;
   max_stories_per_month?: number | null;
@@ -12,7 +12,7 @@ export interface OrgAISettingsPayload {
 
 export interface RoleDefaultPayload {
   role: UserRole;
-  allowed_providers?: string[];
+  allowed_providers?: AIProviderType[];
   allowed_models?: string[];
   max_tokens_per_day?: number | null;
   max_tokens_per_month?: number | null;
@@ -22,9 +22,9 @@ export interface RoleDefaultPayload {
 
 export interface UserAccessPayload {
   user_id: string;
-  allowed_providers?: string[];
+  allowed_providers?: AIProviderType[];
   allowed_models?: string[];
-  denied_providers?: string[];
+  denied_providers?: AIProviderType[];
   denied_models?: string[];
 }
 

@@ -13,6 +13,7 @@ import { z } from "zod";
 import type { StoryBuilder, StoryBuilderOptions } from "../../services/story-builder.js";
 import type { PrismaClient, TranscriptTruncationMode } from "@prisma/client";
 import { TranscriptMerger } from "../../services/transcript-merger.js";
+import type { AIClient } from "../../services/ai-client.js";
 import type { AccountAccessService } from "../../services/account-access.js";
 import type { RoleProfileService } from "../../services/role-profiles.js";
 import { STORY_FORMATS } from "../../types/taxonomy.js";
@@ -39,6 +40,8 @@ const BuildStorySchema = z.object({
   story_length: z.enum(STORY_LENGTHS as unknown as [string, ...string[]]).optional(),
   story_outline: z.enum(STORY_OUTLINES as unknown as [string, ...string[]]).optional(),
   story_type: z.enum(STORY_TYPES as unknown as [string, ...string[]]).optional(),
+  ai_provider: z.enum(["openai", "anthropic", "google"]).optional(),
+  ai_model: z.string().min(1).max(120).optional(),
 });
 
 const MergeTranscriptsSchema = z.object({
@@ -62,7 +65,9 @@ interface RegisterBuildRoutesOptions {
     organizationId: string;
     userId: string;
     userRole: "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
-  }) => Promise<{ client: unknown; retryBudget: number }>;
+    provider?: "openai" | "anthropic" | "google";
+    model?: string;
+  }) => Promise<{ client: AIClient; retryBudget: number }>;
   dispatchStoryEvent: (input: {
     organizationId: string;
     eventType: "story_generated" | "story_generation_failed";
@@ -88,10 +93,10 @@ export function registerBuildRoutes({
     }
 
     const authReq = req as AuthenticatedRequest;
-    const organizationId = authReq.organizationId;
-    const userId = authReq.userId;
+    const organizationId = authReq.organizationId!;
+    const userId = authReq.userId!;
     const userRole = authReq.userRole;
-    if (!organizationId) {
+    if (!organizationId || !userId) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
@@ -105,6 +110,8 @@ export function registerBuildRoutes({
       story_length,
       story_outline,
       story_type,
+      ai_provider,
+      ai_model,
     } = parseResult.data;
 
     try {
@@ -132,8 +139,10 @@ export function registerBuildRoutes({
         aiClient: (
           await resolveStoryAIClient({
             organizationId,
-            userId: userId!,
+            userId,
             userRole: normalizeRole(userRole),
+            provider: ai_provider,
+            model: ai_model,
           })
         ).client,
         aiIdempotencyKey: `story-build:${organizationId}:${account_id}:${Date.now()}`,
@@ -189,10 +198,10 @@ export function registerBuildRoutes({
     }
 
     const authReq = req as AuthenticatedRequest;
-    const organizationId = authReq.organizationId;
-    const userId = authReq.userId;
+    const organizationId = authReq.organizationId!;
+    const userId = authReq.userId!;
     const userRole = authReq.userRole;
-    if (!organizationId) {
+    if (!organizationId || !userId) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
@@ -206,6 +215,8 @@ export function registerBuildRoutes({
       story_length,
       story_outline,
       story_type,
+      ai_provider,
+      ai_model,
     } = parseResult.data;
 
     try {
@@ -251,6 +262,8 @@ export function registerBuildRoutes({
             organizationId,
             userId,
             userRole: normalizeRole(userRole),
+            provider: ai_provider,
+            model: ai_model,
           })
         ).client,
         aiIdempotencyKey: `story-build-stream:${organizationId}:${account_id}:${Date.now()}`,
@@ -315,8 +328,8 @@ export function registerBuildRoutes({
     }
 
     const authReq = req as AuthenticatedRequest;
-    const organizationId = authReq.organizationId;
-    const userId = authReq.userId;
+    const organizationId = authReq.organizationId!;
+    const userId = authReq.userId!;
     const userRole = authReq.userRole;
     if (!organizationId) {
       sendUnauthorized(res, "Authentication required");

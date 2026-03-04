@@ -37,14 +37,15 @@ export interface QuickActionsProps {
 }
 
 export function QuickActions({ data }: QuickActionsProps) {
+  const actions = data.recommended_actions ?? [];
   return (
     <section className="home__quick-actions">
       <h2 className="home__section-title">
         {getGreeting()}, {PERSONA_LABELS[data.persona]}
       </h2>
-      {data.suggested_actions.length > 0 && (
+      {actions.length > 0 && (
         <div className="home__actions-grid">
-          {data.suggested_actions.map((action, index) => {
+          {actions.map((action: string, index: number) => {
             const link = mapActionToLink(action);
             return link ? (
               <Link key={index} to={link} className="home__action-card">

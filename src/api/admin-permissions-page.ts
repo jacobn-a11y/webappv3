@@ -28,6 +28,8 @@ const PERMISSION_COLUMNS: ReadonlyArray<{
   { key: "CREATE_LANDING_PAGE", label: "Create", short: "CREATE" },
   { key: "PUBLISH_LANDING_PAGE", label: "Publish", short: "PUBLISH" },
   { key: "PUBLISH_NAMED_LANDING_PAGE", label: "Publish Named", short: "PUB_NAMED", adminOnly: true },
+  { key: "APPROVE_PUBLISH_REQUESTS", label: "Approve Requests", short: "APPROVE" },
+  { key: "VIEW_RAW_TRANSCRIPTS", label: "View Raw Transcript", short: "RAW_TX" },
   { key: "EDIT_ANY_LANDING_PAGE", label: "Edit Any", short: "EDIT_ANY" },
   { key: "DELETE_ANY_LANDING_PAGE", label: "Delete Any", short: "DELETE_ANY" },
   { key: "VIEW_ANALYTICS", label: "Analytics", short: "ANALYTICS" },
@@ -51,12 +53,12 @@ export function createAdminPermissionsPage(prisma: PrismaClient): Router {
     "/",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
-        const matrix = await permManager.getOrgPermissionMatrix(req.organizationId);
+        const matrix = await permManager.getOrgPermissionMatrix(req.organizationId!);
 
         // For each MEMBER/VIEWER, pre-fetch account access grants
         const accessByUser: Record<string, Awaited<ReturnType<typeof accessService.listUserAccess>>> = {};
@@ -64,7 +66,7 @@ export function createAdminPermissionsPage(prisma: PrismaClient): Router {
           if (!ADMIN_ROLES.includes(user.role)) {
             accessByUser[user.userId] = await accessService.listUserAccess(
               user.userId,
-              req.organizationId
+              req.organizationId!
             );
           }
         }

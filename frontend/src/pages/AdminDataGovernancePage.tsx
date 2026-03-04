@@ -3,20 +3,26 @@ import {
   addApprovalGroupMember,
   createApprovalGroup,
   createDeletionRequest,
+  getDashboardPublishSettings,
   getArtifactGovernancePolicy,
   getApprovalGroups,
   getDataGovernanceSettings,
+  getDataGovernanceOverview,
   getDeletionRequests,
   getTeamApprovalAdminScopes,
   replaceTeamApprovalAdminScopes,
   replaceArtifactApprovalSteps,
   removeApprovalGroupMember,
   reviewDeletionRequest,
+  updateDashboardPublishSettings,
   updateArtifactGovernancePolicy,
   updateDataGovernanceSettings,
+  type ApprovalPolicyMode,
   type ArtifactGovernancePolicySettings,
   type ApprovalGroup,
   type DataGovernanceSettings,
+  type DataGovernanceOverview,
+  type DashboardPublishSettings,
   type DeletionRequest,
   type TeamApprovalAdminScopeRow,
 } from "../lib/api";
@@ -41,6 +47,27 @@ const DEFAULT_ARTIFACT_POLICY: ArtifactGovernancePolicySettings = {
   steps: [],
 };
 
+const DEFAULT_OVERVIEW: DataGovernanceOverview = {
+  pending_approvals_count: 0,
+  pending_deletion_requests_count: 0,
+  retention_days: 365,
+  eligible_call_deletions: 0,
+  legal_hold_enabled: false,
+  pii_export_enabled: true,
+  allow_named_story_exports: false,
+  recent_audit_events: [],
+};
+
+const DEFAULT_DASHBOARD_SETTINGS: DashboardPublishSettings = {
+  landing_pages_enabled: true,
+  default_page_visibility: "PRIVATE",
+  approval_policy: "ALL_REQUIRED",
+  require_approval_to_publish: false,
+  allowed_publishers: ["OWNER", "ADMIN"],
+  max_pages_per_user: null,
+  company_name_replacements: {},
+};
+
 export function AdminDataGovernancePage() {
   const [policy, setPolicy] = useState<DataGovernanceSettings>(DEFAULT_POLICY);
   const [requests, setRequests] = useState<DeletionRequest[]>([]);
@@ -56,26 +83,42 @@ export function AdminDataGovernancePage() {
   );
   const [approvalGroups, setApprovalGroups] = useState<ApprovalGroup[]>([]);
   const [teamApprovalScopes, setTeamApprovalScopes] = useState<TeamApprovalAdminScopeRow[]>([]);
+  const [dashboardSettings, setDashboardSettings] = useState<DashboardPublishSettings>(
+    DEFAULT_DASHBOARD_SETTINGS
+  );
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupDescription, setNewGroupDescription] = useState("");
   const [groupMemberUserId, setGroupMemberUserId] = useState<Record<string, string>>({});
+  const [overview, setOverview] = useState<DataGovernanceOverview>(DEFAULT_OVERVIEW);
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [policyRes, requestRes, artifactPolicyRes, groupsRes, scopesRes] = await Promise.all([
+      const [
+        policyRes,
+        overviewRes,
+        deletionRes,
+        artifactPolicyRes,
+        groupsRes,
+        scopesRes,
+        dashboardSettingsRes,
+      ] = await Promise.all([
         getDataGovernanceSettings(),
+        getDataGovernanceOverview(),
         getDeletionRequests(),
         getArtifactGovernancePolicy(),
         getApprovalGroups(),
         getTeamApprovalAdminScopes(),
+        getDashboardPublishSettings(),
       ]);
       setPolicy(policyRes);
-      setRequests(requestRes.requests);
+      setOverview(overviewRes);
+      setRequests(deletionRes.requests);
       setArtifactPolicy(artifactPolicyRes);
       setApprovalGroups(groupsRes.groups);
       setTeamApprovalScopes(scopesRes.scopes);
+      setDashboardSettings(dashboardSettingsRes);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load governance data");
     } finally {
@@ -92,7 +135,12 @@ export function AdminDataGovernancePage() {
     setError(null);
     setNotice(null);
     try {
-      await updateDataGovernanceSettings(policy);
+      await Promise.all([
+        updateDataGovernanceSettings(policy),
+        updateDashboardPublishSettings({
+          approval_policy: dashboardSettings.approval_policy,
+        }),
+      ]);
       setNotice("Data governance policy saved.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save policy");
@@ -259,6 +307,119 @@ export function AdminDataGovernancePage() {
       {notice && <div className="alert alert--success">{notice}</div>}
 
       <section className="card card--elevated">
+        <h2>Governance Overview</h2>
+        <div className="kpi-grid" style={{ marginBottom: 16 }}>
+          <article className="kpi-card">
+            <h3 className="kpi-card__label">Pending approvals</h3>
+            <div className="kpi-card__value">{overview.pending_approvals_count}</div>
+            <p className="kpi-card__meta">Publish requests awaiting review</p>
+          </article>
+          <article className="kpi-card">
+            <h3 className="kpi-card__label">Retention window</h3>
+            <div className="kpi-card__value">{overview.retention_days}d</div>
+            <p className="kpi-card__meta">
+              {overview.eligible_call_deletions} call(s) eligible for deletion
+            </p>
+          </article>
+          <article className="kpi-card">
+            <h3 className="kpi-card__label">Deletion queue</h3>
+            <div className="kpi-card__value">{overview.pending_deletion_requests_count}</div>
+            <p className="kpi-card__meta">Pending data deletion requests</p>
+          </article>
+        </div>
+        <div className="data-table-wrap" style={{ marginTop: 8 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Control</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Legal hold</td>
+                <td>
+                  <span className={`badge ${overview.legal_hold_enabled ? "badge--warning" : "badge--success"}`}>
+                    {overview.legal_hold_enabled ? "Enabled" : "Disabled"}
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td>PII exports</td>
+                <td>
+                  <span className={`badge ${overview.pii_export_enabled ? "badge--success" : "badge--danger"}`}>
+                    {overview.pii_export_enabled ? "Allowed" : "Blocked"}
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td>Named story exports</td>
+                <td>
+                  <span className={`badge ${overview.allow_named_story_exports ? "badge--success" : "badge--danger"}`}>
+                    {overview.allow_named_story_exports ? "Allowed" : "Blocked"}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <h3 style={{ marginTop: 16 }}>Recent Audit Events</h3>
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Category</th>
+                <th>Action</th>
+                <th>Severity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {overview.recent_audit_events.length === 0 && (
+                <tr>
+                  <td colSpan={4}>No recent audit events.</td>
+                </tr>
+              )}
+              {overview.recent_audit_events.map((event) => (
+                <tr key={event.id}>
+                  <td>{new Date(event.created_at).toLocaleString()}</td>
+                  <td>{formatEnumLabel(event.category)}</td>
+                  <td>{formatEnumLabel(event.action)}</td>
+                  <td>
+                    <span className={badgeClass(event.severity)}>
+                      {formatEnumLabel(event.severity)}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card card--elevated">
+        <label className="form-group">
+          Publish approval policy
+          <select
+            value={dashboardSettings.approval_policy}
+            onChange={(e) =>
+              setDashboardSettings((current) => ({
+                ...current,
+                approval_policy: e.target.value as ApprovalPolicyMode,
+              }))
+            }
+          >
+            <option value="ALL_REQUIRED">All stories require approval</option>
+            <option value="ANON_NO_APPROVAL">
+              Anonymous stories publish directly; named require approval
+            </option>
+            <option value="NAMED_NO_APPROVAL">
+              Named stories publish directly; anonymous require approval
+            </option>
+            <option value="ALL_NO_APPROVAL">All stories publish directly</option>
+          </select>
+        </label>
+
         <label className="form-group">
           Data retention (days)
           <input

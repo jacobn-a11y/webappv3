@@ -30,13 +30,13 @@ export function registerDashboardRenderer({
    * Serves a full server-rendered HTML analytics dashboard with Chart.js.
    */
   router.get("/dashboard", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
 
-      const data = await analyticsCache.getOrSet(req.organizationId, () =>
-        analytics.getDashboardData(req.organizationId as string)
+      const data = await analyticsCache.getOrSet(req.organizationId!, () =>
+        analytics.getDashboardData(req.organizationId! as string)
       );
       res.setHeader("Content-Type", "text/html");
       res.send(renderAnalyticsDashboard(data));

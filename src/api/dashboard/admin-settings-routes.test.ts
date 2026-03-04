@@ -13,8 +13,8 @@ function buildApp(prisma: any, permManager: any) {
       userId?: string;
       userRole?: string;
     };
-    authReq.organizationId = "org-test";
-    authReq.userId = "user-test";
+    authReq.organizationId! = "org-test";
+    authReq.userId! = "user-test";
     authReq.userRole = "ADMIN";
     next();
   });

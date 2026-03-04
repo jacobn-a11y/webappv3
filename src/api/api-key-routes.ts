@@ -95,7 +95,7 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
       });
       await auditLogs.record({
         organizationId: orgId,
-        actorUserId: req.userId,
+        actorUserId: req.userId!,
         category: "ADMIN",
         action: "API_KEY_CREATED",
         targetType: "api_key",
@@ -238,7 +238,7 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
         });
         await auditLogs.record({
           organizationId: orgId,
-          actorUserId: req.userId,
+          actorUserId: req.userId!,
           category: "ADMIN",
           action: "API_KEY_ROTATED",
           targetType: "api_key",
@@ -307,7 +307,7 @@ export function createApiKeyRoutes(prisma: PrismaClient): Router {
         });
         await auditLogs.record({
           organizationId: orgId,
-          actorUserId: req.userId,
+          actorUserId: req.userId!,
           category: "ADMIN",
           action: "API_KEY_REVOKED",
           targetType: "api_key",

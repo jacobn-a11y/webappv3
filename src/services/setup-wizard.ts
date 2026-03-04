@@ -16,6 +16,7 @@
  */
 
 import type {
+  ApprovalPolicy,
   PrismaClient,
   CallProvider,
   CRMProvider,
@@ -643,6 +644,10 @@ export class SetupWizardService {
       requireApprovalToPublish: boolean;
     }
   ): Promise<void> {
+    const approvalPolicy: ApprovalPolicy = config.requireApprovalToPublish
+      ? "ALL_REQUIRED"
+      : "ALL_NO_APPROVAL";
+
     // Upsert OrgSettings with the chosen defaults
     await this.prisma.orgSettings.upsert({
       where: { organizationId },
@@ -650,11 +655,13 @@ export class SetupWizardService {
         organizationId,
         landingPagesEnabled: true,
         defaultPageVisibility: config.defaultPageVisibility,
+        approvalPolicy,
         allowedPublishers: config.allowedPublishers,
         requireApprovalToPublish: config.requireApprovalToPublish,
       },
       update: {
         defaultPageVisibility: config.defaultPageVisibility,
+        approvalPolicy,
         allowedPublishers: config.allowedPublishers,
         requireApprovalToPublish: config.requireApprovalToPublish,
       },

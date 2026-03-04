@@ -53,7 +53,7 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
   const router = Router();
 
   router.get("/:storyId/comments", async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
@@ -66,7 +66,7 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
 
     try {
       const target = await resolveCommentTarget(prisma, {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         storyId: req.params.storyId as string,
         target: parse.data.target,
         pageId: parse.data.page_id,
@@ -74,7 +74,7 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
 
       const comments = await prisma.storyQualityFeedback.findMany({
         where: {
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           storyId: req.params.storyId as string,
           feedbackType: "COMMENT_THREAD",
           targetType: target.targetType,
@@ -117,7 +117,7 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
   });
 
   router.post("/:storyId/comments", async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
@@ -130,7 +130,7 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
 
     try {
       const target = await resolveCommentTarget(prisma, {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         storyId: req.params.storyId as string,
         target: parse.data.target,
         pageId: parse.data.page_id,
@@ -138,9 +138,9 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
 
       const comment = await prisma.storyQualityFeedback.create({
         data: {
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           storyId: req.params.storyId as string,
-          submittedByUserId: req.userId,
+          submittedByUserId: req.userId!,
           feedbackType: "COMMENT_THREAD",
           targetType: target.targetType,
           targetId: target.targetId,

@@ -11,7 +11,7 @@
 import { type Response, type Router } from "express";
 import { z } from "zod";
 import type { PrismaClient, UserRole } from "@prisma/client";
-import type { OrgRequest } from "../../types/authenticated-request.js";
+import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 import {
   ConcurrencyConflictError,
   type LandingPageEditor,
@@ -74,7 +74,7 @@ const UpdatePageSchema = z.object({
   expected_updated_at: z.string().datetime().optional(),
 });
 
-type AuthReq = OrgRequest;
+type AuthReq = AuthenticatedRequest;
 
 // ─── Route Registration ─────────────────────────────────────────────────────
 
@@ -116,20 +116,20 @@ export function registerCrudRoutes({
       }
 
       const { story_id, title, subtitle, hero_image_url, callout_boxes, include_company_name } = parse.data;
-      if (!req.organizationId || !req.userId) {
+      if (!req.organizationId! || !req.userId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      const story = await editor.findStoryForOrg(story_id, req.organizationId);
+      const story = await editor.findStoryForOrg(story_id, req.organizationId!);
       if (!story) {
         sendNotFound(res, "Story not found");
         return;
       }
 
       const canAccess = await accessService.canAccessAccount(
-        req.userId,
-        req.organizationId,
+        req.userId!,
+        req.organizationId!,
         story.accountId,
         req.userRole as UserRole | undefined
       );
@@ -145,8 +145,8 @@ export function registerCrudRoutes({
 
         const pageId = await editor.create({
           storyId: story_id,
-          organizationId: req.organizationId,
-          createdById: req.userId,
+          organizationId: req.organizationId!,
+          createdById: req.userId!,
           title,
           subtitle,
           heroImageUrl: hero_image_url,
@@ -156,8 +156,8 @@ export function registerCrudRoutes({
 
         const page = await editor.getForEditing(pageId);
         await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
+          organizationId: req.organizationId!,
+          actorUserId: req.userId!,
           category: "PUBLISH",
           action: "PAGE_CREATED",
           targetType: "landing_page",
@@ -271,6 +271,10 @@ export function registerCrudRoutes({
     "/:pageId",
     requirePageOwnerOrPermission(prisma),
     asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
       const parse = UpdatePageSchema.safeParse(req.body);
       if (!parse.success) {
         sendBadRequest(res, "validation_error", parse.error.issues);
@@ -284,7 +288,7 @@ export function registerCrudRoutes({
           return;
         }
 
-        const updated = await editor.update(req.params.pageId as string, req.userId, {
+        const updated = await editor.update(req.params.pageId as string, req.userId!, {
           title: parse.data.title,
           subtitle: parse.data.subtitle,
           editableBody: parse.data.editable_body,
@@ -325,13 +329,17 @@ export function registerCrudRoutes({
     "/:pageId",
     requirePermission(prisma, "delete_any"),
     asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
 
-      const page = await editor.findPageForOrg(req.params.pageId as string, req.organizationId);
+      const page = await editor.findPageForOrg(req.params.pageId as string, req.organizationId!);
       if (!page) {
       sendNotFound(res, "Landing page not found");
       return;
       }
-      if (await isLegalHoldEnabled(prisma, req.organizationId)) {
+      if (await isLegalHoldEnabled(prisma, req.organizationId!)) {
       res.status(423).json({
         error: "legal_hold_active",
         message:
@@ -343,8 +351,8 @@ export function registerCrudRoutes({
       await clearScheduledPublish(page.id);
       await editor.deletePage(page.id);
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "PUBLISH",
       action: "PAGE_DELETED",
       targetType: "landing_page",

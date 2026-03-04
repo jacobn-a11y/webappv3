@@ -10,12 +10,12 @@ export function registerSetupStatusRoutes({
   requireSetupAdmin,
 }: Pick<SetupRouteContext, "router" | "wizardService" | "requireSetupAdmin">): void {
   router.get("/status", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
 
-    const status = await wizardService.getStatus(req.organizationId);
+    const status = await wizardService.getStatus(req.organizationId!);
     // Post-setup guard: once wizard is complete, only admins can access setup routes
     if (status.completedAt && !requireSetupAdmin(req, res)) {
       return;

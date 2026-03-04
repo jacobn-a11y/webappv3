@@ -192,6 +192,8 @@ interface SegmentProps {
   matchRefs: React.MutableRefObject<Map<number, HTMLElement>>;
   segmentRefs: React.MutableRefObject<Map<string, HTMLDivElement>>;
   highlightedSegmentId: string | null;
+  onSaveQuote?: (segment: TranscriptData["segments"][number]) => void;
+  savingSegmentId?: string | null;
 }
 
 function Segment({
@@ -202,6 +204,8 @@ function Segment({
   matchRefs,
   segmentRefs,
   highlightedSegmentId,
+  onSaveQuote,
+  savingSegmentId,
 }: SegmentProps) {
   const speaker = segment.speaker ?? "Unknown Speaker";
   const color = speakerColor(speaker);
@@ -238,11 +242,23 @@ function Segment({
       <div className="transcript__seg-body">
         <div className="transcript__seg-header">
           <span className="transcript__seg-speaker">{speaker}</span>
-          {segment.endMs != null && segment.startMs != null && (
-            <span className="transcript__seg-duration">
-              {formatMs(segment.endMs - segment.startMs)}
-            </span>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {segment.endMs != null && segment.startMs != null && (
+              <span className="transcript__seg-duration">
+                {formatMs(segment.endMs - segment.startMs)}
+              </span>
+            )}
+            {onSaveQuote && (
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                disabled={savingSegmentId === segment.id}
+                onClick={() => onSaveQuote(segment)}
+              >
+                {savingSegmentId === segment.id ? "Saving..." : "Save quote"}
+              </button>
+            )}
+          </div>
         </div>
         <div className="transcript__seg-text">
           {parts.map((part, i) =>
@@ -295,6 +311,8 @@ export interface TranscriptBodyProps {
   matchRefs: React.MutableRefObject<Map<number, HTMLElement>>;
   segmentRefs: React.MutableRefObject<Map<string, HTMLDivElement>>;
   highlightedSegmentId: string | null;
+  onSaveQuote?: (segment: TranscriptData["segments"][number]) => void;
+  savingSegmentId?: string | null;
 }
 
 export function TranscriptBody({
@@ -305,6 +323,8 @@ export function TranscriptBody({
   matchRefs,
   segmentRefs,
   highlightedSegmentId,
+  onSaveQuote,
+  savingSegmentId,
 }: TranscriptBodyProps) {
   if (segments.length === 0) {
     return (
@@ -343,6 +363,8 @@ export function TranscriptBody({
           matchRefs={matchRefs}
           segmentRefs={segmentRefs}
           highlightedSegmentId={highlightedSegmentId}
+          onSaveQuote={onSaveQuote}
+          savingSegmentId={savingSegmentId}
         />
       ))}
     </>

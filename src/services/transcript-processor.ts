@@ -19,6 +19,7 @@ import { RAGEngine } from "./rag-engine.js";
 import { AIConfigService } from "./ai-config.js";
 import { AIUsageTracker } from "./ai-usage-tracker.js";
 import { FailoverAIClient } from "./ai-resilience.js";
+import { QuoteLibraryService } from "./quote-library.js";
 import { maskPII } from "../middleware/pii-masker.js";
 import logger from "../lib/logger.js";
 import { metrics } from "../lib/metrics.js";
@@ -77,6 +78,7 @@ export class TranscriptProcessor {
   private ragEngine: RAGEngine;
   private configService: AIConfigService;
   private usageTracker: AIUsageTracker;
+  private quoteLibrary: QuoteLibraryService;
 
   constructor(
     prisma: PrismaClient,
@@ -90,6 +92,7 @@ export class TranscriptProcessor {
     this.ragEngine = ragEngine;
     this.configService = configService;
     this.usageTracker = usageTracker;
+    this.quoteLibrary = new QuoteLibraryService(prisma);
   }
 
   /**
@@ -178,6 +181,20 @@ export class TranscriptProcessor {
           topics: chunk.tags.map((t) => t.topic),
         });
       }
+    }
+
+    try {
+      await this.quoteLibrary.autoExtractForCall({
+        organizationId,
+        callId,
+        accountId,
+      });
+    } catch (error) {
+      logger.warn("Auto quote extraction failed", {
+        organizationId,
+        callId,
+        error,
+      });
     }
 
     metrics.incrementTranscriptsProcessed();

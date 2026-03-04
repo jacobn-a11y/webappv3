@@ -212,6 +212,11 @@ export interface StoryFormStepProps {
   storyTypeMode: StoryTypeMode;
   storyTypeSearch: string;
   filteredStoryTypeOptions: [TaxonomyTopic, string][];
+  aiModelOptions: Array<{
+    provider: "openai" | "anthropic" | "google";
+    model: string;
+  }>;
+  selectedAIModelKey: string;
 
   // Org defaults
   isLengthDefault: boolean;
@@ -241,6 +246,7 @@ export interface StoryFormStepProps {
   setStoryTypeMode: Dispatch<SetStateAction<StoryTypeMode>>;
   setStoryTypeSearch: Dispatch<SetStateAction<string>>;
   setSelectedTopics: Dispatch<SetStateAction<TaxonomyTopic[]>>;
+  setSelectedAIModelKey: Dispatch<SetStateAction<string>>;
 
   // Template delete
   handleDeleteSavedTemplate: (assetId: string) => void;
@@ -287,6 +293,8 @@ export function StoryFormStep(props: StoryFormStepProps) {
     storyTypeMode,
     storyTypeSearch,
     filteredStoryTypeOptions,
+    aiModelOptions,
+    selectedAIModelKey,
     isLengthDefault,
     isOutlineDefault,
     isTypeDefault,
@@ -310,6 +318,7 @@ export function StoryFormStep(props: StoryFormStepProps) {
     setStoryTypeMode,
     setStoryTypeSearch,
     setSelectedTopics,
+    setSelectedAIModelKey,
     handleDeleteSavedTemplate,
     trackSellerEvent,
   } = props;
@@ -385,6 +394,30 @@ export function StoryFormStep(props: StoryFormStepProps) {
               </div>
             </div>
           </div>
+          {aiModelOptions.length > 0 && (
+            <div className="form-grid-2">
+              <div className="form-field">
+                <label className="form-field__label" htmlFor="story-ai-model">
+                  Model
+                </label>
+                <select
+                  id="story-ai-model"
+                  className="form-field__input"
+                  value={selectedAIModelKey}
+                  onChange={(e) => setSelectedAIModelKey(e.target.value)}
+                >
+                  {aiModelOptions.map((option) => (
+                    <option
+                      key={`${option.provider}:${option.model}`}
+                      value={`${option.provider}:${option.model}`}
+                    >
+                      {`${option.provider.toUpperCase()} - ${option.model}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
           {visibilityMode === "NAMED" && (
             <div className="alert alert--warning" role="note">
               <label className="form-row" style={{ marginTop: 8 }}>

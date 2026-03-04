@@ -24,12 +24,12 @@ async function canManageSupportImpersonation(
   prisma: PrismaClient,
   req: AuthenticatedRequest
 ): Promise<boolean> {
-  if (!req.userId) return false;
+  if (!req.userId!) return false;
   if (req.userRole === "OWNER" || req.userRole === "ADMIN") return true;
   const grant = await prisma.userPermission.findUnique({
     where: {
       userId_permission: {
-        userId: req.userId,
+        userId: req.userId!,
         permission: "MANAGE_PERMISSIONS",
       },
     },
@@ -55,7 +55,7 @@ export function registerSupportImpersonationRoutes({
     "/support/impersonation/sessions",
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      if (!req.organizationId || !req.userId) {
+      if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res, "authentication_required");
       return;
       }
@@ -66,7 +66,7 @@ export function registerSupportImpersonationRoutes({
       }
 
       const sessions = await prisma.supportImpersonationSession.findMany({
-      where: { organizationId: req.organizationId },
+      where: { organizationId: req.organizationId! },
       include: {
         actorUser: { select: { id: true, email: true, name: true, role: true } },
         targetUser: { select: { id: true, email: true, name: true, role: true } },
@@ -109,7 +109,7 @@ export function registerSupportImpersonationRoutes({
         return;
       }
 
-      if (!req.organizationId || !req.userId) {
+      if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res, "authentication_required");
       return;
       }
@@ -129,7 +129,7 @@ export function registerSupportImpersonationRoutes({
       const target = await prisma.user.findFirst({
       where: {
         id: payload.target_user_id,
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
       },
       select: { id: true, role: true, email: true },
       });
@@ -159,8 +159,8 @@ export function registerSupportImpersonationRoutes({
 
       const session = await prisma.supportImpersonationSession.create({
       data: {
-        organizationId: req.organizationId,
-        actorUserId: req.userId,
+        organizationId: req.organizationId!,
+        actorUserId: req.userId!,
         targetUserId: target.id,
         reason: payload.reason.trim(),
         scope,
@@ -170,8 +170,8 @@ export function registerSupportImpersonationRoutes({
       });
 
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "SUPPORT",
       action: "SUPPORT_IMPERSONATION_STARTED",
       targetType: "user",
@@ -205,7 +205,7 @@ export function registerSupportImpersonationRoutes({
     "/support/impersonation/:sessionId/revoke",
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      if (!req.organizationId || !req.userId) {
+      if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res, "authentication_required");
       return;
       }
@@ -220,7 +220,7 @@ export function registerSupportImpersonationRoutes({
       const existing = await prisma.supportImpersonationSession.findFirst({
       where: {
         id: sessionId,
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
       },
       select: {
         id: true,
@@ -242,13 +242,13 @@ export function registerSupportImpersonationRoutes({
       where: { id: sessionId },
       data: {
         revokedAt,
-        revokedByUserId: req.userId,
+        revokedByUserId: req.userId!,
       },
       });
 
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "SUPPORT",
       action: "SUPPORT_IMPERSONATION_REVOKED",
       targetType: "user",

@@ -41,6 +41,7 @@ import {
 import {
   createSharedAsset,
   deleteSharedAsset,
+  getAvailableAIProviders,
   getSharedAssets,
   getStoryContextSettings,
   type SharedAsset,
@@ -281,6 +282,10 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
   );
   const [namedPermissionConfirmed, setNamedPermissionConfirmed] =
     useState(false);
+  const [aiModelOptions, setAiModelOptions] = useState<
+    Array<{ provider: "openai" | "anthropic" | "google"; model: string }>
+  >([]);
+  const [selectedAIModelKey, setSelectedAIModelKey] = useState("");
 
   // ── Template state ──────────────────────────────────────────────────────
 
@@ -323,6 +328,14 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
   const isOutlineDefault = orgDefaults?.default_story_outline === storyOutline;
   const isTypeDefault = orgDefaults?.default_story_type === storyType;
   const isFormatDefault = orgDefaults?.default_story_format === selectedFormat;
+  const selectedAIModel = useMemo(
+    () =>
+      aiModelOptions.find(
+        (option) =>
+          `${option.provider}:${option.model}` === selectedAIModelKey,
+      ) ?? null,
+    [aiModelOptions, selectedAIModelKey],
+  );
 
   // ── Persistence effect ──────────────────────────────────────────────────
 
@@ -387,6 +400,59 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
       })
       .catch(() => {
         // Keep local defaults when org settings are unavailable.
+      });
+  }, []);
+
+  useEffect(() => {
+    getAvailableAIProviders()
+      .then((catalog) => {
+        const options = catalog.org_providers
+          .filter((provider) => provider.is_active)
+          .flatMap((provider) =>
+            (provider.available_models ?? []).map((model) => ({
+              provider: provider.provider as "openai" | "anthropic" | "google",
+              model,
+            })),
+          );
+
+        setAiModelOptions(options);
+        if (options.length === 0) {
+          setSelectedAIModelKey("");
+          return;
+        }
+
+        setSelectedAIModelKey((current) => {
+          if (
+            current &&
+            options.some(
+              (option) => `${option.provider}:${option.model}` === current,
+            )
+          ) {
+            return current;
+          }
+
+          const defaultProvider = catalog.org_providers.find(
+            (provider) => provider.is_default,
+          );
+          if (defaultProvider?.default_model) {
+            const defaultKey = `${defaultProvider.provider}:${defaultProvider.default_model}`;
+            if (
+              options.some(
+                (option) =>
+                  `${option.provider}:${option.model}` === defaultKey,
+              )
+            ) {
+              return defaultKey;
+            }
+          }
+
+          const first = options[0];
+          return `${first.provider}:${first.model}`;
+        });
+      })
+      .catch(() => {
+        setAiModelOptions([]);
+        setSelectedAIModelKey("");
       });
   }, []);
 
@@ -572,6 +638,8 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
         story_length: effectiveStoryLength,
         story_outline: effectiveStoryOutline,
         story_type: effectiveStoryType,
+        ai_provider: selectedAIModel?.provider,
+        ai_model: selectedAIModel?.model,
       });
     },
     [
@@ -586,6 +654,7 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
       onPhaseError,
       runStoryGeneration,
       selectedFormat,
+      selectedAIModel,
       selectedStages,
       selectedTopics,
       setSelectedTopics,
@@ -779,6 +848,9 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
     visibilityMode,
     namedPermissionConfirmed,
     setNamedPermissionConfirmed,
+    aiModelOptions,
+    selectedAIModelKey,
+    setSelectedAIModelKey,
 
     // Templates
     allTemplates,

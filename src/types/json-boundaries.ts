@@ -11,6 +11,12 @@ const optionalBool = () => z.boolean().optional().catch(undefined);
 const optionalStringArray = (maxItemLength: number) =>
   z.array(z.string().min(1).max(maxItemLength)).optional().catch(undefined);
 
+const optionalIntArray = (min: number, max: number) =>
+  z
+    .array(z.number().int().min(min).max(max))
+    .optional()
+    .catch(undefined);
+
 const DataGovernancePolicySchema = z
   .object({
     retention_days: optionalInt(30, 3650),
@@ -23,6 +29,11 @@ const DataGovernancePolicySchema = z
     rpo_target_minutes: optionalInt(5, 60 * 24 * 14),
     ai_retry_budget: optionalInt(1, 5),
     ai_spend_alert_daily_cents: optionalInt(500, Number.MAX_SAFE_INTEGER),
+    ai_budget_mode: z.enum(["TOKENS", "COST_CENTS"]).optional().catch(undefined),
+    ai_budget_monthly_tokens: optionalInt(1_000, Number.MAX_SAFE_INTEGER),
+    ai_budget_monthly_cents: optionalInt(100, Number.MAX_SAFE_INTEGER),
+    ai_budget_thresholds: optionalIntArray(1, 100),
+    ai_budget_block_at_100: optionalBool(),
   })
   .passthrough();
 

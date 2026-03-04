@@ -70,8 +70,9 @@ export function PageFilters({
       >
         <option value="">All Statuses</option>
         <option value="DRAFT">Draft</option>
+        <option value="IN_REVIEW">In Review</option>
+        <option value="APPROVED">Approved</option>
         <option value="PUBLISHED">Published</option>
-        <option value="ARCHIVED">Archived</option>
       </select>
 
       <select

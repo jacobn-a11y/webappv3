@@ -7,6 +7,7 @@ import { PROVIDER_MODELS, type AIProviderName } from "../../services/ai-client.j
 import { AISettingsService } from "../../services/ai-settings.js";
 import { parseAIProviderName } from "../../services/provider-policy.js";
 import {
+  BudgetAlertSettingsSchema,
   OrgAISettingsSchema,
   SetLimitSchema,
   SetRoleDefaultSchema,
@@ -14,6 +15,7 @@ import {
   UpsertProviderSchema,
   ValidateKeySchema,
 } from "./schemas.js";
+import { decodeDataGovernancePolicy, encodeJsonValue } from "../../types/json-boundaries.js";
 import type { AISettingsRouteContext, AuthReq } from "./types.js";
 import { asyncHandler } from "../../lib/async-handler.js";
 
@@ -29,12 +31,12 @@ export function registerAISettingsAdminRoutes({
     "/admin/settings",
     requirePermission(prisma, "manage_ai_settings"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
-        const settings = await aiSettingsService.getOrgSettings(req.organizationId);
+        const settings = await aiSettingsService.getOrgSettings(req.organizationId!);
 
         sendSuccess(res, { settings: settings ?? null });
 
@@ -50,12 +52,12 @@ export function registerAISettingsAdminRoutes({
         return;
       }
 
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
-        await aiSettingsService.upsertOrgSettings(req.organizationId, payload);
+        await aiSettingsService.upsertOrgSettings(req.organizationId!, payload);
 
         sendSuccess(res, { saved: true });
       
@@ -66,12 +68,12 @@ export function registerAISettingsAdminRoutes({
     "/admin/providers",
     requirePermission(prisma, "manage_ai_settings"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
-        const configs = await configService.listOrgConfigs(req.organizationId);
+        const configs = await configService.listOrgConfigs(req.organizationId!);
 
         sendSuccess(res, {
           providers: configs.map((config) => ({
@@ -101,12 +103,12 @@ export function registerAISettingsAdminRoutes({
         return;
       }
 
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
-        const configId = await configService.upsertOrgConfig(req.organizationId, {
+        const configId = await configService.upsertOrgConfig(req.organizationId!, {
           provider: payload.provider as AIProviderName,
           apiKey: payload.api_key,
           displayName: payload.display_name,
@@ -143,7 +145,7 @@ export function registerAISettingsAdminRoutes({
     "/admin/providers/:provider",
     requirePermission(prisma, "manage_ai_settings"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
@@ -154,7 +156,7 @@ export function registerAISettingsAdminRoutes({
         return;
       }
 
-        await configService.deleteOrgConfig(req.organizationId, provider);
+        await configService.deleteOrgConfig(req.organizationId!, provider);
         sendSuccess(res, { deleted: true });
       
     }
@@ -164,12 +166,12 @@ export function registerAISettingsAdminRoutes({
     "/admin/role-defaults",
     requirePermission(prisma, "manage_ai_settings"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
-        const defaults = await aiSettingsService.listRoleDefaults(req.organizationId);
+        const defaults = await aiSettingsService.listRoleDefaults(req.organizationId!);
 
         sendSuccess(res, { role_defaults: defaults });
       
@@ -185,12 +187,12 @@ export function registerAISettingsAdminRoutes({
         return;
       }
 
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
-        await aiSettingsService.upsertRoleDefault(req.organizationId, payload);
+        await aiSettingsService.upsertRoleDefault(req.organizationId!, payload);
 
         sendSuccess(res, { saved: true });
       
@@ -201,13 +203,13 @@ export function registerAISettingsAdminRoutes({
     "/admin/role-defaults/:role",
     requirePermission(prisma, "manage_ai_settings"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
         await aiSettingsService.deleteRoleDefault(
-          req.organizationId,
+          req.organizationId!,
           req.params.role as UserRole
         );
 
@@ -220,12 +222,12 @@ export function registerAISettingsAdminRoutes({
     "/admin/user-access",
     requirePermission(prisma, "manage_ai_settings"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
-        const access = await aiSettingsService.listUserAccess(req.organizationId);
+        const access = await aiSettingsService.listUserAccess(req.organizationId!);
 
         sendSuccess(res, { user_access: access });
       
@@ -241,14 +243,14 @@ export function registerAISettingsAdminRoutes({
         return;
       }
 
-      if (!req.organizationId || !req.userId) {
+      if (!req.organizationId! || !req.userId!) {
         sendUnauthorized(res);
         return;
       }
 
         await aiSettingsService.upsertUserAccess(
-          req.organizationId,
-          req.userId,
+          req.organizationId!,
+          req.userId!,
           payload
         );
 
@@ -261,13 +263,13 @@ export function registerAISettingsAdminRoutes({
     "/admin/user-access/:userId",
     requirePermission(prisma, "manage_ai_settings"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
         await aiSettingsService.deleteUserAccess(
-          req.organizationId,
+          req.organizationId!,
           req.params.userId as string
         );
 
@@ -280,12 +282,12 @@ export function registerAISettingsAdminRoutes({
     "/admin/limits",
     requirePermission(prisma, "manage_ai_settings"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
-        const limits = await usageTracker.listLimits(req.organizationId);
+        const limits = await usageTracker.listLimits(req.organizationId!);
         sendSuccess(res, {
           limits: limits.map((limit) => ({
             id: limit.id,
@@ -293,10 +295,13 @@ export function registerAISettingsAdminRoutes({
               ? { id: limit.user.id, name: limit.user.name, email: limit.user.email }
               : null,
             is_org_default: !limit.userId,
+            max_tokens_per_week: limit.maxTokensPerWeek,
             max_tokens_per_day: limit.maxTokensPerDay,
             max_tokens_per_month: limit.maxTokensPerMonth,
+            max_requests_per_week: limit.maxRequestsPerWeek,
             max_requests_per_day: limit.maxRequestsPerDay,
             max_requests_per_month: limit.maxRequestsPerMonth,
+            max_stories_per_week: limit.maxStoriesPerWeek,
             max_stories_per_month: limit.maxStoriesPerMonth,
             warning_threshold_pct: limit.warningThresholdPct,
             created_at: limit.createdAt,
@@ -316,18 +321,21 @@ export function registerAISettingsAdminRoutes({
         return;
       }
 
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
 
         await usageTracker.setLimit({
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           userId: payload.user_id,
+          maxTokensPerWeek: payload.max_tokens_per_week,
           maxTokensPerDay: payload.max_tokens_per_day,
           maxTokensPerMonth: payload.max_tokens_per_month,
+          maxRequestsPerWeek: payload.max_requests_per_week,
           maxRequestsPerDay: payload.max_requests_per_day,
           maxRequestsPerMonth: payload.max_requests_per_month,
+          maxStoriesPerWeek: payload.max_stories_per_week,
           maxStoriesPerMonth: payload.max_stories_per_month,
           warningThresholdPct: payload.warning_threshold_pct,
         });
@@ -341,7 +349,7 @@ export function registerAISettingsAdminRoutes({
     "/admin/limits/:userId",
     requirePermission(prisma, "manage_ai_settings"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
@@ -351,7 +359,7 @@ export function registerAISettingsAdminRoutes({
             ? undefined
             : (req.params.userId as string);
 
-        await usageTracker.removeLimit(req.organizationId, userId);
+        await usageTracker.removeLimit(req.organizationId!, userId);
         sendSuccess(res, { deleted: true });
       
     }
@@ -361,7 +369,7 @@ export function registerAISettingsAdminRoutes({
     "/admin/usage",
     requirePermission(prisma, "manage_ai_settings"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
@@ -369,7 +377,7 @@ export function registerAISettingsAdminRoutes({
         const userId = req.query.user_id as string | undefined;
         const days = parseInt(req.query.days as string, 10) || 30;
 
-        const records = await usageTracker.getUsageHistory(req.organizationId, userId, days);
+        const records = await usageTracker.getUsageHistory(req.organizationId!, userId, days);
 
         sendSuccess(res, {
           records: records.map((record) => ({
@@ -393,7 +401,7 @@ export function registerAISettingsAdminRoutes({
     "/admin/usage/summary",
     requirePermission(prisma, "manage_ai_settings"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res);
         return;
       }
@@ -403,7 +411,7 @@ export function registerAISettingsAdminRoutes({
         startOfMonth.setHours(0, 0, 0, 0);
 
         const buckets = await aiSettingsService.getUsageSummary(
-          req.organizationId,
+          req.organizationId!,
           startOfMonth
         );
 
@@ -421,4 +429,76 @@ export function registerAISettingsAdminRoutes({
       
     }
   ));
+
+  router.get(
+    "/admin/budget-alerts",
+    requirePermission(prisma, "manage_ai_settings"),
+    asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId!) {
+        sendUnauthorized(res);
+        return;
+      }
+
+      const settings = await prisma.orgSettings.findUnique({
+        where: { organizationId: req.organizationId! },
+        select: { dataGovernancePolicy: true },
+      });
+      const policy = decodeDataGovernancePolicy(settings?.dataGovernancePolicy);
+
+      sendSuccess(res, {
+        mode:
+          policy.ai_budget_mode === "TOKENS" || policy.ai_budget_mode === "COST_CENTS"
+            ? policy.ai_budget_mode
+            : "COST_CENTS",
+        monthly_budget_tokens: policy.ai_budget_monthly_tokens ?? null,
+        monthly_budget_cents: policy.ai_budget_monthly_cents ?? null,
+        thresholds: policy.ai_budget_thresholds ?? [80, 90, 100],
+        block_at_100: policy.ai_budget_block_at_100 ?? false,
+      });
+    })
+  );
+
+  router.put(
+    "/admin/budget-alerts",
+    requirePermission(prisma, "manage_ai_settings"),
+    asyncHandler(async (req: AuthReq, res: Response) => {
+      const payload = parseRequestBody(BudgetAlertSettingsSchema, req.body, res);
+      if (!payload) {
+        return;
+      }
+      if (!req.organizationId!) {
+        sendUnauthorized(res);
+        return;
+      }
+
+      const current = await prisma.orgSettings.findUnique({
+        where: { organizationId: req.organizationId! },
+        select: { dataGovernancePolicy: true },
+      });
+      const existing = decodeDataGovernancePolicy(current?.dataGovernancePolicy);
+      const next = {
+        ...existing,
+        ai_budget_mode: payload.mode,
+        ai_budget_monthly_tokens: payload.monthly_budget_tokens ?? null,
+        ai_budget_monthly_cents: payload.monthly_budget_cents ?? null,
+        ai_budget_thresholds: Array.from(new Set(payload.thresholds)).sort(
+          (a, b) => a - b
+        ),
+        ai_budget_block_at_100: payload.block_at_100 ?? false,
+      };
+
+      await prisma.orgSettings.upsert({
+        where: { organizationId: req.organizationId! },
+        create: {
+          organizationId: req.organizationId!,
+          dataGovernancePolicy: encodeJsonValue(next),
+        },
+        update: {
+          dataGovernancePolicy: encodeJsonValue(next),
+        },
+      });
+
+      sendSuccess(res, { saved: true, settings: next });
+    })
+  );
 }

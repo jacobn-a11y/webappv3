@@ -448,8 +448,8 @@ export class AccountAccessService {
       createdAt: Date;
       category: string;
       action: string;
-      targetType: string;
-      targetId: string;
+      targetType: string | null;
+      targetId: string | null;
       severity: string;
     }>;
   }> {

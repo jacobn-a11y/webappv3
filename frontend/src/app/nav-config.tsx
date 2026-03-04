@@ -183,6 +183,10 @@ export function buildNav(
     coreItems.push({ to: "/accounts", label: t("nav.accounts", "Accounts"), icon: IconAccounts });
   }
   coreItems.push({ to: "/stories", label: t("nav.stories", "Stories"), icon: IconBook });
+  coreItems.push({ to: "/quotes", label: t("nav.quotes", "Quotes"), icon: IconBook });
+  coreItems.push({ to: "/taxonomy", label: t("nav.taxonomy", "Taxonomy"), icon: IconFolder });
+  coreItems.push({ to: "/my-queue", label: t("nav.my_queue", "My Queue"), icon: IconClipboard });
+  coreItems.push({ to: "/content-queue", label: t("nav.content_queue", "Content Queue"), icon: IconActivity });
   coreItems.push({ to: "/dashboard/pages", label: t("nav.pages", "Pages"), icon: IconPages });
   if (!isMember) {
     coreItems.push({ to: "/analytics", label: t("nav.analytics", "Analytics"), icon: IconAnalytics });
@@ -204,6 +208,7 @@ export function buildNav(
         { to: "/admin/governance", label: t("nav.governance", "Governance"), icon: IconDatabase },
         { to: "/admin/publish-approvals", label: t("nav.approvals", "Approvals"), icon: IconCheckCircle },
         { to: "/admin/data-quality", label: t("nav.data_quality", "Data Quality"), icon: IconStar },
+        { to: "/admin/ai-usage", label: t("nav.ai_usage", "AI Usage"), icon: IconActivity },
         { to: "/admin/setup", label: t("nav.setup", "Setup"), icon: IconTool },
         { to: "/admin/settings/integrations", label: t("nav.integrations", "Integrations"), icon: IconRefresh },
       );

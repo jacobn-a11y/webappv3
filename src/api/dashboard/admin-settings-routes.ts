@@ -18,6 +18,14 @@ import { asyncHandler } from "../../lib/async-handler.js";
 const UpdateOrgSettingsSchema = z.object({
   landing_pages_enabled: z.boolean().optional(),
   default_page_visibility: z.enum(["PRIVATE", "SHARED_WITH_LINK"]).optional(),
+  approval_policy: z
+    .enum([
+      "ALL_REQUIRED",
+      "ANON_NO_APPROVAL",
+      "NAMED_NO_APPROVAL",
+      "ALL_NO_APPROVAL",
+    ])
+    .optional(),
   require_approval_to_publish: z.boolean().optional(),
   allowed_publishers: z
     .array(z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"]))
@@ -120,12 +128,13 @@ export function registerAdminSettingsRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const settings = await settingsService.getOrgSettings(req.organizationId);
+      const settings = await settingsService.getOrgSettings(req.organizationId!);
 
       sendSuccess(res, {
       settings: settings ?? {
         landing_pages_enabled: true,
         default_page_visibility: "PRIVATE",
+        approval_policy: "ALL_REQUIRED",
         require_approval_to_publish: false,
         allowed_publishers: ["OWNER", "ADMIN"],
         max_pages_per_user: null,
@@ -150,9 +159,10 @@ export function registerAdminSettingsRoutes({
         return;
       }
 
-        await permManager.updateOrgSettings(req.organizationId, {
+        await permManager.updateOrgSettings(req.organizationId!, {
           landingPagesEnabled: payload.landing_pages_enabled,
           defaultPageVisibility: payload.default_page_visibility,
+          approvalPolicy: payload.approval_policy,
           requireApprovalToPublish: payload.require_approval_to_publish,
           allowedPublishers: payload.allowed_publishers as UserRole[] | undefined,
           maxPagesPerUser: payload.max_pages_per_user,
@@ -171,7 +181,7 @@ export function registerAdminSettingsRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const { context, defaults } = await settingsService.getStoryContext(req.organizationId);
+      const { context, defaults } = await settingsService.getStoryContext(req.organizationId!);
       const branding = context.publishedBranding ?? {};
 
       sendSuccess(res, {
@@ -211,14 +221,14 @@ export function registerAdminSettingsRoutes({
 
       const d = payload;
 
-      await settingsService.upsertStoryContext(req.organizationId, d);
+      await settingsService.upsertStoryContext(req.organizationId!, d);
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "POLICY",
       action: "STORY_CONTEXT_UPDATED",
       targetType: "org_settings",
-      targetId: req.organizationId,
+      targetId: req.organizationId!,
       severity: "WARN",
       metadata: { updated_fields: Object.keys(d) },
       ipAddress: req.ip,
@@ -236,7 +246,7 @@ export function registerAdminSettingsRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const policy = await settingsService.getDataGovernancePolicy(req.organizationId);
+      const policy = await settingsService.getDataGovernancePolicy(req.organizationId!);
       sendSuccess(res, {
       retention_days: policy.retention_days ?? 365,
       audit_log_retention_days: policy.audit_log_retention_days ?? 365,
@@ -262,14 +272,14 @@ export function registerAdminSettingsRoutes({
 
       const d = payload;
 
-      await settingsService.upsertDataGovernancePolicy(req.organizationId, d);
+      await settingsService.upsertDataGovernancePolicy(req.organizationId!, d);
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "POLICY",
       action: "DATA_GOVERNANCE_POLICY_UPDATED",
       targetType: "org_settings",
-      targetId: req.organizationId,
+      targetId: req.organizationId!,
       severity: "WARN",
       metadata: { updated_fields: Object.keys(d) },
       ipAddress: req.ip,
@@ -281,13 +291,80 @@ export function registerAdminSettingsRoutes({
   ));
 
   router.get(
+    "/data-governance/overview",
+    requirePermission(prisma, "manage_permissions"),
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+      const policy = await settingsService.getDataGovernancePolicy(req.organizationId!);
+      const retentionDays = policy.retention_days ?? 365;
+      const retentionCutoff = new Date(
+        Date.now() - retentionDays * 24 * 60 * 60 * 1000
+      );
+
+      const [pendingApprovalsCount, pendingDeletionCount, eligibleCallDeletions, recentAuditEvents] =
+        await Promise.all([
+          prisma.approvalRequest.count({
+            where: {
+              organizationId: req.organizationId!,
+              status: "PENDING",
+              requestType: { not: "DATA_DELETION" },
+            },
+          }),
+          prisma.approvalRequest.count({
+            where: {
+              organizationId: req.organizationId!,
+              status: "PENDING",
+              requestType: "DATA_DELETION",
+            },
+          }),
+          prisma.call.count({
+            where: {
+              organizationId: req.organizationId!,
+              occurredAt: { lt: retentionCutoff },
+            },
+          }),
+          prisma.auditLog.findMany({
+            where: { organizationId: req.organizationId! },
+            orderBy: { createdAt: "desc" },
+            take: 10,
+            select: {
+              id: true,
+              category: true,
+              action: true,
+              severity: true,
+              createdAt: true,
+              actorUserId: true,
+            },
+          }),
+        ]);
+
+      sendSuccess(res, {
+        pending_approvals_count: pendingApprovalsCount,
+        pending_deletion_requests_count: pendingDeletionCount,
+        retention_days: retentionDays,
+        eligible_call_deletions: eligibleCallDeletions,
+        legal_hold_enabled: policy.legal_hold_enabled ?? false,
+        pii_export_enabled: policy.pii_export_enabled ?? true,
+        allow_named_story_exports: policy.allow_named_story_exports ?? false,
+        recent_audit_events: recentAuditEvents.map((event) => ({
+          id: event.id,
+          category: event.category,
+          action: event.action,
+          severity: event.severity,
+          actor_user_id: event.actorUserId,
+          created_at: event.createdAt.toISOString(),
+        })),
+      });
+    })
+  );
+
+  router.get(
     "/data-governance/deletion-requests",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const status = (req.query.status as string | undefined)?.trim().toUpperCase();
 
         const requests = await settingsService.listDeletionRequests(
-          req.organizationId,
+          req.organizationId!,
           status
         );
         sendSuccess(res, {
@@ -318,7 +395,7 @@ export function registerAdminSettingsRoutes({
         return;
       }
 
-        const orgId = req.organizationId;
+        const orgId = req.organizationId!;
         const policy = await settingsService.getDataGovernancePolicy(orgId);
 
         if (policy.legal_hold_enabled) {
@@ -334,13 +411,13 @@ export function registerAdminSettingsRoutes({
             orgId,
             payload.target_type,
             payload.target_id,
-            req.userId,
+            req.userId!,
             payload.reason ?? null
           );
 
           await auditLogs.record({
             organizationId: orgId,
-            actorUserId: req.userId,
+            actorUserId: req.userId!,
             category: "GOVERNANCE",
             action: "DATA_DELETION_REQUESTED",
             targetType: payload.target_type.toLowerCase(),
@@ -366,7 +443,7 @@ export function registerAdminSettingsRoutes({
         );
         await auditLogs.record({
           organizationId: orgId,
-          actorUserId: req.userId,
+          actorUserId: req.userId!,
           category: "GOVERNANCE",
           action: "DATA_DELETION_EXECUTED",
           targetType: payload.target_type.toLowerCase(),
@@ -397,7 +474,7 @@ export function registerAdminSettingsRoutes({
       const requestId = String(req.params.requestId);
       const request = await settingsService.findDeletionRequest(
       requestId,
-      req.organizationId
+      req.organizationId!
       );
       if (!request) {
       sendNotFound(res, "Deletion request not found");
@@ -411,12 +488,12 @@ export function registerAdminSettingsRoutes({
       if (payload.decision === "REJECT") {
       const updated = await settingsService.rejectDeletionRequest(
         request.id,
-        req.userId,
+        req.userId!,
         payload.review_notes ?? null
       );
       await auditLogs.record({
-        organizationId: req.organizationId,
-        actorUserId: req.userId,
+        organizationId: req.organizationId!,
+        actorUserId: req.userId!,
         category: "GOVERNANCE",
         action: "DATA_DELETION_REJECTED",
         targetType: updated.targetType.toLowerCase(),
@@ -432,18 +509,18 @@ export function registerAdminSettingsRoutes({
 
       const targetType = request.targetType as "CALL" | "STORY" | "LANDING_PAGE";
       const deleted = await deleteGovernedTarget(
-      req.organizationId,
+      req.organizationId!,
       targetType,
       request.targetId
       );
       const updated = await settingsService.completeDeletionRequest(
       request.id,
-      req.userId,
+      req.userId!,
       payload.review_notes ?? null
       );
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "GOVERNANCE",
       action: "DATA_DELETION_APPROVED_AND_EXECUTED",
       targetType: updated.targetType.toLowerCase(),

@@ -21,6 +21,8 @@ const RolePermissionEnum = z.enum([
   "CREATE_LANDING_PAGE",
   "PUBLISH_LANDING_PAGE",
   "PUBLISH_NAMED_LANDING_PAGE",
+  "APPROVE_PUBLISH_REQUESTS",
+  "VIEW_RAW_TRANSCRIPTS",
   "EDIT_ANY_LANDING_PAGE",
   "DELETE_ANY_LANDING_PAGE",
   "MANAGE_PERMISSIONS",
@@ -63,6 +65,8 @@ const GrantPermissionSchema = z.object({
     "CREATE_LANDING_PAGE",
     "PUBLISH_LANDING_PAGE",
     "PUBLISH_NAMED_LANDING_PAGE",
+    "APPROVE_PUBLISH_REQUESTS",
+    "VIEW_RAW_TRANSCRIPTS",
     "EDIT_ANY_LANDING_PAGE",
     "DELETE_ANY_LANDING_PAGE",
     "MANAGE_PERMISSIONS",
@@ -98,7 +102,7 @@ export function registerAccessControlRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const matrix = await permManager.getOrgPermissionMatrix(
-      req.organizationId
+      req.organizationId!
       );
       sendSuccess(res, { users: matrix });
       
@@ -112,11 +116,11 @@ export function registerAccessControlRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      await roleProfiles.ensurePresetRoles(req.organizationId);
+      await roleProfiles.ensurePresetRoles(req.organizationId!);
 
       const [roles, users] = await Promise.all([
       prisma.roleProfile.findMany({
-        where: { organizationId: req.organizationId },
+        where: { organizationId: req.organizationId! },
         orderBy: [{ isPreset: "desc" }, { name: "asc" }],
         include: {
           assignments: {
@@ -128,7 +132,7 @@ export function registerAccessControlRoutes({
         },
       }),
       prisma.user.findMany({
-        where: { organizationId: req.organizationId },
+        where: { organizationId: req.organizationId! },
         select: {
           id: true,
           name: true,
@@ -166,7 +170,7 @@ export function registerAccessControlRoutes({
         const d = payload;
         const role = await prisma.roleProfile.create({
           data: {
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
             key: d.key,
             name: d.name,
             description: d.description,
@@ -200,7 +204,7 @@ export function registerAccessControlRoutes({
       }
 
         const existing = await prisma.roleProfile.findFirst({
-          where: { id: req.params.roleId as string, organizationId: req.organizationId },
+          where: { id: req.params.roleId as string, organizationId: req.organizationId! },
         });
         if (!existing) {
           sendNotFound(res, "Role profile not found");
@@ -244,7 +248,7 @@ export function registerAccessControlRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const role = await prisma.roleProfile.findFirst({
-      where: { id: req.params.roleId as string, organizationId: req.organizationId },
+      where: { id: req.params.roleId as string, organizationId: req.organizationId! },
       });
       if (!role) {
       sendNotFound(res, "Role profile not found");
@@ -275,14 +279,14 @@ export function registerAccessControlRoutes({
 
       try {
         await roleProfiles.assignRoleToUser(
-          req.organizationId,
+          req.organizationId!,
           payload.user_id,
           payload.role_profile_id,
-          req.userId
+          req.userId!
         );
         await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
+          organizationId: req.organizationId!,
+          actorUserId: req.userId!,
           category: "PERMISSION",
           action: "ROLE_PROFILE_ASSIGNED",
           targetType: "user",
@@ -317,11 +321,11 @@ export function registerAccessControlRoutes({
         await permManager.grantPermission(
           payload.user_id,
           payload.permission as PermissionType,
-          req.userId
+          req.userId!
         );
         await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
+          organizationId: req.organizationId!,
+          actorUserId: req.userId!,
           category: "PERMISSION",
           action: "USER_PERMISSION_GRANTED",
           targetType: "user",
@@ -355,8 +359,8 @@ export function registerAccessControlRoutes({
           payload.permission as PermissionType
         );
         await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
+          organizationId: req.organizationId!,
+          actorUserId: req.userId!,
           category: "PERMISSION",
           action: "USER_PERMISSION_REVOKED",
           targetType: "user",

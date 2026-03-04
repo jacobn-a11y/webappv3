@@ -16,10 +16,13 @@ export const ValidateKeySchema = z.object({
 
 export const SetLimitSchema = z.object({
   user_id: z.string().optional(),
+  max_tokens_per_week: z.number().int().min(0).nullable().optional(),
   max_tokens_per_day: z.number().int().min(0).nullable().optional(),
   max_tokens_per_month: z.number().int().min(0).nullable().optional(),
+  max_requests_per_week: z.number().int().min(0).nullable().optional(),
   max_requests_per_day: z.number().int().min(0).nullable().optional(),
   max_requests_per_month: z.number().int().min(0).nullable().optional(),
+  max_stories_per_week: z.number().int().min(0).nullable().optional(),
   max_stories_per_month: z.number().int().min(0).nullable().optional(),
   warning_threshold_pct: z.number().int().min(1).max(99).optional(),
 });
@@ -54,4 +57,12 @@ export const OrgAISettingsSchema = z.object({
   per_seat_token_budget_per_month: z.number().int().min(0).optional().nullable(),
   per_seat_stories_per_month: z.number().int().min(0).optional().nullable(),
   max_stories_per_month: z.number().int().min(0).optional().nullable(),
+});
+
+export const BudgetAlertSettingsSchema = z.object({
+  mode: z.enum(["TOKENS", "COST_CENTS"]),
+  monthly_budget_tokens: z.number().int().min(0).nullable().optional(),
+  monthly_budget_cents: z.number().int().min(0).nullable().optional(),
+  thresholds: z.array(z.number().int().min(1).max(100)).min(1).max(5),
+  block_at_100: z.boolean().optional(),
 });

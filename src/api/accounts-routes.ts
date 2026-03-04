@@ -79,7 +79,7 @@ export function createAccountsRoutes(prisma: PrismaClient): Router {
    *   MEMBER/VIEWER see only accounts they've been granted access to.
    */
   router.get("/", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId || !req.userId) {
+    if (!req.organizationId! || !req.userId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
@@ -91,8 +91,8 @@ export function createAccountsRoutes(prisma: PrismaClient): Router {
     }
 
       const result = await accountsService.listAccounts(
-        req.organizationId,
-        req.userId,
+        req.organizationId!,
+        req.userId!,
         req.userRole,
         {
           search: parse.data.search,
@@ -123,7 +123,7 @@ export function createAccountsRoutes(prisma: PrismaClient): Router {
    * This is a static endpoint — no auth scoping needed beyond org membership.
    */
   router.get("/stages", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res, "Authentication required");
       return;
     }

@@ -54,13 +54,13 @@ export function registerAccountAccessRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const orgUsers = await accessService.listOrgUsers(req.organizationId);
+      const orgUsers = await accessService.listOrgUsers(req.organizationId!);
 
       const users = await Promise.all(
       orgUsers.map(async (m: { id: string; name: string | null; email: string; role: string }) => {
         const grants = await accessService.listUserAccess(
           m.id,
-          req.organizationId
+          req.organizationId!
         );
         return {
           user_id: m.id,
@@ -100,7 +100,7 @@ export function registerAccountAccessRoutes({
 
       const grants = await accessService.listUserAccess(
       req.params.userId as string,
-      req.organizationId
+      req.organizationId!
       );
       sendSuccess(res, {
       grants: grants.map((g) => ({
@@ -142,19 +142,19 @@ export function registerAccountAccessRoutes({
       try {
         const grantId = await accessService.grantAccess({
           userId: payload.user_id,
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           scopeType: payload.scope_type as AccountScopeType,
           accountId: payload.account_id,
           accountIds: payload.account_ids,
           crmReportId: payload.crm_report_id,
           crmProvider: payload.crm_provider as CRMProvider | undefined,
           crmReportName: payload.crm_report_name,
-          grantedById: req.userId,
+          grantedById: req.userId!,
         });
 
         await auditLogs.record({
-          organizationId: req.organizationId,
-          actorUserId: req.userId,
+          organizationId: req.organizationId!,
+          actorUserId: req.userId!,
           category: "ACCESS_CONTROL",
           action: "ACCOUNT_ACCESS_GRANTED",
           targetType: "user",
@@ -203,7 +203,7 @@ export function registerAccountAccessRoutes({
 
       const grant = await accessService.findGrantById(
       req.params.grantId as string,
-      req.organizationId
+      req.organizationId!
       );
       if (!grant) {
       sendNotFound(res, "Access grant not found");
@@ -212,8 +212,8 @@ export function registerAccountAccessRoutes({
 
       await accessService.revokeAccess(req.params.grantId as string);
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "ACCESS_CONTROL",
       action: "ACCOUNT_ACCESS_REVOKED",
       targetType: "access_grant",
@@ -269,7 +269,7 @@ export function registerAccountAccessRoutes({
       const hasCursor = !!cursorCreatedAt && !Number.isNaN(cursorCreatedAt.getTime());
 
       const logs = await accessService.queryAuditLogs(
-      req.organizationId,
+      req.organizationId!,
       {
         category,
         actorUserId,
@@ -318,7 +318,7 @@ export function registerAccountAccessRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const policy = await accessService.getDataGovernancePolicy(req.organizationId);
+      const policy = await accessService.getDataGovernancePolicy(req.organizationId!);
       if (policy.pii_export_enabled === false) {
       sendForbidden(res, "Exports are disabled by your organization's data governance policy.");
       return;
@@ -342,7 +342,7 @@ export function registerAccountAccessRoutes({
       const targetId = (req.query.target_id as string | undefined)?.trim();
 
       const logs = await accessService.queryAuditLogs(
-      req.organizationId,
+      req.organizationId!,
       { category, actorUserId, action, severity, targetType, targetId },
       limit
       );
@@ -433,7 +433,7 @@ export function registerAccountAccessRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const organizationId = req.organizationId;
+      const organizationId = req.organizationId!;
       const rawActorUserId = req.params.actorUserId;
       const actorUserId = (
       Array.isArray(rawActorUserId)
@@ -477,7 +477,7 @@ export function registerAccountAccessRoutes({
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const organizationId = req.organizationId;
+      const organizationId = req.organizationId!;
       const targetType = (req.query.target_type as string | undefined)?.trim();
       const targetId = (req.query.target_id as string | undefined)?.trim();
       if (!targetType || !targetId) {

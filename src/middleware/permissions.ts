@@ -13,7 +13,13 @@
  */
 
 import type { Request, Response, NextFunction } from "express";
-import type { PrismaClient, PermissionType, UserRole, TranscriptTruncationMode } from "@prisma/client";
+import type {
+  ApprovalPolicy,
+  PrismaClient,
+  PermissionType,
+  TranscriptTruncationMode,
+  UserRole,
+} from "@prisma/client";
 import { RoleProfileService } from "../services/role-profiles.js";
 import { PolicyService, legacyPermissionActionToPolicyAction } from "../services/policy-engine.js";
 import logger from "../lib/logger.js";
@@ -299,6 +305,7 @@ export class PermissionManager {
     updates: {
       landingPagesEnabled?: boolean;
       defaultPageVisibility?: "PRIVATE" | "SHARED_WITH_LINK";
+      approvalPolicy?: ApprovalPolicy;
       requireApprovalToPublish?: boolean;
       allowedPublishers?: UserRole[];
       maxPagesPerUser?: number | null;

@@ -3,6 +3,7 @@ import type {
   BuildStoryResponse,
   StoryComment,
   StoryLibraryItem,
+  StoryLibraryTaxonomyCounts,
   StorySummary,
 } from "./types";
 import { BASE_URL, buildRequestHeaders, request } from "./http";
@@ -124,12 +125,17 @@ export async function getAccountStories(
 
 export async function getStoryLibrary(params?: {
   search?: string;
+  search_mode?: "keyword" | "semantic";
   story_type?: string;
-  status?: "DRAFT" | "PAGE_CREATED" | "PUBLISHED" | "ARCHIVED";
+  status?: "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED";
+  funnel_stage?: string[];
+  topic?: string[];
+  include_archived?: boolean;
   page?: number;
   limit?: number;
 }): Promise<{
   stories: StoryLibraryItem[];
+  search_mode?: "keyword" | "semantic";
   pagination: {
     page: number;
     limit: number;
@@ -139,13 +145,24 @@ export async function getStoryLibrary(params?: {
 }> {
   const qs = new URLSearchParams();
   if (params?.search) qs.set("search", params.search);
+  if (params?.search_mode) qs.set("search_mode", params.search_mode);
   if (params?.story_type) qs.set("story_type", params.story_type);
   if (params?.status) qs.set("status", params.status);
+  if (params?.funnel_stage && params.funnel_stage.length > 0) {
+    qs.set("funnel_stage", params.funnel_stage.join(","));
+  }
+  if (params?.topic && params.topic.length > 0) {
+    qs.set("topic", params.topic.join(","));
+  }
+  if (params?.include_archived != null) {
+    qs.set("include_archived", params.include_archived ? "true" : "false");
+  }
   if (params?.page != null) qs.set("page", String(params.page));
   if (params?.limit != null) qs.set("limit", String(params.limit));
   const query = qs.toString();
   return request<{
     stories: StoryLibraryItem[];
+    search_mode?: "keyword" | "semantic";
     pagination: {
       page: number;
       limit: number;
@@ -153,6 +170,10 @@ export async function getStoryLibrary(params?: {
       totalPages: number;
     };
   }>(`/stories/library${query ? `?${query}` : ""}`);
+}
+
+export async function getStoryLibraryTaxonomy(): Promise<StoryLibraryTaxonomyCounts> {
+  return request<StoryLibraryTaxonomyCounts>("/stories/library/taxonomy");
 }
 
 export async function deleteStory(storyId: string): Promise<{ deleted: boolean }> {

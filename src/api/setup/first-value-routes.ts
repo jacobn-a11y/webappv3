@@ -62,23 +62,23 @@ export function registerSetupFirstValueRoutes({
   requireSetupAdmin,
 }: Pick<SetupRouteContext, "prisma" | "router" | "wizardService" | "requireSetupAdmin">): void {
   router.get("/first-value/recommendations", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId) {
+    if (!req.organizationId!) {
       sendUnauthorized(res);
       return;
     }
 
-    const wizard = await wizardService.getOrCreateWizard(req.organizationId);
+    const wizard = await wizardService.getOrCreateWizard(req.organizationId!);
     if (wizard.completedAt && !requireSetupAdmin(req, res)) {
       return;
     }
 
     const [storyCount, pageCount, account] = await Promise.all([
-        prisma.story.count({ where: { organizationId: req.organizationId } }),
+        prisma.story.count({ where: { organizationId: req.organizationId! } }),
         prisma.landingPage.count({
-          where: { organizationId: req.organizationId, status: "PUBLISHED" },
+          where: { organizationId: req.organizationId!, status: "PUBLISHED" },
         }),
         prisma.account.findFirst({
-          where: { organizationId: req.organizationId },
+          where: { organizationId: req.organizationId! },
           select: { id: true, name: true },
           orderBy: { updatedAt: "desc" },
         }),

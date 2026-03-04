@@ -11,7 +11,11 @@ import {
   useMemo,
 } from "react";
 import { useLocation, useParams } from "react-router-dom";
-import { getTranscriptData, type TranscriptData } from "../lib/api";
+import {
+  getTranscriptData,
+  saveQuoteFromTranscript,
+  type TranscriptData,
+} from "../lib/api";
 import { TranscriptBody, TagPill } from "./transcript/TranscriptBody";
 import { TranscriptSidebar } from "./transcript/TranscriptSidebar";
 import { TranscriptSearch } from "./transcript/TranscriptSearch";
@@ -47,7 +51,9 @@ export function TranscriptViewerPage() {
   const [data, setData] = useState<TranscriptData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [savingSegmentId, setSavingSegmentId] = useState<string | null>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -243,6 +249,28 @@ export function TranscriptViewerPage() {
     setSidebarCollapsed((prev) => !prev);
   }, []);
 
+  const handleSaveQuote = useCallback(
+    async (segment: TranscriptData["segments"][number]) => {
+      if (!callId) return;
+      setSavingSegmentId(segment.id);
+      setError(null);
+      setNotice(null);
+      try {
+        await saveQuoteFromTranscript({
+          call_id: callId,
+          source_chunk_id: segment.id,
+          quote_text: segment.text,
+        });
+        setNotice("Saved as curated quote.");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save quote");
+      } finally {
+        setSavingSegmentId(null);
+      }
+    },
+    [callId]
+  );
+
   // ─── Render: Loading / Error States ──────────────────────────────────
 
   if (!callId) {
@@ -308,12 +336,22 @@ export function TranscriptViewerPage() {
         {data.meta.title ? `${data.meta.title} Transcript` : "Transcript"}
       </h1>
       <div className={mainClasses}>
+        {notice && (
+          <div className="alert alert--success" style={{ marginBottom: 12 }}>
+            {notice}
+          </div>
+        )}
         {/* Header */}
         <div className="transcript__header">
           <div className="transcript__header-inner">
-            <span className="transcript__header-title">
-              {data.meta.title ?? "Transcript"}
-            </span>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span className="transcript__header-title">
+                {data.meta.title ?? "Transcript"}
+              </span>
+              <span className={`badge ${data.meta.viewMode === "SCRUBBED" ? "badge--warning" : "badge--info"}`}>
+                {data.meta.viewMode === "SCRUBBED" ? "Scrubbed transcript" : "Raw transcript"}
+              </span>
+            </div>
 
             {data.callTags.length > 0 && (
               <div className="transcript__header-tags">
@@ -344,15 +382,17 @@ export function TranscriptViewerPage() {
 
         {/* Transcript Body */}
         <div className="transcript__body">
-          <TranscriptBody
-            segments={data.segments}
-            searchQuery={debouncedQuery}
-            activeMatchIndex={activeMatchIndex}
-            segmentMatchStarts={segmentMatchStarts}
-            matchRefs={matchRefs}
-            segmentRefs={segmentRefs}
-            highlightedSegmentId={highlightedSegmentId}
-          />
+        <TranscriptBody
+          segments={data.segments}
+          searchQuery={debouncedQuery}
+          activeMatchIndex={activeMatchIndex}
+          segmentMatchStarts={segmentMatchStarts}
+          matchRefs={matchRefs}
+          segmentRefs={segmentRefs}
+          highlightedSegmentId={highlightedSegmentId}
+          onSaveQuote={handleSaveQuote}
+          savingSegmentId={savingSegmentId}
+        />
         </div>
       </div>
 

@@ -43,7 +43,7 @@ export function registerDataQualityRoutes({
     requirePermission(prisma, "view_analytics"),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-      const orgId = req.organizationId;
+      const orgId = req.organizationId!;
       const now = new Date();
       const last30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       const prev30 = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
@@ -146,7 +146,7 @@ export function registerDataQualityRoutes({
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
       const story = await prisma.story.findFirst({
-      where: { id: req.params.storyId as string, organizationId: req.organizationId },
+      where: { id: req.params.storyId as string, organizationId: req.organizationId! },
       select: { id: true, title: true, confidenceScore: true, lineageSummary: true },
       });
       if (!story) {
@@ -155,7 +155,7 @@ export function registerDataQualityRoutes({
       }
       const claims = await prisma.storyClaimLineage.findMany({
       where: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         storyId: story.id,
       },
       orderBy: { createdAt: "desc" },
@@ -196,7 +196,7 @@ export function registerDataQualityRoutes({
       const story = await prisma.story.findFirst({
       where: {
         id: payload.story_id,
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
       },
       select: { id: true },
       });
@@ -207,9 +207,9 @@ export function registerDataQualityRoutes({
 
       const feedback = await prisma.storyQualityFeedback.create({
       data: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         storyId: story.id,
-        submittedByUserId: req.userId ?? null,
+        submittedByUserId: req.userId! ?? null,
         feedbackType: payload.feedback_type,
         targetType: payload.target_type,
         targetId: payload.target_id ?? null,
@@ -221,8 +221,8 @@ export function registerDataQualityRoutes({
       });
 
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "GOVERNANCE",
       action: "STORY_QUALITY_FEEDBACK_SUBMITTED",
       targetType: "story",
@@ -254,7 +254,7 @@ export function registerDataQualityRoutes({
 
       const rows = await prisma.storyQualityFeedback.findMany({
       where: {
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
         ...(status ? { status } : {}),
       },
       include: {
@@ -297,7 +297,7 @@ export function registerDataQualityRoutes({
       const feedback = await prisma.storyQualityFeedback.findFirst({
       where: {
         id: req.params.feedbackId as string,
-        organizationId: req.organizationId,
+        organizationId: req.organizationId!,
       },
       });
       if (!feedback) {
@@ -312,8 +312,8 @@ export function registerDataQualityRoutes({
       },
       });
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "POLICY",
       action: "STORY_QUALITY_FEEDBACK_REVIEWED",
       targetType: "story_quality_feedback",

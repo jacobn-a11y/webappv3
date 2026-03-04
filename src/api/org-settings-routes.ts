@@ -16,7 +16,7 @@ import { Resend } from "resend";
 import { requirePermission } from "../middleware/permissions.js";
 import { buildPublicAppUrl } from "../lib/public-app-url.js";
 import { OrgSettingsService } from "../services/org-settings.js";
-import type { OrgRequest } from "../types/authenticated-request.js";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import logger from "../lib/logger.js";
 import { sendSuccess, sendCreated, sendBadRequest, sendUnauthorized, sendForbidden, sendNotFound, sendConflict } from "./_shared/responses.js";
@@ -36,7 +36,7 @@ const UpdateMemberRoleSchema = z.object({
   role: z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"]),
 });
 
-type AuthReq = OrgRequest;
+type AuthReq = AuthenticatedRequest;
 
 function renderInviteEmailHtml(options: {
   orgName: string;
@@ -86,12 +86,12 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      const org = await orgSettings.getOrgDetails(req.organizationId);
+      const org = await orgSettings.getOrgDetails(req.organizationId!);
 
       if (!org) {
         sendNotFound(res, "Organization not found");
@@ -121,12 +121,12 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/anonymization",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      const enabled = await orgSettings.getAnonymizationSetting(req.organizationId);
+      const enabled = await orgSettings.getAnonymizationSetting(req.organizationId!);
 
       sendSuccess(res, {
         anonymization_enabled: enabled,
@@ -146,7 +146,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/anonymization",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -158,7 +158,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         return;
       }
 
-      await orgSettings.setAnonymizationSetting(req.organizationId, parse.data.enabled);
+      await orgSettings.setAnonymizationSetting(req.organizationId!, parse.data.enabled);
 
       sendSuccess(res, {
         updated: true,
@@ -178,13 +178,17 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
       const parse = UpdateOrgNameSchema.safeParse(req.body);
       if (!parse.success) {
         sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
-      await orgSettings.updateOrgName(req.organizationId, parse.data.name);
+      await orgSettings.updateOrgName(req.organizationId!, parse.data.name);
 
       sendSuccess(res, { updated: true });
     })
@@ -201,7 +205,11 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/members",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      const members = await orgSettings.listMembers(req.organizationId);
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
+      const members = await orgSettings.listMembers(req.organizationId!);
 
       sendSuccess(res, { members });
     })
@@ -218,6 +226,10 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/members/:memberId/role",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
       const parse = UpdateMemberRoleSchema.safeParse(req.body);
       if (!parse.success) {
         sendBadRequest(res, "validation_error", parse.error.issues);
@@ -227,7 +239,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
       const memberId = req.params.memberId as string;
       const newRole = parse.data.role as UserRole;
 
-      const targetUser = await orgSettings.findMember(memberId, req.organizationId);
+      const targetUser = await orgSettings.findMember(memberId, req.organizationId!);
 
       if (!targetUser) {
         sendNotFound(res, "Member not found");
@@ -243,7 +255,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
       }
 
       if (targetUser.role === "OWNER" && newRole !== "OWNER") {
-        const ownerCount = await orgSettings.countOwners(req.organizationId);
+        const ownerCount = await orgSettings.countOwners(req.organizationId!);
         if (ownerCount <= 1) {
           sendBadRequest(res, "Cannot remove the last owner. Transfer ownership first.");
           return;
@@ -267,22 +279,26 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/members/:memberId",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
       const memberId = req.params.memberId as string;
 
-      const targetUser = await orgSettings.findMember(memberId, req.organizationId);
+      const targetUser = await orgSettings.findMember(memberId, req.organizationId!);
 
       if (!targetUser) {
         sendNotFound(res, "Member not found");
         return;
       }
 
-      if (memberId === req.userId) {
+      if (memberId === req.userId!) {
         sendBadRequest(res, "You cannot remove yourself from the organization.");
         return;
       }
 
       if (targetUser.role === "OWNER") {
-        const ownerCount = await orgSettings.countOwners(req.organizationId);
+        const ownerCount = await orgSettings.countOwners(req.organizationId!);
         if (ownerCount <= 1) {
           sendBadRequest(res, "Cannot remove the last owner.");
           return;
@@ -307,6 +323,10 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/invites",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
       const parse = InviteMemberSchema.safeParse(req.body);
       if (!parse.success) {
         sendBadRequest(res, "validation_error", parse.error.issues);
@@ -315,7 +335,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
 
       const existingUser = await orgSettings.findExistingUserByEmail(
           parse.data.email,
-          req.organizationId
+          req.organizationId!
         );
 
         if (existingUser) {
@@ -327,10 +347,10 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
         const invite = await orgSettings.upsertInvite({
-          organizationId: req.organizationId,
+          organizationId: req.organizationId!,
           email: parse.data.email,
           role: parse.data.role as UserRole,
-          invitedById: req.userId,
+          invitedById: req.userId!,
           token,
           expiresAt,
         });
@@ -342,8 +362,8 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         if (resend) {
           try {
             const { org, inviter } = await orgSettings.getOrgAndInviter(
-              req.organizationId,
-              req.userId
+              req.organizationId!,
+              req.userId!
             );
 
             await resend.emails.send({
@@ -390,7 +410,11 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/invites",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthReq, res: Response) => {
-      const invites = await orgSettings.listPendingInvites(req.organizationId);
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
+      const invites = await orgSettings.listPendingInvites(req.organizationId!);
 
       sendSuccess(res, {
         invites: invites.map((inv) => ({
@@ -412,9 +436,13 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
     "/invites/:inviteId",
     requirePermission(prisma, "manage_permissions"),
     asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
       const invite = await orgSettings.findInvite(
         req.params.inviteId as string,
-        req.organizationId
+        req.organizationId!
       );
 
       if (!invite) {

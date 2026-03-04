@@ -80,7 +80,7 @@ export function registerSellerAdoptionRoutes({
   router.post(
     "/seller-adoption/events",
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-      if (!req.organizationId || !req.userId) {
+      if (!req.organizationId! || !req.userId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -90,8 +90,8 @@ export function registerSellerAdoptionRoutes({
       }
 
       await auditLogs.record({
-      organizationId: req.organizationId,
-      actorUserId: req.userId,
+      organizationId: req.organizationId!,
+      actorUserId: req.userId!,
       category: "SELLER_ADOPTION",
       action: "FLOW_EVENT",
       targetType: "seller_flow",
@@ -126,7 +126,7 @@ export function registerSellerAdoptionRoutes({
         sendBadRequest(res, "validation_error", query.error.issues);
         return;
       }
-      if (!req.organizationId) {
+      if (!req.organizationId!) {
         sendUnauthorized(res, "Authentication required");
         return;
       }
@@ -136,7 +136,7 @@ export function registerSellerAdoptionRoutes({
 
         const logs = await prisma.auditLog.findMany({
           where: {
-            organizationId: req.organizationId,
+            organizationId: req.organizationId!,
             category: "SELLER_ADOPTION",
             action: "FLOW_EVENT",
             createdAt: { gte: windowStart },
