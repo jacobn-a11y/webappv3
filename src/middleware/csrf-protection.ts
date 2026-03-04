@@ -69,7 +69,10 @@ export function createCsrfProtection() {
 
     const csrfToken = readHeader(req.headers["x-csrf-token"]);
     const expectedCsrf = computeCsrfToken(tokenForCsrf);
-    if (!csrfToken || !crypto.timingSafeEqual(Buffer.from(csrfToken), Buffer.from(expectedCsrf))) {
+    const isValidCsrf = csrfToken
+      ? safeTokenMatch(csrfToken, expectedCsrf) || safeTokenMatch(csrfToken, tokenForCsrf)
+      : false;
+    if (!isValidCsrf) {
       res.status(403).json({
         error: "csrf_validation_failed",
         message:
@@ -95,4 +98,13 @@ export function createCsrfProtection() {
 
 export function getCsrfToken(sessionToken: string): string {
   return computeCsrfToken(sessionToken);
+}
+
+function safeTokenMatch(providedToken: string, expectedToken: string): boolean {
+  const provided = Buffer.from(providedToken, "utf8");
+  const expected = Buffer.from(expectedToken, "utf8");
+  if (provided.length !== expected.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(provided, expected);
 }

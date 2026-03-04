@@ -18,10 +18,11 @@ export function requestLoggingMiddleware(
   res.on("finish", () => {
     const duration = Date.now() - start;
     const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info";
+    const path = req.path;
 
-    logger.log(level, `${req.method} ${req.originalUrl} ${res.statusCode}`, {
+    logger.log(level, `${req.method} ${path} ${res.statusCode}`, {
       method: req.method,
-      url: req.originalUrl,
+      url: path,
       statusCode: res.statusCode,
       durationMs: duration,
       contentLength: res.getHeader("content-length"),

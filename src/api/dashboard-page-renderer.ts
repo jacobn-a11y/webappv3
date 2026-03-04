@@ -13,7 +13,6 @@ import { Router, type Response } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { LandingPageEditor, type LandingPageSummary } from "../services/landing-page-editor.js";
 import { escapeHtml, escapeAttr } from "../lib/html-utils.js";
-import logger from "../lib/logger.js";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import { sendUnauthorized } from "./_shared/responses.js";
@@ -104,7 +103,7 @@ export function createDashboardPageRoutes(prisma: PrismaClient): Router {
         },
       });
 
-      res.setHeader("Cache-Control", "private, no-cache");
+      res.setHeader("Cache-Control", "private, no-store");
       res.send(html);
     
   }));
@@ -971,4 +970,3 @@ function formatNumber(n: number): string {
   if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K";
   return n.toString();
 }
-

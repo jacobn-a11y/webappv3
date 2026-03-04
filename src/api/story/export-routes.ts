@@ -12,6 +12,7 @@ import { markdownToPdfBuffer, markdownToDocxBuffer, sanitizeFileName } from "../
 import type { AccountAccessService } from "../../services/account-access.js";
 import type { RoleProfileService } from "../../services/role-profiles.js";
 import type { StoryQueryService } from "../../services/story-query.js";
+import type { RAGEngine } from "../../services/rag-engine.js";
 import { asyncHandler } from "../../lib/async-handler.js";
 import { sendSuccess, sendBadRequest, sendUnauthorized, sendForbidden, sendNotFound, sendConflict } from "../_shared/responses.js";
 
@@ -28,6 +29,7 @@ interface RegisterExportRoutesOptions {
   storyQuery: StoryQueryService;
   accessService: AccountAccessService;
   roleProfiles: RoleProfileService;
+  ragEngine?: RAGEngine;
 }
 
 export function registerExportRoutes({
@@ -35,6 +37,7 @@ export function registerExportRoutes({
   storyQuery,
   accessService,
   roleProfiles,
+  ragEngine,
 }: RegisterExportRoutesOptions): void {
   router.get("/:storyId/export", asyncHandler(async (req: Request, res: Response) => {
     const parse = ExportQuerySchema.safeParse(req.query);
@@ -144,6 +147,12 @@ export function registerExportRoutes({
         return;
       }
 
+      if (ragEngine) {
+        await ragEngine.pruneVectorsForStory({
+          organizationId,
+          storyId: story.id,
+        });
+      }
       await storyQuery.deleteStory(story.id);
       sendSuccess(res, { deleted: true });
 

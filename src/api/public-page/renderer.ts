@@ -24,8 +24,6 @@ import {
 import {
   getLandingPageStyles,
   PASSWORD_PAGE_STYLES,
-  ERROR_404_STYLES,
-  ERROR_410_STYLES,
 } from "./styles.js";
 
 // ─── Markdown to HTML (simple converter) ─────────────────────────────────────
@@ -303,7 +301,7 @@ function renderPasswordPage(slug: string, showError = false): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
-  <title>Password Required</title>
+  <title>Story Access</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -318,9 +316,9 @@ function renderPasswordPage(slug: string, showError = false): string {
         <path d="M7 11V7a5 5 0 0110 0v4"/>
       </svg>
     </div>
-    <h1>This page is protected</h1>
-    <p class="card__description">Enter the password to view this story.</p>
-    <div class="error" role="alert" ${showError ? '' : 'hidden'}>Incorrect password. Please try again.</div>
+    <h1>Story unavailable or restricted</h1>
+    <p class="card__description">If you were given a password, enter it below.</p>
+    <div class="error" role="alert" ${showError ? '' : 'hidden'}>Unable to access this story with the provided password.</div>
     <form method="POST" action="/s/${escapeHtml(slug)}">
       <div class="form-group">
         <label for="password-input">Password</label>
@@ -328,61 +326,6 @@ function renderPasswordPage(slug: string, showError = false): string {
       </div>
       <button type="submit">View Story</button>
     </form>
-  </main>
-</body>
-</html>`;
-}
-
-// ─── Error Pages ─────────────────────────────────────────────────────────────
-
-function render404(): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="robots" content="noindex, nofollow">
-  <title>Page Not Found</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-  <style>${ERROR_404_STYLES}
-  </style>
-</head>
-<body>
-  <main class="error-page" role="main">
-    <div class="error-page__code" aria-hidden="true">404</div>
-    <h1>Page not found</h1>
-    <p>The story you're looking for doesn't exist or is no longer available.</p>
-  </main>
-</body>
-</html>`;
-}
-
-function render410(): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="robots" content="noindex, nofollow">
-  <title>Link Expired</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-  <style>${ERROR_410_STYLES}
-  </style>
-</head>
-<body>
-  <main class="error-page" role="main">
-    <div class="error-page__icon" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="10"/>
-        <polyline points="12,6 12,12 16,14"/>
-      </svg>
-    </div>
-    <h1>This link has expired</h1>
-    <p>The owner of this story set an expiration date that has passed. Contact the person who shared this link to request access.</p>
   </main>
 </body>
 </html>`;
@@ -401,6 +344,13 @@ export function registerRoutes(deps: {
   async function handleSlugRequest(req: Request, res: Response): Promise<void> {
     const slug = req.params.slug as string;
     const password = typeof req.body?.p === "string" ? req.body.p : undefined;
+    const hasPasswordAttempt = typeof password === "string" && password.length > 0;
+
+    const sendUnavailable = (showError = false) => {
+      res.setHeader("X-Robots-Tag", "noindex, nofollow");
+      res.setHeader("Cache-Control", "private, no-store");
+      res.status(404).send(renderPasswordPage(slug, showError));
+    };
 
     // Check if page exists and needs a password
     const rawPage = await prisma.landingPage.findUnique({
@@ -414,29 +364,29 @@ export function registerRoutes(deps: {
     });
 
     if (!rawPage || rawPage.status !== "PUBLISHED") {
-      res.status(404).send(render404());
+      sendUnavailable(hasPasswordAttempt);
       return;
     }
 
     if (rawPage.expiresAt && new Date() > rawPage.expiresAt) {
-      res.status(410).send(render410());
+      sendUnavailable(hasPasswordAttempt);
       return;
     }
 
     if (rawPage.visibility === "PRIVATE") {
-      res.status(404).send(render404());
+      sendUnavailable(hasPasswordAttempt);
       return;
     }
 
     // Password check
     if (rawPage.password) {
       if (!password) {
-        res.status(200).send(renderPasswordPage(slug));
+        sendUnavailable(false);
         return;
       }
 
       if (!verifyPagePassword(password, rawPage.password)) {
-        res.status(200).send(renderPasswordPage(slug, true));
+        sendUnavailable(true);
         return;
       }
     }
@@ -444,13 +394,13 @@ export function registerRoutes(deps: {
     // Fetch and render
     const page = await editor.getPublicBySlug(slug, password);
     if (!page) {
-      res.status(404).send(render404());
+      sendUnavailable(hasPasswordAttempt);
       return;
     }
 
     // Set noindex headers
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
-    res.setHeader("Cache-Control", "private, no-cache");
+    res.setHeader("Cache-Control", "private, no-store");
     res.send(renderLandingPageHtml(page));
   }
 

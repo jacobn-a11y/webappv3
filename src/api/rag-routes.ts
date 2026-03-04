@@ -12,7 +12,6 @@ import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import type { RAGEngine } from "../services/rag-engine.js";
 import { AccountAccessService } from "../services/account-access.js";
 import { sendSuccess, sendUnauthorized, sendForbidden, sendBadRequest } from "./_shared/responses.js";
-import logger from "../lib/logger.js";
 import { asyncHandler } from "../lib/async-handler.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -27,7 +26,7 @@ const ChatSchema = z.object({
     .string()
     .min(3, "Query must be at least 3 characters")
     .max(1000, "Query must be under 1000 characters"),
-  account_id: z.string().nullable(),
+  account_id: z.string().min(1),
   history: z.array(ChatMessageSchema).max(50).default([]),
   top_k: z.number().int().min(1).max(20).optional(),
   funnel_stages: z.array(z.string()).optional(),
@@ -145,7 +144,6 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    *
    * Conversation-aware chat endpoint. Carries message history so
    * follow-up questions are resolved with context.
-   * When account_id is null, searches across all org accounts.
    */
   router.post("/chat", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const orgId = req.organizationId;
@@ -163,7 +161,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
     const { query, account_id, history, top_k, funnel_stages } =
       parseResult.data;
 
-      if (account_id && req.userId) {
+      if (req.userId) {
         const canAccessAccount = await accessService.canAccessAccount(
           req.userId,
           orgId,

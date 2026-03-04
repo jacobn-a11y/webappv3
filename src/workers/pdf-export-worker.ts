@@ -15,6 +15,8 @@
 
 import { parentPort } from "node:worker_threads";
 import puppeteer from "puppeteer-core";
+import type { HTTPRequest } from "puppeteer-core";
+import { assertSafeOutboundUrl, parseHostAllowlist } from "../lib/url-security.js";
 
 if (!parentPort) {
   throw new Error("pdf-export-worker must be run as a worker_threads Worker");
@@ -32,6 +34,12 @@ export interface PdfWorkerRequest {
   };
 }
 
+const PDF_SET_CONTENT_TIMEOUT_MS = resolvePositiveInt(
+  process.env.PDF_SET_CONTENT_TIMEOUT_MS,
+  20_000
+);
+const PDF_ASSET_ALLOWLIST = parseHostAllowlist(process.env.PDF_EXPORT_ASSET_HOST_ALLOWLIST);
+
 parentPort.on("message", async (msg: PdfWorkerRequest) => {
   try {
     const executablePath =
@@ -45,7 +53,15 @@ parentPort.on("message", async (msg: PdfWorkerRequest) => {
 
     try {
       const page = await browser.newPage();
-      await page.setContent(msg.html, { waitUntil: "networkidle0" });
+      await page.setRequestInterception(true);
+      page.on("request", (request) => {
+        void enforceRequestPolicy(request);
+      });
+
+      await page.setContent(msg.html, {
+        waitUntil: "networkidle0",
+        timeout: PDF_SET_CONTENT_TIMEOUT_MS,
+      });
 
       const pdfBuffer = await page.pdf(msg.pdfOptions as Parameters<typeof page.pdf>[0]);
 
@@ -61,3 +77,40 @@ parentPort.on("message", async (msg: PdfWorkerRequest) => {
     parentPort!.postMessage({ error: message });
   }
 });
+
+async function enforceRequestPolicy(request: HTTPRequest): Promise<void> {
+  try {
+    const url = request.url();
+    if (
+      url === "about:blank" ||
+      url.startsWith("data:") ||
+      url.startsWith("blob:")
+    ) {
+      await request.continue();
+      return;
+    }
+
+    await assertSafeOutboundUrl(url, {
+      allowHttp: process.env.NODE_ENV !== "production",
+      allowHttps: true,
+      denyPrivateNetworks: true,
+      allowlistHosts: PDF_ASSET_ALLOWLIST,
+    });
+    await request.continue();
+  } catch {
+    try {
+      await request.abort("blockedbyclient");
+    } catch {
+      // Request may already be resolved; ignore.
+    }
+  }
+}
+
+function resolvePositiveInt(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}

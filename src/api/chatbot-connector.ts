@@ -33,7 +33,7 @@ export function createChatbotConnectorRoutes(): Router {
       return;
     }
 
-    res.setHeader("Cache-Control", "private, no-cache");
+    res.setHeader("Cache-Control", "private, no-store");
     res.send(renderChatPage(req.organizationId));
   });
 

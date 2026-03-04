@@ -3,7 +3,6 @@ import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
 import { requirePermission } from "../../middleware/permissions.js";
 import type { AuditLogService } from "../../services/audit-log.js";
-import logger from "../../lib/logger.js";
 import { decodeSecurityPolicy } from "../../types/json-boundaries.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import crypto from "crypto";
@@ -18,6 +17,7 @@ import {
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
 import { asyncHandler } from "../../lib/async-handler.js";
 import { sendSuccess, sendCreated, sendNotFound, sendNoContent } from "../_shared/responses.js";
+import { assertSafeOutboundUrl, parseHostAllowlist, UrlPolicyError } from "../../lib/url-security.js";
 
 const SecurityPolicySchema = z.object({
   enforce_mfa_for_admin_actions: z.boolean().optional(),
@@ -64,6 +64,9 @@ export function registerSecurityRoutes({
   auditLogs,
 }: RegisterSecurityRoutesOptions): void {
   const eventOptions = OUTBOUND_WEBHOOK_EVENTS as readonly OutboundWebhookEventType[];
+  const outboundWebhookHostAllowlist = parseHostAllowlist(
+    process.env.OUTBOUND_WEBHOOK_HOST_ALLOWLIST
+  );
 
   // ── Admin: Security Policy ─────────────────────────────────────────
 
@@ -202,6 +205,21 @@ export function registerSecurityRoutes({
       prisma,
       req.organizationId
       );
+      try {
+        await assertSafeOutboundUrl(payload.url, {
+          allowHttp: process.env.NODE_ENV !== "production",
+          allowHttps: true,
+          denyPrivateNetworks: true,
+          allowlistHosts: outboundWebhookHostAllowlist,
+        });
+      } catch (error) {
+        const reason = error instanceof UrlPolicyError ? error.code : "invalid_url";
+        res.status(400).json({
+          error: "invalid_webhook_url",
+          message: `Outbound webhook URL failed security policy: ${reason}`,
+        });
+        return;
+      }
       const now = new Date().toISOString();
       const next: OutboundWebhookSubscription = {
       id: crypto.randomUUID(),

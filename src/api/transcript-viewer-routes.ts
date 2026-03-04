@@ -131,7 +131,7 @@ export function createTranscriptViewerRoutes(prisma: PrismaClient): Router {
       return;
     }
 
-    res.setHeader("Cache-Control", "private, no-cache");
+    res.setHeader("Cache-Control", "private, no-store");
     res.send(renderTranscriptPage(meta, segments, participants, entity, callTags));
   });
 

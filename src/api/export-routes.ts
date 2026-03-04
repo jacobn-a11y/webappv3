@@ -16,9 +16,9 @@ import { LandingPageExporter } from "../services/landing-page-exports.js";
 import { requirePageOwnerOrPermission } from "../middleware/permissions.js";
 import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.js";
 import { decodeDataGovernancePolicy } from "../types/json-boundaries.js";
-import logger from "../lib/logger.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import { sendBadRequest, sendSuccess } from "./_shared/responses.js";
+import { assertSafeOutboundUrl, parseHostAllowlist, UrlPolicyError } from "../lib/url-security.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -35,6 +35,9 @@ const SlackExportSchema = z.object({
 export function createExportRoutes(prisma: PrismaClient): Router {
   const router = Router();
   const exporter = new LandingPageExporter(prisma);
+  const slackWebhookHostAllowlist = parseHostAllowlist(
+    process.env.SLACK_WEBHOOK_HOST_ALLOWLIST
+  );
   const resolveOrgId = (req: Request, res: Response): string | null => {
     try {
       return getOrganizationIdOrThrow(req);
@@ -172,6 +175,22 @@ export function createExportRoutes(prisma: PrismaClient): Router {
       }
 
       if (!(await enforceExportPolicy(req, res))) return;
+      if (parse.data.webhook_url) {
+        try {
+          await assertSafeOutboundUrl(parse.data.webhook_url, {
+            allowHttp: process.env.NODE_ENV !== "production",
+            allowHttps: true,
+            denyPrivateNetworks: true,
+            allowlistHosts: slackWebhookHostAllowlist.length > 0
+              ? slackWebhookHostAllowlist
+              : ["hooks.slack.com", "hooks.slack-gov.com"],
+          });
+        } catch (error) {
+          const reason = error instanceof UrlPolicyError ? error.code : "invalid_url";
+          sendBadRequest(res, "invalid_webhook_url", { reason });
+          return;
+        }
+      }
       const result = await exporter.exportSlack(
         req.params.pageId as string,
         parse.data.webhook_url
