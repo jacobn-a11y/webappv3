@@ -1,4 +1,4 @@
-import { type Request, type Response, type Router } from "express";
+import { type Response, type Router } from "express";
 import { z } from "zod";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import {
@@ -13,7 +13,10 @@ import { requirePermission, type PermissionManager } from "../../middleware/perm
 import type { AuditLogService } from "../../services/audit-log.js";
 import logger from "../../lib/logger.js";
 import { decodeDataGovernancePolicy } from "../../types/json-boundaries.js";
+import { sendSuccess, sendNotFound, sendConflict } from "../_shared/responses.js";
 import { parseRequestBody } from "../_shared/validators.js";
+import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
+import { asyncHandler } from "../../lib/async-handler.js";
 
 const UpdateOrgSettingsSchema = z.object({
   landing_pages_enabled: z.boolean().optional(),
@@ -85,12 +88,6 @@ const ReviewDeletionRequestSchema = z.object({
   review_notes: z.string().max(1000).optional(),
 });
 
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
-
 type DeleteGovernedTarget = (
   organizationId: string,
   targetType: "CALL" | "STORY" | "LANDING_PAGE",
@@ -122,28 +119,25 @@ export function registerAdminSettingsRoutes({
   router.get(
     "/settings",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const settings = await prisma.orgSettings.findUnique({
-          where: { organizationId: req.organizationId! },
-        });
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-        res.json({
-          settings: settings ?? {
-            landing_pages_enabled: true,
-            default_page_visibility: "PRIVATE",
-            require_approval_to_publish: false,
-            allowed_publishers: ["OWNER", "ADMIN"],
-            max_pages_per_user: null,
-            company_name_replacements: {},
-          },
-        });
-      } catch (err) {
-        logger.error("Get settings error", { error: err });
-        res.status(500).json({ error: "Failed to load settings" });
-      }
+      const settings = await prisma.orgSettings.findUnique({
+      where: { organizationId: req.organizationId },
+      });
+
+      sendSuccess(res, {
+      settings: settings ?? {
+        landing_pages_enabled: true,
+        default_page_visibility: "PRIVATE",
+        require_approval_to_publish: false,
+        allowed_publishers: ["OWNER", "ADMIN"],
+        max_pages_per_user: null,
+        company_name_replacements: {},
+      },
+      });
+      
     }
-  );
+  ));
 
   /**
    * PATCH /api/dashboard/settings
@@ -153,14 +147,13 @@ export function registerAdminSettingsRoutes({
   router.patch(
     "/settings",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const payload = parseRequestBody(UpdateOrgSettingsSchema, req.body, res);
       if (!payload) {
         return;
       }
 
-      try {
-        await permManager.updateOrgSettings(req.organizationId!, {
+        await permManager.updateOrgSettings(req.organizationId, {
           landingPagesEnabled: payload.landing_pages_enabled,
           defaultPageVisibility: payload.default_page_visibility,
           requireApprovalToPublish: payload.require_approval_to_publish,
@@ -169,240 +162,225 @@ export function registerAdminSettingsRoutes({
           companyNameReplacements: payload.company_name_replacements,
         });
 
-        res.json({ updated: true });
-      } catch (err) {
-        logger.error("Update settings error", { error: err });
-        res.status(500).json({ error: "Failed to update settings" });
-      }
+        sendSuccess(res, { updated: true });
+      
     }
-  );
+  ));
 
   // ── Admin: Story Context & Prompt Defaults ────────────────────────
 
   router.get(
     "/story-context",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const settings = await prisma.orgSettings.findUnique({
-          where: { organizationId: req.organizationId! },
-          select: { storyContext: true, storyPromptDefaults: true },
-        });
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-        const context = (settings?.storyContext ?? {}) as StoryContextSettings;
-        const defaults = (settings?.storyPromptDefaults ?? {}) as StoryPromptDefaults;
-        const branding = context.publishedBranding ?? {};
+      const settings = await prisma.orgSettings.findUnique({
+      where: { organizationId: req.organizationId },
+      select: { storyContext: true, storyPromptDefaults: true },
+      });
 
-        res.json({
-          company_overview: context.companyOverview ?? "",
-          products: context.products ?? [],
-          target_personas: context.targetPersonas ?? [],
-          target_industries: context.targetIndustries ?? [],
-          differentiators: context.differentiators ?? [],
-          proof_points: context.proofPoints ?? [],
-          banned_claims: context.bannedClaims ?? [],
-          writing_style_guide: context.writingStyleGuide ?? "",
-          approved_terminology: context.approvedTerminology ?? [],
-          published_branding: {
-            brand_name: branding.brandName ?? "",
-            logo_url: branding.logoUrl ?? "",
-            primary_color: branding.primaryColor ?? "",
-            accent_color: branding.accentColor ?? "",
-            surface_color: branding.surfaceColor ?? "",
-          },
-          default_story_length: defaults.storyLength ?? "MEDIUM",
-          default_story_outline: defaults.storyOutline ?? "CHRONOLOGICAL_JOURNEY",
-          default_story_format: defaults.storyFormat ?? null,
-          default_story_type: defaults.storyType ?? "FULL_ACCOUNT_JOURNEY",
-        });
-      } catch (err) {
-        logger.error("Get story context error", { error: err });
-        res.status(500).json({ error: "Failed to load story context" });
-      }
+      const context = (settings?.storyContext ?? {}) as StoryContextSettings;
+      const defaults = (settings?.storyPromptDefaults ?? {}) as StoryPromptDefaults;
+      const branding = context.publishedBranding ?? {};
+
+      sendSuccess(res, {
+      company_overview: context.companyOverview ?? "",
+      products: context.products ?? [],
+      target_personas: context.targetPersonas ?? [],
+      target_industries: context.targetIndustries ?? [],
+      differentiators: context.differentiators ?? [],
+      proof_points: context.proofPoints ?? [],
+      banned_claims: context.bannedClaims ?? [],
+      writing_style_guide: context.writingStyleGuide ?? "",
+      approved_terminology: context.approvedTerminology ?? [],
+      published_branding: {
+        brand_name: branding.brandName ?? "",
+        logo_url: branding.logoUrl ?? "",
+        primary_color: branding.primaryColor ?? "",
+        accent_color: branding.accentColor ?? "",
+        surface_color: branding.surfaceColor ?? "",
+      },
+      default_story_length: defaults.storyLength ?? "MEDIUM",
+      default_story_outline: defaults.storyOutline ?? "CHRONOLOGICAL_JOURNEY",
+      default_story_format: defaults.storyFormat ?? null,
+      default_story_type: defaults.storyType ?? "FULL_ACCOUNT_JOURNEY",
+      });
+      
     }
-  );
+  ));
 
   router.patch(
     "/story-context",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const payload = parseRequestBody(StoryContextSchema, req.body, res);
       if (!payload) {
         return;
       }
 
       const d = payload;
-      try {
-        await prisma.orgSettings.upsert({
-          where: { organizationId: req.organizationId! },
-          create: {
-            organizationId: req.organizationId!,
-            storyContext: {
-              companyOverview: d.company_overview ?? "",
-              products: d.products ?? [],
-              targetPersonas: d.target_personas ?? [],
-              targetIndustries: d.target_industries ?? [],
-              differentiators: d.differentiators ?? [],
-              proofPoints: d.proof_points ?? [],
-              bannedClaims: d.banned_claims ?? [],
-              writingStyleGuide: d.writing_style_guide ?? "",
-              approvedTerminology: d.approved_terminology ?? [],
-              publishedBranding: {
-                brandName: d.published_branding?.brand_name?.trim() || undefined,
-                logoUrl: d.published_branding?.logo_url?.trim() || undefined,
-                primaryColor: d.published_branding?.primary_color || undefined,
-                accentColor: d.published_branding?.accent_color || undefined,
-                surfaceColor: d.published_branding?.surface_color || undefined,
-              },
-            },
-            storyPromptDefaults: {
-              storyLength: d.default_story_length ?? "MEDIUM",
-              storyOutline: d.default_story_outline ?? "CHRONOLOGICAL_JOURNEY",
-              storyFormat: d.default_story_format ?? null,
-              storyType: d.default_story_type ?? "FULL_ACCOUNT_JOURNEY",
-            },
+
+      await prisma.orgSettings.upsert({
+      where: { organizationId: req.organizationId },
+      create: {
+        organizationId: req.organizationId,
+        storyContext: {
+          companyOverview: d.company_overview ?? "",
+          products: d.products ?? [],
+          targetPersonas: d.target_personas ?? [],
+          targetIndustries: d.target_industries ?? [],
+          differentiators: d.differentiators ?? [],
+          proofPoints: d.proof_points ?? [],
+          bannedClaims: d.banned_claims ?? [],
+          writingStyleGuide: d.writing_style_guide ?? "",
+          approvedTerminology: d.approved_terminology ?? [],
+          publishedBranding: {
+            brandName: d.published_branding?.brand_name?.trim() || undefined,
+            logoUrl: d.published_branding?.logo_url?.trim() || undefined,
+            primaryColor: d.published_branding?.primary_color || undefined,
+            accentColor: d.published_branding?.accent_color || undefined,
+            surfaceColor: d.published_branding?.surface_color || undefined,
           },
-          update: {
-            storyContext: {
-              companyOverview: d.company_overview ?? "",
-              products: d.products ?? [],
-              targetPersonas: d.target_personas ?? [],
-              targetIndustries: d.target_industries ?? [],
-              differentiators: d.differentiators ?? [],
-              proofPoints: d.proof_points ?? [],
-              bannedClaims: d.banned_claims ?? [],
-              writingStyleGuide: d.writing_style_guide ?? "",
-              approvedTerminology: d.approved_terminology ?? [],
-              publishedBranding: {
-                brandName: d.published_branding?.brand_name?.trim() || undefined,
-                logoUrl: d.published_branding?.logo_url?.trim() || undefined,
-                primaryColor: d.published_branding?.primary_color || undefined,
-                accentColor: d.published_branding?.accent_color || undefined,
-                surfaceColor: d.published_branding?.surface_color || undefined,
-              },
-            },
-            storyPromptDefaults: {
-              storyLength: d.default_story_length ?? "MEDIUM",
-              storyOutline: d.default_story_outline ?? "CHRONOLOGICAL_JOURNEY",
-              storyFormat: d.default_story_format ?? null,
-              storyType: d.default_story_type ?? "FULL_ACCOUNT_JOURNEY",
-            },
+        },
+        storyPromptDefaults: {
+          storyLength: d.default_story_length ?? "MEDIUM",
+          storyOutline: d.default_story_outline ?? "CHRONOLOGICAL_JOURNEY",
+          storyFormat: d.default_story_format ?? null,
+          storyType: d.default_story_type ?? "FULL_ACCOUNT_JOURNEY",
+        },
+      },
+      update: {
+        storyContext: {
+          companyOverview: d.company_overview ?? "",
+          products: d.products ?? [],
+          targetPersonas: d.target_personas ?? [],
+          targetIndustries: d.target_industries ?? [],
+          differentiators: d.differentiators ?? [],
+          proofPoints: d.proof_points ?? [],
+          bannedClaims: d.banned_claims ?? [],
+          writingStyleGuide: d.writing_style_guide ?? "",
+          approvedTerminology: d.approved_terminology ?? [],
+          publishedBranding: {
+            brandName: d.published_branding?.brand_name?.trim() || undefined,
+            logoUrl: d.published_branding?.logo_url?.trim() || undefined,
+            primaryColor: d.published_branding?.primary_color || undefined,
+            accentColor: d.published_branding?.accent_color || undefined,
+            surfaceColor: d.published_branding?.surface_color || undefined,
           },
-        });
-        await auditLogs.record({
-          organizationId: req.organizationId!,
-          actorUserId: req.userId,
-          category: "POLICY",
-          action: "STORY_CONTEXT_UPDATED",
-          targetType: "org_settings",
-          targetId: req.organizationId!,
-          severity: "WARN",
-          metadata: { updated_fields: Object.keys(d) },
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        res.json({ updated: true });
-      } catch (err) {
-        logger.error("Update story context error", { error: err });
-        res.status(500).json({ error: "Failed to update story context" });
-      }
+        },
+        storyPromptDefaults: {
+          storyLength: d.default_story_length ?? "MEDIUM",
+          storyOutline: d.default_story_outline ?? "CHRONOLOGICAL_JOURNEY",
+          storyFormat: d.default_story_format ?? null,
+          storyType: d.default_story_type ?? "FULL_ACCOUNT_JOURNEY",
+        },
+      },
+      });
+      await auditLogs.record({
+      organizationId: req.organizationId,
+      actorUserId: req.userId,
+      category: "POLICY",
+      action: "STORY_CONTEXT_UPDATED",
+      targetType: "org_settings",
+      targetId: req.organizationId,
+      severity: "WARN",
+      metadata: { updated_fields: Object.keys(d) },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+      });
+      sendSuccess(res, { updated: true });
+      
     }
-  );
+  ));
 
   // ── Admin: Data Governance Policy ────────────────────────────────
 
   router.get(
     "/data-governance",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const settings = await prisma.orgSettings.findUnique({
-          where: { organizationId: req.organizationId! },
-          select: { dataGovernancePolicy: true },
-        });
-        const policy = decodeDataGovernancePolicy(settings?.dataGovernancePolicy);
-        res.json({
-          retention_days: policy.retention_days ?? 365,
-          audit_log_retention_days: policy.audit_log_retention_days ?? 365,
-          legal_hold_enabled: policy.legal_hold_enabled ?? false,
-          pii_export_enabled: policy.pii_export_enabled ?? true,
-          deletion_requires_approval: policy.deletion_requires_approval ?? true,
-          allow_named_story_exports: policy.allow_named_story_exports ?? false,
-          rto_target_minutes: policy.rto_target_minutes ?? 240,
-          rpo_target_minutes: policy.rpo_target_minutes ?? 60,
-        });
-      } catch (err) {
-        logger.error("Get data governance policy error", { error: err });
-        res.status(500).json({ error: "Failed to load data governance policy" });
-      }
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+
+      const settings = await prisma.orgSettings.findUnique({
+      where: { organizationId: req.organizationId },
+      select: { dataGovernancePolicy: true },
+      });
+      const policy = decodeDataGovernancePolicy(settings?.dataGovernancePolicy);
+      sendSuccess(res, {
+      retention_days: policy.retention_days ?? 365,
+      audit_log_retention_days: policy.audit_log_retention_days ?? 365,
+      legal_hold_enabled: policy.legal_hold_enabled ?? false,
+      pii_export_enabled: policy.pii_export_enabled ?? true,
+      deletion_requires_approval: policy.deletion_requires_approval ?? true,
+      allow_named_story_exports: policy.allow_named_story_exports ?? false,
+      rto_target_minutes: policy.rto_target_minutes ?? 240,
+      rpo_target_minutes: policy.rpo_target_minutes ?? 60,
+      });
+      
     }
-  );
+  ));
 
   router.patch(
     "/data-governance",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const payload = parseRequestBody(DataGovernanceSchema, req.body, res);
       if (!payload) {
         return;
       }
 
       const d = payload;
-      try {
-        await prisma.orgSettings.upsert({
-          where: { organizationId: req.organizationId! },
-          create: {
-            organizationId: req.organizationId!,
-            dataGovernancePolicy: {
-              retention_days: d.retention_days ?? 365,
-              audit_log_retention_days: d.audit_log_retention_days ?? 365,
-              legal_hold_enabled: d.legal_hold_enabled ?? false,
-              pii_export_enabled: d.pii_export_enabled ?? true,
-              deletion_requires_approval:
-                d.deletion_requires_approval ?? true,
-              allow_named_story_exports: d.allow_named_story_exports ?? false,
-              rto_target_minutes: d.rto_target_minutes ?? 240,
-              rpo_target_minutes: d.rpo_target_minutes ?? 60,
-            },
-          },
-          update: {
-            dataGovernancePolicy: {
-              retention_days: d.retention_days ?? 365,
-              audit_log_retention_days: d.audit_log_retention_days ?? 365,
-              legal_hold_enabled: d.legal_hold_enabled ?? false,
-              pii_export_enabled: d.pii_export_enabled ?? true,
-              deletion_requires_approval:
-                d.deletion_requires_approval ?? true,
-              allow_named_story_exports: d.allow_named_story_exports ?? false,
-              rto_target_minutes: d.rto_target_minutes ?? 240,
-              rpo_target_minutes: d.rpo_target_minutes ?? 60,
-            },
-          },
-        });
-        await auditLogs.record({
-          organizationId: req.organizationId!,
-          actorUserId: req.userId,
-          category: "POLICY",
-          action: "DATA_GOVERNANCE_POLICY_UPDATED",
-          targetType: "org_settings",
-          targetId: req.organizationId!,
-          severity: "WARN",
-          metadata: { updated_fields: Object.keys(d) },
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        res.json({ updated: true });
-      } catch (err) {
-        logger.error("Update data governance policy error", { error: err });
-        res.status(500).json({ error: "Failed to update data governance policy" });
-      }
+
+      await prisma.orgSettings.upsert({
+      where: { organizationId: req.organizationId },
+      create: {
+        organizationId: req.organizationId,
+        dataGovernancePolicy: {
+          retention_days: d.retention_days ?? 365,
+          audit_log_retention_days: d.audit_log_retention_days ?? 365,
+          legal_hold_enabled: d.legal_hold_enabled ?? false,
+          pii_export_enabled: d.pii_export_enabled ?? true,
+          deletion_requires_approval:
+            d.deletion_requires_approval ?? true,
+          allow_named_story_exports: d.allow_named_story_exports ?? false,
+          rto_target_minutes: d.rto_target_minutes ?? 240,
+          rpo_target_minutes: d.rpo_target_minutes ?? 60,
+        },
+      },
+      update: {
+        dataGovernancePolicy: {
+          retention_days: d.retention_days ?? 365,
+          audit_log_retention_days: d.audit_log_retention_days ?? 365,
+          legal_hold_enabled: d.legal_hold_enabled ?? false,
+          pii_export_enabled: d.pii_export_enabled ?? true,
+          deletion_requires_approval:
+            d.deletion_requires_approval ?? true,
+          allow_named_story_exports: d.allow_named_story_exports ?? false,
+          rto_target_minutes: d.rto_target_minutes ?? 240,
+          rpo_target_minutes: d.rpo_target_minutes ?? 60,
+        },
+      },
+      });
+      await auditLogs.record({
+      organizationId: req.organizationId,
+      actorUserId: req.userId,
+      category: "POLICY",
+      action: "DATA_GOVERNANCE_POLICY_UPDATED",
+      targetType: "org_settings",
+      targetId: req.organizationId,
+      severity: "WARN",
+      metadata: { updated_fields: Object.keys(d) },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+      });
+      sendSuccess(res, { updated: true });
+      
     }
-  );
+  ));
 
   router.get(
     "/data-governance/deletion-requests",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const status = (req.query.status as string | undefined)?.trim().toUpperCase();
       const isKnownStatus =
         status === "PENDING" ||
@@ -410,16 +388,15 @@ export function registerAdminSettingsRoutes({
         status === "REJECTED" ||
         status === "COMPLETED";
 
-      try {
         const requests = await prisma.approvalRequest.findMany({
           where: isKnownStatus
             ? {
-                organizationId: req.organizationId!,
+                organizationId: req.organizationId,
                 requestType: "DATA_DELETION",
                 status,
               }
             : {
-                organizationId: req.organizationId!,
+                organizationId: req.organizationId,
                 requestType: "DATA_DELETION",
               },
           orderBy: { createdAt: "desc" },
@@ -438,7 +415,7 @@ export function registerAdminSettingsRoutes({
             updatedAt: true,
           },
         });
-        res.json({
+        sendSuccess(res, {
           requests: requests.map((r) => ({
             id: r.id,
             status: r.status,
@@ -453,24 +430,20 @@ export function registerAdminSettingsRoutes({
             updated_at: r.updatedAt.toISOString(),
           })),
         });
-      } catch (err) {
-        logger.error("List deletion requests error", { error: err });
-        res.status(500).json({ error: "Failed to load deletion requests" });
-      }
+      
     }
-  );
+  ));
 
   router.post(
     "/data-governance/deletion-requests",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const payload = parseRequestBody(CreateDeletionRequestSchema, req.body, res);
       if (!payload) {
         return;
       }
 
-      try {
-        const orgId = req.organizationId!;
+        const orgId = req.organizationId;
         const settings = await prisma.orgSettings.findUnique({
           where: { organizationId: orgId },
           select: { dataGovernancePolicy: true },
@@ -495,7 +468,7 @@ export function registerAdminSettingsRoutes({
               requestType: "DATA_DELETION",
               targetType: payload.target_type,
               targetId: payload.target_id,
-              requestedByUserId: req.userId!,
+              requestedByUserId: req.userId,
               status: "PENDING",
               requestPayload,
             },
@@ -543,101 +516,95 @@ export function registerAdminSettingsRoutes({
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
         });
-        res.json({ deleted });
-      } catch (err) {
-        logger.error("Create deletion request error", { error: err });
-        res.status(500).json({ error: "Failed to create deletion request" });
-      }
+        sendSuccess(res, { deleted });
+      
     }
-  );
+  ));
 
   router.post(
     "/data-governance/deletion-requests/:requestId/review",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const payload = parseRequestBody(ReviewDeletionRequestSchema, req.body, res);
       if (!payload) {
         return;
       }
-      try {
-        const requestId = String(req.params.requestId);
-        const request = await prisma.approvalRequest.findFirst({
-          where: {
-            id: requestId,
-            organizationId: req.organizationId!,
-            requestType: "DATA_DELETION",
-          },
-        });
-        if (!request) {
-          res.status(404).json({ error: "Deletion request not found" });
-          return;
-        }
-        if (request.status !== "PENDING") {
-          res.status(409).json({ error: "Request is no longer pending" });
-          return;
-        }
 
-        if (payload.decision === "REJECT") {
-          const updated = await prisma.approvalRequest.update({
-            where: { id: request.id },
-            data: {
-              status: "REJECTED",
-              reviewerUserId: req.userId!,
-              reviewNotes: payload.review_notes ?? null,
-              reviewedAt: new Date(),
-            },
-          });
-          await auditLogs.record({
-            organizationId: req.organizationId!,
-            actorUserId: req.userId,
-            category: "GOVERNANCE",
-            action: "DATA_DELETION_REJECTED",
-            targetType: updated.targetType.toLowerCase(),
-            targetId: updated.targetId,
-            severity: "INFO",
-            metadata: { approval_request_id: updated.id },
-            ipAddress: req.ip,
-            userAgent: req.get("user-agent"),
-          });
-          res.json({ status: "REJECTED" });
-          return;
-        }
-
-        const targetType = request.targetType as "CALL" | "STORY" | "LANDING_PAGE";
-        const deleted = await deleteGovernedTarget(
-          req.organizationId!,
-          targetType,
-          request.targetId
-        );
-        const updated = await prisma.approvalRequest.update({
-          where: { id: request.id },
-          data: {
-            status: "COMPLETED",
-            reviewerUserId: req.userId!,
-            reviewNotes: payload.review_notes ?? null,
-            reviewedAt: new Date(),
-          },
-        });
-        await auditLogs.record({
-          organizationId: req.organizationId!,
-          actorUserId: req.userId,
-          category: "GOVERNANCE",
-          action: "DATA_DELETION_APPROVED_AND_EXECUTED",
-          targetType: updated.targetType.toLowerCase(),
-          targetId: updated.targetId,
-          severity: "WARN",
-          metadata: {
-            approval_request_id: updated.id,
-            deleted,
-          },
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        res.json({ status: "COMPLETED", deleted });
-      } catch (err) {
-        logger.error("Review deletion request error", { error: err });
-        res.status(500).json({ error: "Failed to review deletion request" });
+      const requestId = String(req.params.requestId);
+      const request = await prisma.approvalRequest.findFirst({
+      where: {
+        id: requestId,
+        organizationId: req.organizationId,
+        requestType: "DATA_DELETION",
+      },
+      });
+      if (!request) {
+      sendNotFound(res, "Deletion request not found");
+      return;
       }
+      if (request.status !== "PENDING") {
+      sendConflict(res, "Request is no longer pending");
+      return;
+      }
+
+      if (payload.decision === "REJECT") {
+      const updated = await prisma.approvalRequest.update({
+        where: { id: request.id },
+        data: {
+          status: "REJECTED",
+          reviewerUserId: req.userId,
+          reviewNotes: payload.review_notes ?? null,
+          reviewedAt: new Date(),
+        },
+      });
+      await auditLogs.record({
+        organizationId: req.organizationId,
+        actorUserId: req.userId,
+        category: "GOVERNANCE",
+        action: "DATA_DELETION_REJECTED",
+        targetType: updated.targetType.toLowerCase(),
+        targetId: updated.targetId,
+        severity: "INFO",
+        metadata: { approval_request_id: updated.id },
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+      sendSuccess(res, { status: "REJECTED" });
+      return;
+      }
+
+      const targetType = request.targetType as "CALL" | "STORY" | "LANDING_PAGE";
+      const deleted = await deleteGovernedTarget(
+      req.organizationId,
+      targetType,
+      request.targetId
+      );
+      const updated = await prisma.approvalRequest.update({
+      where: { id: request.id },
+      data: {
+        status: "COMPLETED",
+        reviewerUserId: req.userId,
+        reviewNotes: payload.review_notes ?? null,
+        reviewedAt: new Date(),
+      },
+      });
+      await auditLogs.record({
+      organizationId: req.organizationId,
+      actorUserId: req.userId,
+      category: "GOVERNANCE",
+      action: "DATA_DELETION_APPROVED_AND_EXECUTED",
+      targetType: updated.targetType.toLowerCase(),
+      targetId: updated.targetId,
+      severity: "WARN",
+      metadata: {
+        approval_request_id: updated.id,
+        deleted,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+      });
+      sendSuccess(res, { status: "COMPLETED", deleted });
+      
     }
-  );
+  ));
 }

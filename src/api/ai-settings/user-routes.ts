@@ -1,24 +1,25 @@
 import type { Response } from "express";
-import { respondAuthRequired } from "../_shared/errors.js";
+import { sendUnauthorized, sendSuccess, sendNotFound } from "../_shared/responses.js";
 import {
   DEFAULT_MODELS,
   PROVIDER_MODELS,
   type AIProviderName,
 } from "../../services/ai-client.js";
 import type { AISettingsRouteContext, AuthReq } from "./types.js";
+import logger from "../../lib/logger.js";
+import { asyncHandler } from "../../lib/async-handler.js";
 
 export function registerAISettingsUserRoutes({
   configService,
   router,
   usageTracker,
 }: Pick<AISettingsRouteContext, "configService" | "router" | "usageTracker">): void {
-  router.get("/providers", async (req: AuthReq, res: Response) => {
+  router.get("/providers", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId || !req.userRole) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
-    try {
       const access = await configService.resolveUserAccess(
         req.organizationId,
         req.userId,
@@ -33,7 +34,7 @@ export function registerAISettingsUserRoutes({
           ? platformModels
           : platformModels.filter((m) => access.allowedProviders.includes(m.provider));
 
-      res.json({
+      sendSuccess(res, {
         org_providers: orgConfigs.map((config) => ({
           provider: config.provider,
           display_name: config.displayName,
@@ -50,22 +51,18 @@ export function registerAISettingsUserRoutes({
         })),
         user_access: access,
       });
-    } catch (err) {
-      console.error("List providers error:", err);
-      res.status(500).json({ error: "Failed to list AI providers" });
-    }
-  });
+    
+  }));
 
-  router.get("/usage/me", async (req: AuthReq, res: Response) => {
+  router.get("/usage/me", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
-    try {
       const status = await usageTracker.getLimitStatus(req.organizationId, req.userId);
 
-      res.json({
+      sendSuccess(res, {
         allowed: status.allowed,
         reason: status.reason,
         usage: {
@@ -89,26 +86,22 @@ export function registerAISettingsUserRoutes({
             }
           : null,
       });
-    } catch (err) {
-      console.error("Usage status error:", err);
-      res.status(500).json({ error: "Failed to get usage status" });
-    }
-  });
+    
+  }));
 
-  router.get("/balance/me", async (req: AuthReq, res: Response) => {
+  router.get("/balance/me", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
-    try {
       const balance = await usageTracker.getBalance(req.organizationId, req.userId);
       if (!balance) {
-        res.json({ balance: null });
+        sendSuccess(res, { balance: null });
         return;
       }
 
-      res.json({
+      sendSuccess(res, {
         balance: {
           balance_cents: balance.balanceCents,
           lifetime_spent_cents: balance.lifetimeSpentCents,
@@ -121,25 +114,21 @@ export function registerAISettingsUserRoutes({
           })),
         },
       });
-    } catch (err) {
-      console.error("Balance error:", err);
-      res.status(500).json({ error: "Failed to get balance" });
-    }
-  });
+    
+  }));
 
-  router.get("/notifications", async (req: AuthReq, res: Response) => {
+  router.get("/notifications", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
-    try {
       const notifications = await usageTracker.getPendingNotifications(
         req.organizationId,
         req.userId
       );
 
-      res.json({
+      sendSuccess(res, {
         notifications: notifications.map((notice) => ({
           id: notice.id,
           limit_type: notice.limitType,
@@ -150,51 +139,40 @@ export function registerAISettingsUserRoutes({
           created_at: notice.createdAt.toISOString(),
         })),
       });
-    } catch (err) {
-      console.error("Notifications error:", err);
-      res.status(500).json({ error: "Failed to get notifications" });
-    }
-  });
+    
+  }));
 
-  router.post("/notifications/:id/acknowledge", async (req: AuthReq, res: Response) => {
+  router.post("/notifications/:id/acknowledge", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
-    try {
       const acknowledged = await usageTracker.acknowledgeNotification(
         req.organizationId,
         req.userId,
         req.params.id as string
       );
       if (!acknowledged) {
-        res.status(404).json({ error: "notification_not_found" });
+        sendNotFound(res, "notification_not_found");
         return;
       }
 
-      res.json({ acknowledged: true });
-    } catch (err) {
-      console.error("Acknowledge notification error:", err);
-      res.status(500).json({ error: "Failed to acknowledge notification" });
-    }
-  });
+      sendSuccess(res, { acknowledged: true });
+    
+  }));
 
-  router.post("/notifications/acknowledge-all", async (req: AuthReq, res: Response) => {
+  router.post("/notifications/acknowledge-all", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
-    try {
       const acknowledgedCount = await usageTracker.acknowledgeAllNotifications(
         req.organizationId,
         req.userId
       );
-      res.json({ acknowledged: true, count: acknowledgedCount });
-    } catch (err) {
-      console.error("Acknowledge all notifications error:", err);
-      res.status(500).json({ error: "Failed to acknowledge notifications" });
-    }
-  });
+      sendSuccess(res, { acknowledged: true, count: acknowledgedCount });
+    
+  }));
 }

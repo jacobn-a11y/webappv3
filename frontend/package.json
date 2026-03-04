@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "lint": "eslint src/",
     "test": "vitest run",
     "test:a11y": "vitest run src/a11y.test.tsx"
   },

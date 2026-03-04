@@ -27,7 +27,7 @@ function readSessionToken(req: Request): string | null {
  * present, it does not reject and simply lets downstream guards enforce auth.
  */
 export function createSessionAuth(prisma: PrismaClient) {
-  return async (req: Request, _res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     try {
       const authReq = req as AuthenticatedRequest;
 

@@ -11,14 +11,9 @@
  * the existing landing page design language.
  */
 
-import { Router, type Request, type Response } from "express";
-import type { UserRole } from "@prisma/client";
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
+import { Router, type Response } from "express";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import { sendUnauthorized } from "./_shared/responses.js";
 
 // ─── Route Factory ──────────────────────────────────────────────────────────
 
@@ -31,9 +26,9 @@ export function createChatbotConnectorRoutes(): Router {
    * Renders the embedded chatbot connector interface.
    * Requires authentication (organizationId set by auth middleware).
    */
-  router.get("/", (req: AuthReq, res: Response) => {
+  router.get("/", (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId || !req.userId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 

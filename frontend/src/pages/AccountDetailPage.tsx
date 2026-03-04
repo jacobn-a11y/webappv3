@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { StoryGeneratorModal } from "../components/StoryGeneratorModal";
 import { Breadcrumb } from "../components/Breadcrumb";
 import {
@@ -280,6 +281,7 @@ function StoryCard({
   );
   const [deleting, setDeleting] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<{ action: () => void; title: string; message: string } | null>(null);
 
   const handleCopy = async () => {
     try {
@@ -337,22 +339,24 @@ function StoryCard({
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!canEdit) return;
-    const confirmed = window.confirm(
-      `Are you sure you want to delete the story "${story.title}"? This action cannot be undone.`
-    );
-    if (!confirmed) return;
-    setDeleting(true);
-    setPageError(null);
-    try {
-      await deleteStory(story.id);
-      onDeleted(story.id);
-    } catch (err) {
-      setPageError(err instanceof Error ? err.message : "Failed to delete story");
-    } finally {
-      setDeleting(false);
-    }
+    setConfirmState({
+      title: "Delete Story",
+      message: `Are you sure you want to delete the story "${story.title}"? This action cannot be undone.`,
+      action: async () => {
+        setDeleting(true);
+        setPageError(null);
+        try {
+          await deleteStory(story.id);
+          onDeleted(story.id);
+        } catch (err) {
+          setPageError(err instanceof Error ? err.message : "Failed to delete story");
+        } finally {
+          setDeleting(false);
+        }
+      },
+    });
   };
 
   const typeLabel = STORY_TYPE_LABELS[story.story_type] ?? story.story_type;
@@ -457,6 +461,16 @@ function StoryCard({
           </article>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmState}
+        title={confirmState?.title ?? ""}
+        message={confirmState?.message ?? ""}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => { confirmState?.action(); setConfirmState(null); }}
+        onCancel={() => setConfirmState(null)}
+      />
     </div>
   );
 }

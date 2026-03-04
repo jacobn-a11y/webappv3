@@ -8,6 +8,7 @@ import {
   replayRetryableDeadLetterJobs,
 } from "../services/call-processing-dead-letter-replay.js";
 import logger from "../lib/logger.js";
+import { sendSuccess, sendError } from "./_shared/responses.js";
 
 interface QueueRegistry {
   processingQueue: Queue;
@@ -54,7 +55,7 @@ export function createQueueHealthRoutes(deps: QueueHealthDeps): Router {
       })
     );
 
-    res.json({
+    sendSuccess(res, {
       timestamp: new Date().toISOString(),
       queues: queueMetrics,
       enqueue_diagnostics: metrics
@@ -88,7 +89,7 @@ export function createQueueHealthRoutes(deps: QueueHealthDeps): Router {
           actorUserId,
         });
 
-        res.json({
+        sendSuccess(res, {
           replayed: replaySummary.replayed,
           scanned: replaySummary.scanned,
           replayed_calls: replaySummary.replayed_calls,
@@ -102,9 +103,7 @@ export function createQueueHealthRoutes(deps: QueueHealthDeps): Router {
         logger.error("Failed to replay call-processing dead-letter jobs", {
           error,
         });
-        res.status(500).json({
-          error: "Failed to replay call-processing dead-letter jobs",
-        });
+        sendError(res, 500, "internal_error", "Failed to replay call-processing dead-letter jobs");
       }
     }
   );

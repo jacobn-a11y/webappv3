@@ -389,93 +389,93 @@ export class EntityResolutionQueueService {
       throw new Error("Cannot merge an account into itself");
     }
 
-    // Move calls
-    await this.prisma.call.updateMany({
-      where: { accountId: sourceAccountId },
-      data: { accountId: targetAccountId },
-    });
-
-    // Move contacts (skip duplicates by email)
-    const sourceContacts = await this.prisma.contact.findMany({
-      where: { accountId: sourceAccountId },
-    });
-
-    for (const contact of sourceContacts) {
-      const existing = await this.prisma.contact.findFirst({
-        where: {
-          accountId: targetAccountId,
-          email: contact.email,
-        },
+    await this.prisma.$transaction(async (tx) => {
+      // Move calls
+      await tx.call.updateMany({
+        where: { accountId: sourceAccountId },
+        data: { accountId: targetAccountId },
       });
 
-      if (existing) {
-        // Update participant links to point to existing contact
-        await this.prisma.callParticipant.updateMany({
-          where: { contactId: contact.id },
-          data: { contactId: existing.id },
-        });
-        await this.prisma.contact.delete({ where: { id: contact.id } });
-      } else {
-        await this.prisma.contact.update({
-          where: { id: contact.id },
-          data: { accountId: targetAccountId },
-        });
-      }
-    }
-
-    // Move domain aliases (add source's domain and aliases to target)
-    if (source.domain && source.domain !== target.domain) {
-      const aliasExists = await this.prisma.accountDomain.findFirst({
-        where: { accountId: targetAccountId, domain: source.domain },
+      // Move contacts (skip duplicates by email)
+      const sourceContacts = await tx.contact.findMany({
+        where: { accountId: sourceAccountId },
       });
-      if (!aliasExists) {
-        await this.prisma.accountDomain.create({
-          data: { accountId: targetAccountId, domain: source.domain },
+
+      for (const contact of sourceContacts) {
+        const existing = await tx.contact.findFirst({
+          where: {
+            accountId: targetAccountId,
+            email: contact.email,
+          },
         });
+
+        if (existing) {
+          await tx.callParticipant.updateMany({
+            where: { contactId: contact.id },
+            data: { contactId: existing.id },
+          });
+          await tx.contact.delete({ where: { id: contact.id } });
+        } else {
+          await tx.contact.update({
+            where: { id: contact.id },
+            data: { accountId: targetAccountId },
+          });
+        }
       }
-    }
 
-    const sourceAliases = await this.prisma.accountDomain.findMany({
-      where: { accountId: sourceAccountId },
-    });
+      // Move domain aliases (add source's domain and aliases to target)
+      if (source.domain && source.domain !== target.domain) {
+        const aliasExists = await tx.accountDomain.findFirst({
+          where: { accountId: targetAccountId, domain: source.domain },
+        });
+        if (!aliasExists) {
+          await tx.accountDomain.create({
+            data: { accountId: targetAccountId, domain: source.domain },
+          });
+        }
+      }
 
-    for (const alias of sourceAliases) {
-      const exists = await this.prisma.accountDomain.findFirst({
-        where: { accountId: targetAccountId, domain: alias.domain },
+      const sourceAliases = await tx.accountDomain.findMany({
+        where: { accountId: sourceAccountId },
       });
-      if (!exists && alias.domain !== target.domain) {
-        await this.prisma.accountDomain.create({
-          data: { accountId: targetAccountId, domain: alias.domain },
+
+      for (const alias of sourceAliases) {
+        const exists = await tx.accountDomain.findFirst({
+          where: { accountId: targetAccountId, domain: alias.domain },
         });
+        if (!exists && alias.domain !== target.domain) {
+          await tx.accountDomain.create({
+            data: { accountId: targetAccountId, domain: alias.domain },
+          });
+        }
       }
-    }
 
-    // Delete source domain aliases (will be cascade-deleted, but be explicit)
-    await this.prisma.accountDomain.deleteMany({
-      where: { accountId: sourceAccountId },
-    });
+      await tx.accountDomain.deleteMany({
+        where: { accountId: sourceAccountId },
+      });
 
-    // Move stories
-    await this.prisma.story.updateMany({
-      where: { accountId: sourceAccountId },
-      data: { accountId: targetAccountId },
-    });
+      // Move stories
+      await tx.story.updateMany({
+        where: { accountId: sourceAccountId },
+        data: { accountId: targetAccountId },
+      });
 
-    // Move Salesforce events
-    await this.prisma.salesforceEvent.updateMany({
-      where: { accountId: sourceAccountId },
-      data: { accountId: targetAccountId },
-    });
+      // Move Salesforce events
+      await tx.salesforceEvent.updateMany({
+        where: { accountId: sourceAccountId },
+        data: { accountId: targetAccountId },
+      });
 
-    // Move user account access grants
-    await this.prisma.userAccountAccess.updateMany({
-      where: { accountId: sourceAccountId },
-      data: { accountId: targetAccountId },
-    });
+      // Move user account access grants
+      await tx.userAccountAccess.updateMany({
+        where: { accountId: sourceAccountId },
+        data: { accountId: targetAccountId },
+      });
 
-    // Delete the source account
-    await this.prisma.account.delete({
-      where: { id: sourceAccountId },
+      // Delete the source account
+      await tx.account.delete({
+        where: { id: sourceAccountId },
+      });
     });
   }
 

@@ -20,6 +20,7 @@ import type { PrismaClient } from "@prisma/client";
 import { metrics } from "../lib/metrics.js";
 import logger from "../lib/logger.js";
 import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.js";
+import { sendSuccess, sendError } from "./_shared/responses.js";
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
@@ -75,7 +76,7 @@ export function createAdminMetricsRoutes(prisma: PrismaClient): Router {
         };
       }
 
-      res.json({
+      sendSuccess(res, {
         timestamp: new Date().toISOString(),
         uptime_seconds: runtimeMetrics.uptime_seconds,
         database_totals: {
@@ -108,7 +109,7 @@ export function createAdminMetricsRoutes(prisma: PrismaClient): Router {
         return;
       }
       logger.error("Failed to collect admin metrics", { error: err });
-      res.status(500).json({ error: "Failed to collect metrics" });
+      sendError(res, 500, "internal_error", "Failed to collect metrics");
     }
   });
 

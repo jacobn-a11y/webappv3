@@ -1,0 +1,299 @@
+.account-list-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.account-list-controls .form-field__input {
+  max-width: 420px;
+}
+
+.account-list-controls__page-size {
+  max-width: 132px;
+}
+
+.account-list-controls__count {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.account-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.account-list-pagination {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+/* ─── Account Detail Page ────────────────────────────────────────────────── */
+
+.account-detail__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 32px;
+}
+
+.account-detail__title {
+  font-size: 24px;
+  font-weight: 300;
+  color: var(--white);
+  margin-bottom: 4px;
+}
+
+.account-detail__id {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  font-family: monospace;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 300;
+  margin-bottom: 16px;
+  color: var(--white);
+}
+
+.account-detail__stories-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.account-detail__stories-count {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.story-filters {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.stories-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--color-text-secondary);
+  padding: 24px;
+}
+
+.stories-empty {
+  background: var(--color-surface);
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.stories-empty__icon {
+  color: var(--color-border);
+  margin-bottom: 16px;
+}
+
+.stories-empty h3 {
+  font-size: 16px;
+  color: var(--color-text);
+  margin-bottom: 4px;
+}
+
+.stories-empty p {
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.stories-empty--compact {
+  padding: 24px;
+}
+
+.stories-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* ═══════════════════════════════════════════════════════════════════════════
+   Account Journey
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.journey__loading, .journey__error {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 400px; gap: 16px; color: var(--color-text-secondary);
+}
+.journey__spinner {
+  width: 32px; height: 32px; border: 3px solid var(--color-border);
+  border-top-color: var(--color-accent); border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.journey__container { display: flex; gap: 24px; max-width: 1200px; margin: 0 auto; padding: 24px; }
+.journey__sidebar {
+  width: 300px; flex-shrink: 0; background: var(--color-surface);
+  border-radius: var(--radius-md); padding: 20px;
+  border: 1px solid var(--color-border); height: fit-content; position: sticky; top: 24px;
+}
+.journey__main { flex: 1; min-width: 0; }
+.journey__header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 20px; }
+.journey__title { font-size: 24px; font-weight: 300; color: var(--white); margin-bottom: 0; }
+.journey__account-header { margin-bottom: 16px; }
+.journey__account-name { font-size: 18px; font-weight: 300; color: var(--white); }
+.journey__account-domain { font-size: 13px; color: var(--color-text-muted); display: block; margin-top: 2px; }
+.journey__stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+.journey__stat {
+  background: var(--color-bg); border-radius: var(--radius-md);
+  padding: 12px; text-align: center;
+}
+.journey__stat-value { display: block; font-size: 20px; font-weight: 300; color: var(--white); }
+.journey__stat-label { display: block; font-size: 11px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+.journey__section-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-text-muted); margin-bottom: 10px; }
+.journey__crm-section, .journey__funnel-section, .journey__contacts-section { margin-bottom: 20px; padding-top: 16px; border-top: 1px solid var(--color-border); }
+.journey__crm-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
+.journey__crm-label { color: var(--color-text-muted); }
+.journey__crm-value { font-weight: 500; }
+.journey__funnel-legend { display: flex; flex-direction: column; gap: 6px; }
+.journey__funnel-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.journey__funnel-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.journey__funnel-label { flex: 1; }
+.journey__funnel-count { font-weight: 600; color: var(--color-text-secondary); }
+.journey__contacts-list { display: flex; flex-direction: column; gap: 8px; }
+.journey__contact { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--radius-md); }
+.journey__contact:hover { background: var(--color-bg); }
+.journey__contact-avatar {
+  width: 36px; height: 36px; border-radius: 50%; background: var(--color-accent-light);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.journey__contact-initials { font-size: 13px; font-weight: 600; color: var(--color-accent); }
+.journey__contact-info { flex: 1; min-width: 0; }
+.journey__contact-name { display: block; font-size: 13px; font-weight: 500; }
+.journey__contact-title, .journey__contact-email { display: block; font-size: 11px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.journey__contact-calls { font-size: 12px; color: var(--color-text-muted); white-space: nowrap; }
+.journey__timeline { position: relative; padding-left: 20px; }
+.journey__timeline-empty { text-align: center; padding: 40px; color: var(--color-text-muted); }
+.journey__month-separator { padding: 16px 0 8px; }
+.journey__month-label { font-size: 13px; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.journey__node { display: flex; gap: 16px; margin-bottom: 16px; position: relative; }
+.journey__node-line { display: flex; flex-direction: column; align-items: center; width: 20px; flex-shrink: 0; }
+.journey__node-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.journey__node-dot--crm { background: #fff; border: 2.5px solid; }
+.journey__node-content {
+  flex: 1; background: var(--color-surface); border-radius: var(--radius-md);
+  padding: 14px 16px; border: 1px solid var(--color-border);
+}
+.journey__node-content--crm { border-left: 3px solid; }
+.journey__node-header { display: flex; align-items: flex-start; gap: 10px; }
+.journey__node-title-group { flex: 1; min-width: 0; }
+.journey__node-title { font-size: 14px; font-weight: 600; margin: 0; }
+.journey__node-datetime { font-size: 12px; color: var(--color-text-muted); }
+.journey__provider-icon {
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  background: var(--color-accent-light); color: var(--color-accent);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 13px; flex-shrink: 0;
+}
+.journey__participants { display: flex; gap: 4px; margin-top: 10px; flex-wrap: wrap; }
+.journey__participant {
+  width: 30px; height: 30px; border-radius: 50%;
+  background: var(--color-accent-light); display: flex; align-items: center;
+  justify-content: center; border: 2px solid var(--color-surface);
+}
+.journey__participant-initials { font-size: 10px; font-weight: 600; color: var(--color-accent); }
+.journey__participant--overflow { background: var(--color-bg); color: var(--color-text-muted); font-size: 11px; font-weight: 600; }
+.journey__tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.journey__tag {
+  padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500;
+  background: var(--color-accent-light); color: var(--color-accent);
+}
+.journey__crm-icon { flex-shrink: 0; display: flex; align-items: center; }
+.journey__crm-detail { font-size: 13px; color: var(--color-text-secondary); margin-top: 8px; }
+.journey__crm-amount { display: inline-block; font-size: 14px; font-weight: 700; color: var(--color-success); margin-top: 6px; }
+@media (max-width: 768px) {
+  .journey__container { flex-direction: column; }
+  .journey__sidebar { width: 100%; position: static; }
+}
+/* ─── Journey Breadcrumb ───────────────────────────────────────────────────── */
+
+.journey__breadcrumb {
+  grid-column: 1 / -1;
+  padding: 0 0 8px;
+}
+
+/* ─── Account Detail Actions ───────────────────────────────────────────────── */
+
+.account-detail__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.account-detail__viewer-tag {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  border-radius: 999px;
+  padding: 5px 10px;
+}
+
+@media (max-width: 768px) {
+  .account-detail__header {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .story-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .account-list-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .account-list-controls .form-field__input {
+    max-width: 100%;
+  }
+
+  .account-list-controls__page-size {
+    max-width: 100%;
+  }
+
+  .journey__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+.account-detail {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.account-detail__stories {
+  margin-top: 10px;
+}
+
+.journey__crm-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.journey__node--call .journey__node-dot {
+  background: var(--color-accent);
+}
+
+.journey__node--crm .journey__node-dot {
+  background: #fff;
+  border: 2px solid var(--color-info);
+}

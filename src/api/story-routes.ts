@@ -6,13 +6,13 @@
 
 import { Router, type Request, type Response } from "express";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import logger from "../lib/logger.js";
 import { z } from "zod";
 import { markdownToPdfBuffer, markdownToDocxBuffer, sanitizeFileName } from "../services/story-exports.js";
 import type { StoryBuilder, StoryBuilderOptions } from "../services/story-builder.js";
 import type {
   PrismaClient,
   TranscriptTruncationMode,
-  HighValueQuote,
   UserRole,
 } from "@prisma/client";
 import { TranscriptMerger } from "../services/transcript-merger.js";
@@ -31,6 +31,9 @@ import {
   type StoryTypeInput,
 } from "../types/story-generation.js";
 import { dispatchOutboundWebhookEvent } from "../services/outbound-webhooks.js";
+import { mapStorySummary, mapGeneratedQuote } from "../services/story-mappers.js";
+import { asyncHandler } from "../lib/async-handler.js";
+import { sendSuccess, sendBadRequest, sendUnauthorized, sendForbidden, sendNotFound, sendConflict, sendError } from "./_shared/responses.js";
 
 const BuildStorySchema = z.object({
   account_id: z.string().min(1),
@@ -148,17 +151,14 @@ export function createStoryRoutes(
     }
   ): Promise<void> => {
     await dispatchOutboundWebhookEvent(prisma, input).catch((err) => {
-      console.warn("Story outbound webhook dispatch failed:", err);
+      logger.warn("Story outbound webhook dispatch failed", { error: err });
     });
   };
 
-  router.post("/build", async (req: Request, res: Response) => {
+  router.post("/build", asyncHandler(async (req: Request, res: Response) => {
     const parseResult = BuildStorySchema.safeParse(req.body);
     if (!parseResult.success) {
-      res.status(400).json({
-        error: "validation_error",
-        details: parseResult.error.issues,
-      });
+      sendBadRequest(res, "validation_error", parseResult.error.issues);
       return;
     }
 
@@ -167,7 +167,7 @@ export function createStoryRoutes(
     const userId = authReq.userId;
     const userRole = authReq.userRole;
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
@@ -194,18 +194,12 @@ export function createStoryRoutes(
       ]);
 
       if (!policy.canGenerateAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot generate stories.",
-        });
+        sendForbidden(res, "Your role cannot generate stories.");
         return;
       }
 
       if (!canAccessAccount) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "You do not have access to this account.",
-        });
+        sendForbidden(res, "You do not have access to this account.");
         return;
       }
 
@@ -240,14 +234,14 @@ export function createStoryRoutes(
         },
       });
 
-      res.json({
+      sendSuccess(res, {
         story_id: result.storyId,
         title: result.title,
         markdown: result.markdownBody,
         quotes: result.quotes.map((q) => mapGeneratedQuote(q)),
       });
     } catch (err) {
-      console.error("Story build error:", err);
+      logger.error("Story build error", { error: err });
       const errorMessage = err instanceof Error ? err.message : "Failed to build story";
       await dispatchStoryEvent({
         organizationId,
@@ -258,17 +252,14 @@ export function createStoryRoutes(
           error: errorMessage,
         },
       });
-      res.status(500).json({ error: "Failed to build story" });
+      sendError(res, 500, "internal_error", "Failed to build story");
     }
-  });
+  }));
 
-  router.post("/build/stream", async (req: Request, res: Response) => {
+  router.post("/build/stream", asyncHandler(async (req: Request, res: Response) => {
     const parseResult = BuildStorySchema.safeParse(req.body);
     if (!parseResult.success) {
-      res.status(400).json({
-        error: "validation_error",
-        details: parseResult.error.issues,
-      });
+      sendBadRequest(res, "validation_error", parseResult.error.issues);
       return;
     }
 
@@ -277,7 +268,7 @@ export function createStoryRoutes(
     const userId = authReq.userId;
     const userRole = authReq.userRole;
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
@@ -299,18 +290,12 @@ export function createStoryRoutes(
       ]);
 
       if (!policy.canGenerateAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot generate stories.",
-        });
+        sendForbidden(res, "Your role cannot generate stories.");
         return;
       }
 
       if (!canAccessAccount) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "You do not have access to this account.",
-        });
+        sendForbidden(res, "You do not have access to this account.");
         return;
       }
 
@@ -393,12 +378,12 @@ export function createStoryRoutes(
       res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
       res.end();
     }
-  });
+  }));
 
-  router.get("/library", async (req: Request, res: Response) => {
+  router.get("/library", asyncHandler(async (req: Request, res: Response) => {
     const parse = StoryLibraryQuerySchema.safeParse(req.query);
     if (!parse.success) {
-      res.status(400).json({ error: "validation_error", details: parse.error.issues });
+      sendBadRequest(res, "validation_error", parse.error.issues);
       return;
     }
 
@@ -408,17 +393,13 @@ export function createStoryRoutes(
     const userRole = authReq.userRole;
 
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
-    try {
       const policy = await roleProfiles.getEffectivePolicy(organizationId, userId, userRole);
       if (!policy.canAccessAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot access stories.",
-        });
+        sendForbidden(res, "Your role cannot access stories.");
         return;
       }
 
@@ -429,7 +410,7 @@ export function createStoryRoutes(
       );
 
       if (accessibleIds !== null && accessibleIds.length === 0) {
-        res.json({
+        sendSuccess(res, {
           stories: [],
           pagination: { page: 1, limit: 25, totalCount: 0, totalPages: 0 },
         });
@@ -529,7 +510,7 @@ export function createStoryRoutes(
 
       const totalPages = Math.ceil(totalCount / limit);
 
-      res.json({
+      sendSuccess(res, {
         stories: stories.map((s) => ({
           ...mapStorySummary(s),
           account: {
@@ -545,16 +526,13 @@ export function createStoryRoutes(
           totalPages,
         },
       });
-    } catch (err) {
-      console.error("Story library error:", err);
-      res.status(500).json({ error: "Failed to load story library" });
-    }
-  });
+    
+  }));
 
-  router.get("/:storyId/export", async (req: Request, res: Response) => {
+  router.get("/:storyId/export", asyncHandler(async (req: Request, res: Response) => {
     const parse = ExportQuerySchema.safeParse(req.query);
     if (!parse.success) {
-      res.status(400).json({ error: "validation_error", details: parse.error.issues });
+      sendBadRequest(res, "validation_error", parse.error.issues);
       return;
     }
 
@@ -564,11 +542,10 @@ export function createStoryRoutes(
     const userRole = authReq.userRole;
 
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
-    try {
       const [policy, story] = await Promise.all([
         roleProfiles.getEffectivePolicy(organizationId, userId, userRole),
         prisma.story.findFirst({
@@ -586,15 +563,12 @@ export function createStoryRoutes(
       ]);
 
       if (!policy.canAccessAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot access stories.",
-        });
+        sendForbidden(res, "Your role cannot access stories.");
         return;
       }
 
       if (!story) {
-        res.status(404).json({ error: "Story not found" });
+        sendNotFound(res, "Story not found");
         return;
       }
 
@@ -606,10 +580,7 @@ export function createStoryRoutes(
       );
 
       if (!canAccessAccount) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "You do not have access to this story.",
-        });
+        sendForbidden(res, "You do not have access to this story.");
         return;
       }
 
@@ -631,24 +602,20 @@ export function createStoryRoutes(
       );
       res.setHeader("Content-Disposition", `attachment; filename="${filename}.docx"`);
       res.send(Buffer.from(docxBuffer));
-    } catch (err) {
-      console.error("Story export error:", err);
-      res.status(500).json({ error: "Failed to export story" });
-    }
-  });
+    
+  }));
 
-  router.delete("/:storyId", async (req: Request, res: Response) => {
+  router.delete("/:storyId", asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthenticatedRequest;
     const organizationId = authReq.organizationId;
     const userId = authReq.userId;
     const userRole = authReq.userRole;
 
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
-    try {
       const [policy, story] = await Promise.all([
         roleProfiles.getEffectivePolicy(organizationId, userId, userRole),
         prisma.story.findFirst({
@@ -662,15 +629,12 @@ export function createStoryRoutes(
       ]);
 
       if (!policy.canGenerateAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot delete stories.",
-        });
+        sendForbidden(res, "Your role cannot delete stories.");
         return;
       }
 
       if (!story) {
-        res.status(404).json({ error: "Story not found" });
+        sendNotFound(res, "Story not found");
         return;
       }
 
@@ -682,40 +646,30 @@ export function createStoryRoutes(
       );
 
       if (!canAccessAccount) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "You do not have access to this story.",
-        });
+        sendForbidden(res, "You do not have access to this story.");
         return;
       }
 
       if (story._count.landingPages > 0) {
-        res.status(409).json({
-          error: "story_has_pages",
-          message: "Cannot delete a story that already has landing pages.",
-        });
+        sendConflict(res, "Cannot delete a story that already has landing pages.");
         return;
       }
 
       await prisma.story.delete({ where: { id: story.id } });
-      res.json({ deleted: true });
-    } catch (err) {
-      console.error("Story delete error:", err);
-      res.status(500).json({ error: "Failed to delete story" });
-    }
-  });
+      sendSuccess(res, { deleted: true });
+    
+  }));
 
-  router.get("/:accountId", async (req: Request, res: Response) => {
+  router.get("/:accountId", asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthenticatedRequest;
     const organizationId = authReq.organizationId;
     const userId = authReq.userId;
     const userRole = authReq.userRole;
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
-    try {
       const [policy, canAccessAccount] = await Promise.all([
         roleProfiles.getEffectivePolicy(organizationId, userId, userRole),
         accessService.canAccessAccount(
@@ -727,18 +681,12 @@ export function createStoryRoutes(
       ]);
 
       if (!policy.canAccessAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot access stories.",
-        });
+        sendForbidden(res, "Your role cannot access stories.");
         return;
       }
 
       if (!canAccessAccount) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "You do not have access to this account.",
-        });
+        sendForbidden(res, "You do not have access to this account.");
         return;
       }
 
@@ -764,24 +712,18 @@ export function createStoryRoutes(
         orderBy: { generatedAt: "desc" },
       });
 
-      res.json({
+      sendSuccess(res, {
         stories: stories.map((s) => mapStorySummary(s)),
       });
-    } catch (err) {
-      console.error("Story retrieval error:", err);
-      res.status(500).json({ error: "Failed to retrieve stories" });
-    }
-  });
+    
+  }));
 
   const merger = new TranscriptMerger(prisma);
 
-  router.post("/merge-transcripts", async (req: Request, res: Response) => {
+  router.post("/merge-transcripts", asyncHandler(async (req: Request, res: Response) => {
     const parseResult = MergeTranscriptsSchema.safeParse(req.body);
     if (!parseResult.success) {
-      res.status(400).json({
-        error: "validation_error",
-        details: parseResult.error.issues,
-      });
+      sendBadRequest(res, "validation_error", parseResult.error.issues);
       return;
     }
 
@@ -790,14 +732,13 @@ export function createStoryRoutes(
     const userId = authReq.userId;
     const userRole = authReq.userRole;
     if (!organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
     const { account_id, max_words, truncation_mode, after_date, before_date } =
       parseResult.data;
 
-    try {
       const [policy, canAccessAccount] = await Promise.all([
         roleProfiles.getEffectivePolicy(organizationId, userId, userRole),
         accessService.canAccessAccount(
@@ -809,18 +750,12 @@ export function createStoryRoutes(
       ]);
 
       if (!policy.canGenerateAnonymousStories) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "Your role cannot generate stories.",
-        });
+        sendForbidden(res, "Your role cannot generate stories.");
         return;
       }
 
       if (!canAccessAccount) {
-        res.status(403).json({
-          error: "permission_denied",
-          message: "You do not have access to this account.",
-        });
+        sendForbidden(res, "You do not have access to this account.");
         return;
       }
 
@@ -833,7 +768,7 @@ export function createStoryRoutes(
         beforeDate: before_date ? new Date(before_date) : undefined,
       });
 
-      res.json({
+      sendSuccess(res, {
         markdown: result.markdown,
         word_count: result.wordCount,
         total_calls: result.totalCalls,
@@ -842,165 +777,8 @@ export function createStoryRoutes(
         truncation_boundary: result.truncationBoundary?.toISOString() ?? null,
         truncation_mode: result.truncationMode,
       });
-    } catch (err) {
-      console.error("Transcript merge error:", err);
-      res.status(500).json({ error: "Failed to merge transcripts" });
-    }
-  });
+    
+  }));
 
   return router;
 }
-
-function mapStorySummary(s: {
-  id: string;
-  title: string;
-  storyType: string;
-  funnelStages: string[];
-  filterTags: string[];
-  generatedAt: Date;
-  markdownBody: string;
-  quotes: HighValueQuote[];
-  landingPages: Array<{
-    id: string;
-    slug: string;
-    status: string;
-    publishedAt: Date | null;
-  }>;
-}) {
-  return {
-    story_status:
-      s.landingPages.length === 0
-        ? "DRAFT"
-        : s.landingPages[0]?.status === "PUBLISHED"
-          ? "PUBLISHED"
-          : s.landingPages[0]?.status === "ARCHIVED"
-            ? "ARCHIVED"
-            : "PAGE_CREATED",
-    id: s.id,
-    title: s.title,
-    story_type: s.storyType,
-    funnel_stages: s.funnelStages,
-    filter_tags: s.filterTags,
-    generated_at: s.generatedAt.toISOString(),
-    markdown: s.markdownBody,
-    landing_page:
-      s.landingPages[0] == null
-        ? null
-        : {
-            id: s.landingPages[0].id,
-            slug: s.landingPages[0].slug,
-            status: s.landingPages[0].status,
-            published_at: s.landingPages[0].publishedAt?.toISOString() ?? null,
-          },
-    quotes: s.quotes.map((q) => mapStoredQuote(q)),
-  };
-}
-
-function mapGeneratedQuote(q: {
-  speaker: string | null;
-  quoteText: string;
-  context: string | null;
-  metricType: string | null;
-  metricValue: string | null;
-  callId: string;
-  sourceChunkId: string | null;
-  sourceTimestampMs: number | null;
-  sourceCallTitle: string | null;
-  sourceRecordingUrl: string | null;
-  confidenceScore?: number;
-}) {
-  return {
-    speaker: q.speaker,
-    quote_text: q.quoteText,
-    context: q.context,
-    metric_type: q.metricType,
-    metric_value: q.metricValue,
-    confidence_score: q.confidenceScore ?? undefined,
-    call_id: q.callId,
-    source_chunk_id: q.sourceChunkId ?? undefined,
-    source_timestamp_ms: q.sourceTimestampMs ?? undefined,
-    source_call_title: q.sourceCallTitle ?? undefined,
-    source_recording_url: q.sourceRecordingUrl ?? undefined,
-    transcript_deep_link: buildTranscriptDeepLink(
-      q.callId,
-      q.sourceTimestampMs ?? undefined,
-      q.sourceChunkId ?? undefined
-    ),
-  };
-}
-
-function mapStoredQuote(q: HighValueQuote) {
-  const metadata = parseLineageMetadata(q.lineageMetadata);
-  const sourceCallId = q.callId ?? metadata.source_call_id;
-
-  return {
-    speaker: q.speaker,
-    quote_text: q.quoteText,
-    context: q.context,
-    metric_type: q.metricType,
-    metric_value: q.metricValue,
-    confidence_score: q.confidenceScore,
-    call_id: sourceCallId ?? undefined,
-    source_chunk_id: metadata.source_chunk_id,
-    source_timestamp_ms: metadata.source_start_ms,
-    source_call_title: metadata.source_call_title,
-    source_recording_url: metadata.source_recording_url,
-    transcript_deep_link: sourceCallId
-      ? buildTranscriptDeepLink(sourceCallId, metadata.source_start_ms, metadata.source_chunk_id)
-      : undefined,
-  };
-}
-
-function parseLineageMetadata(lineageMetadata: unknown): {
-  source_call_id?: string;
-  source_chunk_id?: string;
-  source_start_ms?: number;
-  source_call_title?: string;
-  source_recording_url?: string;
-} {
-  if (!lineageMetadata || typeof lineageMetadata !== "object" || Array.isArray(lineageMetadata)) {
-    return {};
-  }
-
-  const metadata = lineageMetadata as Record<string, unknown>;
-  const sourceStartMs = metadata.source_start_ms;
-  return {
-    source_call_id:
-      typeof metadata.source_call_id === "string" ? metadata.source_call_id : undefined,
-    source_chunk_id:
-      typeof metadata.source_chunk_id === "string" ? metadata.source_chunk_id : undefined,
-    source_start_ms:
-      typeof sourceStartMs === "number"
-        ? sourceStartMs
-        : typeof sourceStartMs === "string"
-          ? Number.isFinite(Number(sourceStartMs))
-            ? Number(sourceStartMs)
-            : undefined
-          : undefined,
-    source_call_title:
-      typeof metadata.source_call_title === "string" ? metadata.source_call_title : undefined,
-    source_recording_url:
-      typeof metadata.source_recording_url === "string"
-        ? metadata.source_recording_url
-        : undefined,
-  };
-}
-
-function buildTranscriptDeepLink(
-  callId: string,
-  sourceTimestampMs?: number,
-  sourceChunkId?: string
-): string {
-  const params = new URLSearchParams();
-  if (typeof sourceTimestampMs === "number" && Number.isFinite(sourceTimestampMs) && sourceTimestampMs >= 0) {
-    params.set("tms", String(Math.floor(sourceTimestampMs)));
-  }
-  if (typeof sourceChunkId === "string" && sourceChunkId.length > 0) {
-    params.set("chunk", sourceChunkId);
-  }
-  const query = params.toString();
-  return query.length > 0
-    ? `/calls/${encodeURIComponent(callId)}/transcript?${query}`
-    : `/calls/${encodeURIComponent(callId)}/transcript`;
-}
-

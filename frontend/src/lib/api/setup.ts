@@ -4,7 +4,7 @@ import type {
   SetupMvpQuickstartStatus,
   SetupPlanCatalog,
   SetupStatus,
-} from "../api";
+} from "./types";
 import { request } from "./http";
 
 export async function getSetupMvpQuickstartStatus(): Promise<SetupMvpQuickstartStatus> {

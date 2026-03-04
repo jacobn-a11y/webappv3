@@ -15,7 +15,21 @@ export interface AuthenticatedRequest extends Request {
   apiKeyId?: string;
   apiKeyScopes?: string[];
   impersonation?: {
+    sessionId: string;
     actorUserId: string;
-    actorOrganizationId: string;
+    actorOrganizationId?: string;
+    targetUserId: string;
+    scope: string[];
+    reason: string;
+    expiresAt: string;
   };
+}
+
+/**
+ * Narrowed request type for routes behind requireAuth + requireOrganization.
+ * organizationId is guaranteed to be present.
+ */
+export interface OrgRequest extends AuthenticatedRequest {
+  organizationId: string;
+  userId: string;
 }

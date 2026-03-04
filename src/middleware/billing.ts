@@ -73,6 +73,12 @@ export function createTrialGate(prisma: PrismaClient, _stripe: Stripe) {
     try {
       const org = await prisma.organization.findUnique({
         where: { id: orgId },
+        select: {
+          id: true,
+          plan: true,
+          trialEndsAt: true,
+          billingChannel: true,
+        },
       });
 
       if (!org) {

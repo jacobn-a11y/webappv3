@@ -1,11 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
-import type { PrismaClient, UserRole } from "@prisma/client";
-
-interface AuthRequest extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
+import type { PrismaClient } from "@prisma/client";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 
 export function createDevAuthBypass(prisma: PrismaClient) {
   return async (req: Request, _res: Response, next: NextFunction) => {
@@ -19,7 +14,7 @@ export function createDevAuthBypass(prisma: PrismaClient) {
       return;
     }
 
-    const authReq = req as AuthRequest;
+    const authReq = req as AuthenticatedRequest;
     if (authReq.organizationId && authReq.userId) {
       next();
       return;

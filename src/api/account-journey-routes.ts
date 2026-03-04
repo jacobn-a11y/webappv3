@@ -12,8 +12,9 @@
  * A sidebar displays the account's CRM data (industry, revenue, contacts).
  */
 
-import { Router, type Request, type Response } from "express";
-import type { PrismaClient, UserRole } from "@prisma/client";
+import { Router, type Response } from "express";
+import type { PrismaClient } from "@prisma/client";
+import logger from "../lib/logger.js";
 import {
   AccountJourneyService,
   type TimelineNode,
@@ -21,14 +22,9 @@ import {
   type TimelineCrmEventNode,
   type AccountCrmSidebar,
 } from "../services/account-journey.js";
-
-// ─── Auth Request ─────────────────────────────────────────────────────────────
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import { asyncHandler } from "../lib/async-handler.js";
+import { sendUnauthorized, sendSuccess } from "./_shared/responses.js";
 
 // ─── Route Factory ────────────────────────────────────────────────────────────
 
@@ -44,19 +40,18 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
    *   - timeline nodes (calls + CRM events, chronologically sorted)
    *   - stage counts
    */
-  router.get("/:accountId/journey", async (req: AuthReq, res: Response) => {
+  router.get("/:accountId/journey", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.organizationId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
-    try {
       const data = await journeyService.getAccountJourney(
         req.params.accountId as string,
         req.organizationId
       );
 
-      res.json({
+      sendSuccess(res, {
         account: {
           id: data.account.id,
           name: data.account.name,
@@ -116,11 +111,8 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
         }),
         stage_counts: data.stageCounts,
       });
-    } catch (err) {
-      console.error("Account journey error:", err);
-      res.status(500).json({ error: "Failed to load account journey" });
-    }
-  });
+    
+  }));
 
   /**
    * GET /api/accounts/:accountId/journey/view
@@ -129,13 +121,12 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
    */
   router.get(
     "/:accountId/journey/view",
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      try {
         const data = await journeyService.getAccountJourney(
           req.params.accountId as string,
           req.organizationId
@@ -145,12 +136,9 @@ export function createAccountJourneyRoutes(prisma: PrismaClient): Router {
         res.send(
           renderJourneyPage(data.account, data.timeline, data.stageCounts)
         );
-      } catch (err) {
-        console.error("Account journey view error:", err);
-        res.status(500).send(renderErrorPage());
-      }
+      
     }
-  );
+  ));
 
   return router;
 }

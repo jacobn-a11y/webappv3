@@ -5,7 +5,7 @@ import {
   type UserRole,
 } from "@prisma/client";
 import type { Response } from "express";
-import { respondAuthRequired } from "../_shared/errors.js";
+import { sendSuccess, sendUnauthorized } from "../_shared/responses.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import { isBillingEnabled } from "../../middleware/billing.js";
 import { getStripePriceId } from "../../config/stripe-plans.js";
@@ -22,6 +22,7 @@ import {
 } from "./schemas.js";
 import type { AuthReq, SetupRouteContext } from "./types.js";
 import logger from "../../lib/logger.js";
+import { asyncHandler } from "../../lib/async-handler.js";
 
 export function registerSetupStepRoutes({
   prisma,
@@ -34,27 +35,23 @@ export function registerSetupStepRoutes({
   SetupRouteContext,
   "prisma" | "requireSetupAdmin" | "roleProfiles" | "router" | "stripe" | "wizardService"
 >): void {
-  router.post("/step/recording-provider", async (req: AuthReq, res: Response) => {
+  router.post("/step/recording-provider", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
-    try {
       const linkToken = await wizardService.initRecordingProviderLink(req.organizationId);
-      res.json(linkToken);
-    } catch (err) {
-      logger.error("Recording provider link error", { error: err });
-      res.status(500).json({ error: "Failed to create Merge.dev link session" });
-    }
-  });
+      sendSuccess(res, linkToken);
+    
+  }));
 
   router.post(
     "/step/recording-provider/complete",
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
       if (!requireSetupAdmin(req, res)) return;
@@ -64,7 +61,6 @@ export function registerSetupStepRoutes({
         return;
       }
 
-      try {
         await wizardService.completeRecordingProvider(
           req.organizationId,
           payload.provider as CallProvider,
@@ -72,33 +68,26 @@ export function registerSetupStepRoutes({
         );
 
         const status = await wizardService.getStatus(req.organizationId);
-        res.json({ completed: true, status });
-      } catch (err) {
-        logger.error("Complete recording provider error", { error: err });
-        res.status(500).json({ error: "Failed to complete recording provider setup" });
-      }
+        sendSuccess(res, { completed: true, status });
+      
     }
-  );
+  ));
 
-  router.post("/step/crm", async (req: AuthReq, res: Response) => {
+  router.post("/step/crm", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
-    try {
       const linkToken = await wizardService.initCrmLink(req.organizationId);
-      res.json(linkToken);
-    } catch (err) {
-      logger.error("CRM link error", { error: err });
-      res.status(500).json({ error: "Failed to create Merge.dev CRM link session" });
-    }
-  });
+      sendSuccess(res, linkToken);
+    
+  }));
 
-  router.post("/step/crm/complete", async (req: AuthReq, res: Response) => {
+  router.post("/step/crm/complete", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -108,7 +97,6 @@ export function registerSetupStepRoutes({
       return;
     }
 
-    try {
       await wizardService.completeCrmConnection(
         req.organizationId,
         payload.crm_provider as CRMProvider,
@@ -116,32 +104,25 @@ export function registerSetupStepRoutes({
       );
 
       const status = await wizardService.getStatus(req.organizationId);
-      res.json({ completed: true, status });
-    } catch (err) {
-      logger.error("Complete CRM error", { error: err });
-      res.status(500).json({ error: "Failed to complete CRM setup" });
-    }
-  });
+      sendSuccess(res, { completed: true, status });
+    
+  }));
 
-  router.get("/step/account-sync", async (req: AuthReq, res: Response) => {
+  router.get("/step/account-sync", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
-    try {
       const preview = await wizardService.getAccountSyncPreview(req.organizationId);
-      res.json(preview);
-    } catch (err) {
-      logger.error("Account sync preview error", { error: err });
-      res.status(500).json({ error: "Failed to load account sync preview" });
-    }
-  });
+      sendSuccess(res, preview);
+    
+  }));
 
-  router.post("/step/account-sync/resolve", async (req: AuthReq, res: Response) => {
+  router.post("/step/account-sync/resolve", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -151,7 +132,6 @@ export function registerSetupStepRoutes({
       return;
     }
 
-    try {
       const result = await wizardService.applyEntityResolutionFixes(
         req.organizationId,
         payload.fixes.map((fix) => ({
@@ -159,71 +139,61 @@ export function registerSetupStepRoutes({
           accountId: fix.account_id,
         }))
       );
-      res.json(result);
-    } catch (err) {
-      logger.error("Entity resolution fix error", { error: err });
-      res.status(500).json({ error: "Failed to apply entity resolution fixes" });
-    }
-  });
+      sendSuccess(res, result);
+    
+  }));
 
-  router.post("/step/account-sync/complete", async (req: AuthReq, res: Response) => {
+  router.post("/step/account-sync/complete", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
-    try {
       await wizardService.completeAccountSyncReview(req.organizationId);
       const status = await wizardService.getStatus(req.organizationId);
-      res.json({ completed: true, status });
-    } catch (err) {
-      logger.error("Complete account sync error", { error: err });
-      res.status(500).json({ error: "Failed to complete account sync review" });
-    }
-  });
+      sendSuccess(res, { completed: true, status });
+    
+  }));
 
-  router.get("/step/plan", async (_req: AuthReq, res: Response) => {
+  router.get("/step/plan", asyncHandler(async (_req: AuthReq, res: Response) => {
     const plans = wizardService.getAvailablePlans();
-    res.json({
+    sendSuccess(res, {
       plans,
       billing_enabled: isBillingEnabled(),
     });
-  });
+  }));
 
-  router.post("/step/plan", async (req: AuthReq, res: Response) => {
+  router.post("/step/plan", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
     if (!isBillingEnabled()) {
-      try {
-        const result = await wizardService.completePlanSelection(
-          req.organizationId,
-          "FREE_TRIAL" as Plan,
-          {
-            createCheckoutSession: async () => null,
-          }
-        );
 
-        await prisma.organization.update({
-          where: { id: req.organizationId },
-          data: { trialEndsAt: null },
-        });
-
-        const status = await wizardService.getStatus(req.organizationId);
-        res.json({
-          completed: true,
-          checkoutUrl: result.checkoutUrl,
-          billing_enabled: false,
-          status,
-        });
-      } catch (err) {
-        logger.error("Plan selection error (billing disabled)", { error: err });
-        res.status(500).json({ error: "Failed to complete plan selection" });
+      const result = await wizardService.completePlanSelection(
+      req.organizationId,
+      "FREE_TRIAL" as Plan,
+      {
+        createCheckoutSession: async () => null,
       }
+      );
+
+      await prisma.organization.update({
+      where: { id: req.organizationId },
+      data: { trialEndsAt: null },
+      });
+
+      const status = await wizardService.getStatus(req.organizationId);
+      sendSuccess(res, {
+      completed: true,
+      checkoutUrl: result.checkoutUrl,
+      billing_enabled: false,
+      status,
+      });
+      
       return;
     }
 
@@ -277,7 +247,7 @@ export function registerSetupStepRoutes({
       );
 
       const status = await wizardService.getStatus(req.organizationId);
-      res.json({
+      sendSuccess(res, {
         completed: true,
         checkoutUrl: result.checkoutUrl,
         status,
@@ -289,11 +259,11 @@ export function registerSetupStepRoutes({
       const statusCode = message.includes("not configured") ? 400 : 500;
       res.status(statusCode).json({ error: message });
     }
-  });
+  }));
 
-  router.post("/step/permissions", async (req: AuthReq, res: Response) => {
+  router.post("/step/permissions", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -303,7 +273,6 @@ export function registerSetupStepRoutes({
       return;
     }
 
-    try {
       await wizardService.completePermissionsSetup(req.organizationId, {
         defaultPageVisibility: payload.default_page_visibility,
         allowedPublishers: payload.allowed_publishers as UserRole[],
@@ -311,16 +280,13 @@ export function registerSetupStepRoutes({
       });
 
       const status = await wizardService.getStatus(req.organizationId);
-      res.json({ completed: true, status });
-    } catch (err) {
-      logger.error("Permissions setup error", { error: err });
-      res.status(500).json({ error: "Failed to configure permissions" });
-    }
-  });
+      sendSuccess(res, { completed: true, status });
+    
+  }));
 
-  router.post("/step/org-profile", async (req: AuthReq, res: Response) => {
+  router.post("/step/org-profile", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -330,7 +296,6 @@ export function registerSetupStepRoutes({
       return;
     }
 
-    try {
       const data = payload;
       await prisma.orgSettings.upsert({
         where: { organizationId: req.organizationId },
@@ -353,16 +318,13 @@ export function registerSetupStepRoutes({
         },
       });
       const status = await wizardService.getStatus(req.organizationId);
-      res.json({ updated: true, status });
-    } catch (err) {
-      logger.error("Org profile setup error", { error: err });
-      res.status(500).json({ error: "Failed to save org profile setup" });
-    }
-  });
+      sendSuccess(res, { updated: true, status });
+    
+  }));
 
-  router.post("/step/governance-defaults", async (req: AuthReq, res: Response) => {
+  router.post("/step/governance-defaults", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -372,7 +334,6 @@ export function registerSetupStepRoutes({
       return;
     }
 
-    try {
       const data = payload;
       await prisma.orgSettings.upsert({
         where: { organizationId: req.organizationId },
@@ -403,33 +364,26 @@ export function registerSetupStepRoutes({
         },
       });
       const status = await wizardService.getStatus(req.organizationId);
-      res.json({ updated: true, status });
-    } catch (err) {
-      logger.error("Governance defaults setup error", { error: err });
-      res.status(500).json({ error: "Failed to save governance defaults" });
-    }
-  });
+      sendSuccess(res, { updated: true, status });
+    
+  }));
 
-  router.post("/step/role-presets", async (req: AuthReq, res: Response) => {
+  router.post("/step/role-presets", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
-    try {
       await roleProfiles.ensurePresetRoles(req.organizationId);
       const status = await wizardService.getStatus(req.organizationId);
-      res.json({ updated: true, status });
-    } catch (err) {
-      logger.error("Role presets setup error", { error: err });
-      res.status(500).json({ error: "Failed to apply role presets" });
-    }
-  });
+      sendSuccess(res, { updated: true, status });
+    
+  }));
 
-  router.post("/skip", async (req: AuthReq, res: Response) => {
+  router.post("/skip", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
@@ -439,13 +393,9 @@ export function registerSetupStepRoutes({
       return;
     }
 
-    try {
       await wizardService.skipStep(req.organizationId, payload.step);
       const status = await wizardService.getStatus(req.organizationId);
-      res.json({ skipped: true, status });
-    } catch (err) {
-      logger.error("Skip step error", { error: err });
-      res.status(500).json({ error: "Failed to skip step" });
-    }
-  });
+      sendSuccess(res, { skipped: true, status });
+    
+  }));
 }

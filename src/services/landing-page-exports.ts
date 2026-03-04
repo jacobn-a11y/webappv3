@@ -15,6 +15,11 @@ import type { CalloutBox } from "./landing-page-editor.js";
 import { decodeCalloutBoxes } from "../types/json-boundaries.js";
 import type { StoryContextSettings } from "../types/story-generation.js";
 
+// ─── PDF Concurrency Limiter ─────────────────────────────────────────────────
+
+let activePdfJobs = 0;
+const MAX_PDF_CONCURRENCY = 3;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ExportablePage {
@@ -56,40 +61,49 @@ export class LandingPageExporter {
     const page = await this.getExportablePage(pageId);
     const html = renderLandingPageHtml(page);
 
-    const executablePath =
-      process.env.PUPPETEER_EXECUTABLE_PATH ??
-      "/usr/bin/chromium-browser";
-
-    const browser = await puppeteer.launch({
-      executablePath,
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
-    });
+    while (activePdfJobs >= MAX_PDF_CONCURRENCY) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+    activePdfJobs++;
 
     try {
-      const browserPage = await browser.newPage();
-      await browserPage.setContent(html, { waitUntil: "networkidle0" });
+      const executablePath =
+        process.env.PUPPETEER_EXECUTABLE_PATH ??
+        "/usr/bin/chromium-browser";
 
-      const pdfBuffer = await browserPage.pdf({
-        format: "A4",
-        printBackground: true,
-        margin: { top: "0.5in", bottom: "0.5in", left: "0.5in", right: "0.5in" },
-        displayHeaderFooter: true,
-        headerTemplate: `<div style="font-size:8px;width:100%;text-align:center;color:#999;padding:0 0.5in;">
-          <span>${page.title.replace(/"/g, "&quot;")}</span>
-        </div>`,
-        footerTemplate: `<div style="font-size:8px;width:100%;text-align:center;color:#999;padding:0 0.5in;">
-          <span>Compiled by AI from ${page.totalCallHours} hours of call recordings</span>
-          <span style="float:right;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
-        </div>`,
+      const browser = await puppeteer.launch({
+        executablePath,
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
       });
 
-      const slug = await this.getPageSlug(pageId);
-      const filename = `${slug}.pdf`;
+      try {
+        const browserPage = await browser.newPage();
+        await browserPage.setContent(html, { waitUntil: "networkidle0" });
 
-      return { buffer: Buffer.from(pdfBuffer), filename };
+        const pdfBuffer = await browserPage.pdf({
+          format: "A4",
+          printBackground: true,
+          margin: { top: "0.5in", bottom: "0.5in", left: "0.5in", right: "0.5in" },
+          displayHeaderFooter: true,
+          headerTemplate: `<div style="font-size:8px;width:100%;text-align:center;color:#999;padding:0 0.5in;">
+            <span>${page.title.replace(/"/g, "&quot;")}</span>
+          </div>`,
+          footerTemplate: `<div style="font-size:8px;width:100%;text-align:center;color:#999;padding:0 0.5in;">
+            <span>Compiled by AI from ${page.totalCallHours} hours of call recordings</span>
+            <span style="float:right;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+          </div>`,
+        });
+
+        const slug = await this.getPageSlug(pageId);
+        const filename = `${slug}.pdf`;
+
+        return { buffer: Buffer.from(pdfBuffer), filename };
+      } finally {
+        await browser.close();
+      }
     } finally {
-      await browser.close();
+      activePdfJobs--;
     }
   }
 

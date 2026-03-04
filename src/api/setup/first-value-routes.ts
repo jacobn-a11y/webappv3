@@ -1,6 +1,8 @@
 import type { Response } from "express";
-import { respondAuthRequired, respondServerError } from "../_shared/errors.js";
+import { sendUnauthorized, sendError } from "../_shared/responses.js";
+import logger from "../../lib/logger.js";
 import type { AuthReq, SetupRouteContext } from "./types.js";
+import { asyncHandler } from "../../lib/async-handler.js";
 
 interface ContextualPrompt {
   id: string;
@@ -57,13 +59,12 @@ export function registerSetupFirstValueRoutes({
   prisma,
   router,
 }: Pick<SetupRouteContext, "prisma" | "router">): void {
-  router.get("/first-value/recommendations", async (req: AuthReq, res: Response) => {
+  router.get("/first-value/recommendations", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
 
-    try {
       const [storyCount, pageCount, account] = await Promise.all([
         prisma.story.count({ where: { organizationId: req.organizationId } }),
         prisma.landingPage.count({
@@ -118,13 +119,6 @@ export function registerSetupFirstValueRoutes({
         }),
         next_tasks: tasks,
       });
-    } catch (err) {
-      respondServerError(
-        res,
-        "First-value recommendation error:",
-        "Failed to load first-value recommendations",
-        err
-      );
-    }
-  });
+    
+  }));
 }

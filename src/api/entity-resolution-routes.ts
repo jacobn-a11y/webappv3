@@ -15,12 +15,16 @@
  *   POST   /api/entity-resolution/merge       — Merge two accounts
  */
 
-import { Router, type Request, type Response } from "express";
+import { Router, type Response } from "express";
 import { z } from "zod";
-import type { PrismaClient, UserRole } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { EntityResolutionQueueService } from "../services/entity-resolution-queue.js";
 import { parseBoundedLimit, PAGINATION_LIMITS } from "../lib/pagination.js";
 import { requirePermission } from "../middleware/permissions.js";
+import logger from "../lib/logger.js";
+import { asyncHandler } from "../lib/async-handler.js";
+import { sendSuccess, sendBadRequest, sendUnauthorized } from "./_shared/responses.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -49,12 +53,6 @@ const MergeAccountsSchema = z.object({
   target_account_id: z.string().min(1),
 });
 
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
-
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
 export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
@@ -81,13 +79,12 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
   router.get(
     "/queue",
     resolvePermission,
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      try {
         const result = await queueService.listQueue(req.organizationId, {
           page: req.query.page ? parseInt(req.query.page as string, 10) : undefined,
           pageSize: req.query.page_size ? parseInt(req.query.page_size as string, 10) : undefined,
@@ -96,13 +93,10 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
           sortOrder: req.query.sort_order as "asc" | "desc" | undefined,
         });
 
-        res.json(result);
-      } catch (err) {
-        console.error("Entity resolution queue error:", err);
-        res.status(500).json({ error: "Failed to load resolution queue" });
-      }
+        sendSuccess(res, result);
+      
     }
-  );
+  ));
 
   // ── Queue Stats ────────────────────────────────────────────────────
 
@@ -114,21 +108,17 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
   router.get(
     "/stats",
     resolvePermission,
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      try {
         const stats = await queueService.getQueueStats(req.organizationId);
-        res.json(stats);
-      } catch (err) {
-        console.error("Entity resolution stats error:", err);
-        res.status(500).json({ error: "Failed to load queue stats" });
-      }
+        sendSuccess(res, stats);
+      
     }
-  );
+  ));
 
   // ── Account Search (for Assign dropdown) ───────────────────────────
 
@@ -141,13 +131,12 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
   router.get(
     "/accounts",
     resolvePermission,
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      try {
         const query = (req.query.q as string) ?? "";
         const limit = parseBoundedLimit(req.query.limit, {
           fallback: PAGINATION_LIMITS.SEARCH_DEFAULT,
@@ -160,13 +149,10 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
           limit
         );
 
-        res.json({ accounts });
-      } catch (err) {
-        console.error("Account search error:", err);
-        res.status(500).json({ error: "Failed to search accounts" });
-      }
+        sendSuccess(res, { accounts });
+      
     }
-  );
+  ));
 
   // ── Manual Resolution ──────────────────────────────────────────────
 
@@ -180,15 +166,15 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
   router.post(
     "/resolve",
     resolvePermission,
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
       const parse = ResolveCallSchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
@@ -199,14 +185,14 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
           req.organizationId
         );
 
-        res.json({ resolved: true, call_id: parse.data.call_id, account_id: parse.data.account_id });
+        sendSuccess(res, { resolved: true, call_id: parse.data.call_id, account_id: parse.data.account_id });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to resolve call";
-        console.error("Resolve call error:", err);
-        res.status(400).json({ error: message });
+        logger.error("Resolve call error", { error: err });
+        sendBadRequest(res, message);
       }
     }
-  );
+  ));
 
   // ── Bulk Resolution ────────────────────────────────────────────────
 
@@ -218,32 +204,28 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
   router.post(
     "/bulk-resolve",
     resolvePermission,
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
       const parse = BulkResolveSchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
-      try {
         const result = await queueService.bulkResolve(
           parse.data.call_ids,
           parse.data.account_id,
           req.organizationId
         );
 
-        res.json(result);
-      } catch (err) {
-        console.error("Bulk resolve error:", err);
-        res.status(500).json({ error: "Failed to bulk resolve calls" });
-      }
+        sendSuccess(res, result);
+      
     }
-  );
+  ));
 
   // ── Dismiss ────────────────────────────────────────────────────────
 
@@ -256,31 +238,27 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
   router.post(
     "/dismiss",
     resolvePermission,
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
       const parse = DismissCallsSchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
-      try {
         const result = await queueService.dismissCalls(
           parse.data.call_ids,
           req.organizationId
         );
 
-        res.json(result);
-      } catch (err) {
-        console.error("Dismiss calls error:", err);
-        res.status(500).json({ error: "Failed to dismiss calls" });
-      }
+        sendSuccess(res, result);
+      
     }
-  );
+  ));
 
   // ── Create Account from Call ───────────────────────────────────────
 
@@ -293,15 +271,15 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
   router.post(
     "/create-account",
     resolvePermission,
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
       const parse = CreateAccountFromCallSchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
@@ -315,14 +293,14 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
           }
         );
 
-        res.json({ created: true, ...result });
+        sendSuccess(res, { created: true, ...result });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to create account";
-        console.error("Create account from call error:", err);
-        res.status(400).json({ error: message });
+        logger.error("Create account from call error", { error: err });
+        sendBadRequest(res, message);
       }
     }
-  );
+  ));
 
   // ── Merge Accounts ─────────────────────────────────────────────────
 
@@ -336,15 +314,15 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
   router.post(
     "/merge",
     resolvePermission,
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
       const parse = MergeAccountsSchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
@@ -355,18 +333,18 @@ export function createEntityResolutionRoutes(prisma: PrismaClient): Router {
           req.organizationId
         );
 
-        res.json({
+        sendSuccess(res, {
           merged: true,
           source_account_id: parse.data.source_account_id,
           target_account_id: parse.data.target_account_id,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to merge accounts";
-        console.error("Merge accounts error:", err);
-        res.status(400).json({ error: message });
+        logger.error("Merge accounts error", { error: err });
+        sendBadRequest(res, message);
       }
     }
-  );
+  ));
 
   return router;
 }

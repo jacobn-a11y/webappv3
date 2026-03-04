@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { Response } from "express";
-import { respondAuthRequired, respondServerError } from "../_shared/errors.js";
+import { sendUnauthorized, sendError, sendSuccess, sendBadRequest, sendNotFound } from "../_shared/responses.js";
+import logger from "../../lib/logger.js";
 import { parseRequestBody } from "../_shared/validators.js";
 import { toProviderCredentials } from "../../integrations/types.js";
 import { asObject, parseGongKeyBundle } from "./helpers.js";
@@ -10,6 +11,7 @@ import {
   MvpSelectAccountsSchema,
 } from "./schemas.js";
 import type { AuthReq, SetupRouteContext } from "./types.js";
+import { asyncHandler } from "../../lib/async-handler.js";
 
 export function registerSetupQuickstartRoutes({
   deps,
@@ -92,34 +94,26 @@ export function registerSetupQuickstartRoutes({
     };
   };
 
-  router.get("/mvp/quickstart", async (req: AuthReq, res: Response) => {
+  router.get("/mvp/quickstart", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
 
-    try {
       const status = await buildMvpQuickstartStatus(req.organizationId);
-      res.json(status);
-    } catch (err) {
-      respondServerError(
-        res,
-        "MVP quickstart status error:",
-        "Failed to load MVP quickstart status",
-        err
-      );
-    }
-  });
+      sendSuccess(res, status);
+    
+  }));
 
-  router.post("/mvp/quickstart", async (req: AuthReq, res: Response) => {
+  router.post("/mvp/quickstart", asyncHandler(async (req: AuthReq, res: Response) => {
     if (!req.organizationId) {
-      respondAuthRequired(res);
+      sendUnauthorized(res);
       return;
     }
     if (!requireSetupAdmin(req, res)) return;
     if (!deps.aiConfigService) {
-      res.status(500).json({ error: "AI config service unavailable" });
+      sendError(res, 500, "internal_error", "AI config service unavailable");
       return;
     }
 
@@ -130,14 +124,10 @@ export function registerSetupQuickstartRoutes({
 
     const gongBundle = parseGongKeyBundle(payload.gong_api_key);
     if (!gongBundle) {
-      res.status(400).json({
-        error:
-          "Invalid Gong API key format. Use `accessKey:accessKeySecret` or `Basic <base64(accessKey:accessKeySecret)>`.",
-      });
+      sendBadRequest(res, "Invalid Gong API key format. Use `accessKey:accessKeySecret` or `Basic <base64(accessKey:accessKeySecret)>`.");
       return;
     }
 
-    try {
       const valid = await gongProvider.validateCredentials({
         accessKey: gongBundle.accessKey,
         accessKeySecret: gongBundle.accessKeySecret,
@@ -145,9 +135,7 @@ export function registerSetupQuickstartRoutes({
       });
 
       if (!valid) {
-        res.status(400).json({
-          error: "Gong credentials validation failed. Check your Gong API key.",
-        });
+        sendBadRequest(res, "Gong credentials validation failed. Check your Gong API key.");
         return;
       }
 
@@ -217,22 +205,15 @@ export function registerSetupQuickstartRoutes({
       });
 
       const status = await buildMvpQuickstartStatus(req.organizationId);
-      res.json({ saved: true, status });
-    } catch (err) {
-      respondServerError(
-        res,
-        "MVP quickstart save error:",
-        "Failed to save MVP quickstart keys",
-        err
-      );
-    }
-  });
+      sendSuccess(res, { saved: true, status });
+    
+  }));
 
   router.post(
     "/mvp/quickstart/gong/accounts/index",
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
       if (!requireSetupAdmin(req, res)) return;
@@ -242,7 +223,6 @@ export function registerSetupQuickstartRoutes({
         return;
       }
 
-      try {
         const config = await prisma.integrationConfig.findUnique({
           where: {
             organizationId_provider: {
@@ -252,9 +232,7 @@ export function registerSetupQuickstartRoutes({
           },
         });
         if (!config) {
-          res.status(404).json({
-            error: "Gong is not configured yet. Save your Gong key first.",
-          });
+          sendNotFound(res, "Gong is not configured yet. Save your Gong key first.");
           return;
         }
 
@@ -267,7 +245,7 @@ export function registerSetupQuickstartRoutes({
           cachedAccounts.length > 0 && typeof existingIndex.generatedAt === "string";
 
         if (!payload.refresh && hasCachedIndex) {
-          res.json({
+          sendSuccess(res, {
             generated_at: existingIndex.generatedAt,
             total_calls_indexed: Number(existingIndex.totalCallsIndexed ?? 0) || 0,
             accounts: cachedAccounts,
@@ -301,25 +279,22 @@ export function registerSetupQuickstartRoutes({
           data: { settings: nextSettings as Prisma.InputJsonValue },
         });
 
-        res.json({
+        sendSuccess(res, {
           generated_at: indexResult.generatedAt,
           total_calls_indexed: indexResult.totalCallsIndexed,
           accounts: indexResult.accounts,
           total_accounts: indexResult.totalAccounts,
           cached: false,
         });
-      } catch (err) {
-        console.error("MVP Gong account index error:", err);
-        res.status(500).json({ error: "Failed to index Gong accounts" });
-      }
+      
     }
-  );
+  ));
 
   router.post(
     "/mvp/quickstart/gong/accounts/selection",
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        respondAuthRequired(res);
+        sendUnauthorized(res);
         return;
       }
       if (!requireSetupAdmin(req, res)) return;
@@ -329,7 +304,6 @@ export function registerSetupQuickstartRoutes({
         return;
       }
 
-      try {
         const config = await prisma.integrationConfig.findUnique({
           where: {
             organizationId_provider: {
@@ -339,9 +313,7 @@ export function registerSetupQuickstartRoutes({
           },
         });
         if (!config) {
-          res.status(404).json({
-            error: "Gong is not configured yet. Save your Gong key first.",
-          });
+          sendNotFound(res, "Gong is not configured yet. Save your Gong key first.");
           return;
         }
 
@@ -382,20 +354,17 @@ export function registerSetupQuickstartRoutes({
               cursorOverride: null,
             })
             .catch((err) => {
-              console.error("MVP quickstart ingest failed:", err);
+              logger.error("MVP quickstart ingest failed", { error: err });
             });
         }
 
-        res.json({
+        sendSuccess(res, {
           saved: true,
           selected_account_names: selected,
           ingest_started: Boolean(shouldTriggerIngest && deps.syncEngine),
           idempotency_key: idempotencyKey,
         });
-      } catch (err) {
-        console.error("MVP Gong account selection error:", err);
-        res.status(500).json({ error: "Failed to save Gong account selection" });
-      }
+      
     }
-  );
+  ));
 }

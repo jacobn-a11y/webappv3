@@ -16,6 +16,9 @@ import { LandingPageExporter } from "../services/landing-page-exports.js";
 import { requirePageOwnerOrPermission } from "../middleware/permissions.js";
 import { getOrganizationIdOrThrow, TenantGuardError } from "../lib/tenant-guard.js";
 import { decodeDataGovernancePolicy } from "../types/json-boundaries.js";
+import logger from "../lib/logger.js";
+import { asyncHandler } from "../lib/async-handler.js";
+import { sendBadRequest, sendSuccess } from "./_shared/responses.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -95,22 +98,17 @@ export function createExportRoutes(prisma: PrismaClient): Router {
    * Renders the landing page as a branded PDF using Puppeteer.
    * Returns the PDF as a binary download.
    */
-  router.post("/:pageId/export/pdf", async (req: Request, res: Response) => {
-    try {
-      if (!(await enforceExportPolicy(req, res))) return;
-      const { buffer, filename } = await exporter.exportPdf(req.params.pageId as string);
+  router.post("/:pageId/export/pdf", asyncHandler(async (req: Request, res: Response) => {
 
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-      res.setHeader("Content-Length", buffer.length.toString());
-      res.send(buffer);
-    } catch (err) {
-      console.error("PDF export error:", err);
-      const message =
-        err instanceof Error ? err.message : "Failed to export PDF";
-      res.status(500).json({ error: "pdf_export_failed", message });
-    }
-  });
+    if (!(await enforceExportPolicy(req, res))) return;
+    const { buffer, filename } = await exporter.exportPdf(req.params.pageId as string);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Length", buffer.length.toString());
+    res.send(buffer);
+    
+  }));
 
   // ── Google Doc Export ───────────────────────────────────────────────
 
@@ -130,35 +128,24 @@ export function createExportRoutes(prisma: PrismaClient): Router {
    */
   router.post(
     "/:pageId/export/google-doc",
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
       const parse = GoogleDocExportSchema.safeParse(req.body);
       if (!parse.success) {
-        res
-          .status(400)
-          .json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
-      try {
-        if (!(await enforceExportPolicy(req, res))) return;
-        const result = await exporter.exportGoogleDoc(
-          req.params.pageId as string,
-          parse.data.access_token
-        );
+      if (!(await enforceExportPolicy(req, res))) return;
+      const result = await exporter.exportGoogleDoc(
+        req.params.pageId as string,
+        parse.data.access_token
+      );
 
-        res.json({
-          document_id: result.documentId,
-          document_url: result.documentUrl,
-        });
-      } catch (err) {
-        console.error("Google Doc export error:", err);
-        const message =
-          err instanceof Error ? err.message : "Failed to create Google Doc";
-        res
-          .status(500)
-          .json({ error: "google_doc_export_failed", message });
-      }
-    }
+      sendSuccess(res, {
+        document_id: result.documentId,
+        document_url: result.documentUrl,
+      });
+    })
   );
 
   // ── Slack Export ────────────────────────────────────────────────────
@@ -177,30 +164,21 @@ export function createExportRoutes(prisma: PrismaClient): Router {
    */
   router.post(
     "/:pageId/export/slack",
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
       const parse = SlackExportSchema.safeParse(req.body);
       if (!parse.success) {
-        res
-          .status(400)
-          .json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
-      try {
-        if (!(await enforceExportPolicy(req, res))) return;
-        const result = await exporter.exportSlack(
-          req.params.pageId as string,
-          parse.data.webhook_url
-        );
+      if (!(await enforceExportPolicy(req, res))) return;
+      const result = await exporter.exportSlack(
+        req.params.pageId as string,
+        parse.data.webhook_url
+      );
 
-        res.json({ sent: result.ok });
-      } catch (err) {
-        console.error("Slack export error:", err);
-        const message =
-          err instanceof Error ? err.message : "Failed to send to Slack";
-        res.status(500).json({ error: "slack_export_failed", message });
-      }
-    }
+      sendSuccess(res, { sent: result.ok });
+    })
   );
 
   return router;

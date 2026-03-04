@@ -11,6 +11,7 @@ import type { PrismaClient } from "@prisma/client";
 import { diffLines } from "diff";
 import { StoryBuilder } from "./story-builder.js";
 import { EmailService, type AccountChange } from "./email.js";
+import logger from "../lib/logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -193,7 +194,7 @@ export class WeeklyStoryRegeneration {
 
     // Step 1: Find eligible accounts
     const eligible = await this.findEligibleAccounts(data.organizationId);
-    console.log(
+    logger.info(
       `[story-regen] Found ${eligible.length} account(s) with new calls`
     );
 
@@ -210,7 +211,7 @@ export class WeeklyStoryRegeneration {
         results.push(result);
       } catch (err) {
         const msg = `Failed to regenerate story for account ${account.accountName} (${account.accountId}): ${(err as Error).message}`;
-        console.error(`[story-regen] ${msg}`);
+        logger.error(`[story-regen] ${msg}`);
         errors.push(msg);
       }
     }
@@ -231,12 +232,12 @@ export class WeeklyStoryRegeneration {
         orgsNotified++;
       } catch (err) {
         const msg = `Failed to send digest for org ${orgId}: ${(err as Error).message}`;
-        console.error(`[story-regen] ${msg}`);
+        logger.error(`[story-regen] ${msg}`);
         errors.push(msg);
       }
     }
 
-    console.log(
+    logger.info(
       `[story-regen] Complete: ${results.length} account(s) processed, ${orgsNotified} org(s) notified`
     );
 
@@ -337,7 +338,7 @@ export class WeeklyStoryRegeneration {
   private async regenerateAccountStory(
     account: EligibleAccount
   ): Promise<RegenResult> {
-    console.log(
+    logger.info(
       `[story-regen] Regenerating FULL_JOURNEY for ${account.accountName} (${account.newCallCount} new calls)`
     );
 
@@ -442,11 +443,11 @@ export class WeeklyStoryRegeneration {
     const adminEmails = admins.map((a) => a.email);
 
     if (adminEmails.length === 0) {
-      console.log(`[story-regen] No admins found for org ${orgId}, skipping email`);
+      logger.info(`[story-regen] No admins found for org ${orgId}, skipping email`);
       return;
     }
 
-    console.log(
+    logger.info(
       `[story-regen] Sending digest for ${org.name} to ${adminEmails.length} admin(s)`
     );
 

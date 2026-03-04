@@ -7,19 +7,17 @@
  * Member rows are expandable to show account access grants.
  */
 
-import { Router, type Request, type Response } from "express";
+import { Router, type Response } from "express";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import { PermissionManager, requirePermission } from "../middleware/permissions.js";
 import { AccountAccessService } from "../services/account-access.js";
 import { escapeHtml } from "../lib/html-utils.js";
+import logger from "../lib/logger.js";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import { asyncHandler } from "../lib/async-handler.js";
+import { sendUnauthorized } from "./_shared/responses.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
 
 /** The permission columns displayed in the table. */
 const PERMISSION_COLUMNS: ReadonlyArray<{
@@ -53,13 +51,12 @@ export function createAdminPermissionsPage(prisma: PrismaClient): Router {
   router.get(
     "/",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      try {
         const matrix = await permManager.getOrgPermissionMatrix(req.organizationId);
 
         // For each MEMBER/VIEWER, pre-fetch account access grants
@@ -75,12 +72,9 @@ export function createAdminPermissionsPage(prisma: PrismaClient): Router {
 
         res.setHeader("Cache-Control", "private, no-cache");
         res.send(renderPermissionsPage(matrix, accessByUser));
-      } catch (err) {
-        console.error("Admin permissions page error:", err);
-        res.status(500).json({ error: "Failed to load permissions page" });
-      }
+      
     }
-  );
+  ));
 
   return router;
 }

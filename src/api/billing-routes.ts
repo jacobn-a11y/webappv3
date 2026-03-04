@@ -7,20 +7,16 @@
  *   - Upgrade/downgrade via Stripe Customer Portal session
  */
 
-import { Router, type Request, type Response } from "express";
+import { Router, type Response } from "express";
 import Stripe from "stripe";
-import type { PrismaClient, UserRole } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { requirePermission } from "../middleware/permissions.js";
 import { isBillingEnabled } from "../middleware/billing.js";
 import { buildPublicAppUrl } from "../lib/public-app-url.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
+import logger from "../lib/logger.js";
+import { asyncHandler } from "../lib/async-handler.js";
+import { sendUnauthorized, sendNotFound, sendSuccess } from "./_shared/responses.js";
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
@@ -40,19 +36,18 @@ export function createBillingRoutes(
   router.get(
     "/",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      try {
         const org = await prisma.organization.findUnique({
           where: { id: req.organizationId },
         });
 
         if (!org) {
-          res.status(404).json({ error: "Organization not found" });
+          sendNotFound(res, "Organization not found");
           return;
         }
 
@@ -90,13 +85,10 @@ export function createBillingRoutes(
           }
         }
 
-        res.json({ billing });
-      } catch (err) {
-        console.error("Get billing error:", err);
-        res.status(500).json({ error: "Failed to load billing info" });
-      }
+        sendSuccess(res, { billing });
+      
     }
-  );
+  ));
 
   // ── Usage Meter ──────────────────────────────────────────────────────
 
@@ -109,64 +101,61 @@ export function createBillingRoutes(
   router.get(
     "/usage",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const org = await prisma.organization.findUnique({
-          where: { id: req.organizationId! },
-        });
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-        if (!org) {
-          res.status(404).json({ error: "Organization not found" });
-          return;
-        }
+      const org = await prisma.organization.findUnique({
+      where: { id: req.organizationId },
+      });
 
-        // Determine the billing period start
-        let periodStart = new Date();
-        periodStart.setDate(1); // Default: start of current month
-        periodStart.setHours(0, 0, 0, 0);
-
-        if (org.stripeCustomerId) {
-          const subscriptions = await stripe.subscriptions.list({
-            customer: org.stripeCustomerId,
-            status: "active",
-            limit: 1,
-          });
-
-          const subscription = subscriptions.data[0];
-          if (subscription) {
-            periodStart = new Date(
-              subscription.current_period_start * 1000
-            );
-          }
-        }
-
-        // Sum call durations (seconds) from the current period
-        const result = await prisma.call.aggregate({
-          where: {
-            organizationId: req.organizationId!,
-            occurredAt: { gte: periodStart },
-            duration: { not: null },
-          },
-          _sum: { duration: true },
-          _count: { id: true },
-        });
-
-        const totalSeconds = result._sum.duration ?? 0;
-        const totalMinutes = Math.ceil(totalSeconds / 60);
-
-        res.json({
-          usage: {
-            period_start: periodStart.toISOString(),
-            transcript_minutes: totalMinutes,
-            total_calls: result._count.id,
-          },
-        });
-      } catch (err) {
-        console.error("Get usage error:", err);
-        res.status(500).json({ error: "Failed to load usage data" });
+      if (!org) {
+      sendNotFound(res, "Organization not found");
+      return;
       }
+
+      // Determine the billing period start
+      let periodStart = new Date();
+      periodStart.setDate(1); // Default: start of current month
+      periodStart.setHours(0, 0, 0, 0);
+
+      if (org.stripeCustomerId) {
+      const subscriptions = await stripe.subscriptions.list({
+        customer: org.stripeCustomerId,
+        status: "active",
+        limit: 1,
+      });
+
+      const subscription = subscriptions.data[0];
+      if (subscription) {
+        periodStart = new Date(
+          subscription.current_period_start * 1000
+        );
+      }
+      }
+
+      // Sum call durations (seconds) from the current period
+      const result = await prisma.call.aggregate({
+      where: {
+        organizationId: req.organizationId,
+        occurredAt: { gte: periodStart },
+        duration: { not: null },
+      },
+      _sum: { duration: true },
+      _count: { id: true },
+      });
+
+      const totalSeconds = result._sum.duration ?? 0;
+      const totalMinutes = Math.ceil(totalSeconds / 60);
+
+      sendSuccess(res, {
+      usage: {
+        period_start: periodStart.toISOString(),
+        transcript_minutes: totalMinutes,
+        total_calls: result._count.id,
+      },
+      });
+      
     }
-  );
+  ));
 
   // ── Stripe Customer Portal ───────────────────────────────────────────
 
@@ -180,45 +169,42 @@ export function createBillingRoutes(
   router.post(
     "/portal",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const org = await prisma.organization.findUnique({
-          where: { id: req.organizationId! },
-        });
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
 
-        if (!org) {
-          res.status(404).json({ error: "Organization not found" });
-          return;
-        }
+      const org = await prisma.organization.findUnique({
+      where: { id: req.organizationId },
+      });
 
-        // Ensure Stripe customer exists
-        let customerId = org.stripeCustomerId;
-        if (!customerId) {
-          const customer = await stripe.customers.create({
-            metadata: {
-              organizationId: org.id,
-              organizationName: org.name,
-            },
-          });
-          customerId = customer.id;
-          await prisma.organization.update({
-            where: { id: org.id },
-            data: { stripeCustomerId: customerId },
-          });
-        }
-
-        const session = await stripe.billingPortal.sessions.create({
-          customer: customerId,
-          return_url: buildPublicAppUrl("/admin/billing"),
-        });
-
-        res.json({ portalUrl: session.url });
-      } catch (err) {
-        console.error("Create portal session error:", err);
-        res.status(500).json({ error: "Failed to create billing portal session" });
+      if (!org) {
+      sendNotFound(res, "Organization not found");
+      return;
       }
+
+      // Ensure Stripe customer exists
+      let customerId = org.stripeCustomerId;
+      if (!customerId) {
+      const customer = await stripe.customers.create({
+        metadata: {
+          organizationId: org.id,
+          organizationName: org.name,
+        },
+      });
+      customerId = customer.id;
+      await prisma.organization.update({
+        where: { id: org.id },
+        data: { stripeCustomerId: customerId },
+      });
+      }
+
+      const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: buildPublicAppUrl("/admin/billing"),
+      });
+
+      sendSuccess(res, { portalUrl: session.url });
+      
     }
-  );
+  ));
 
   return router;
 }

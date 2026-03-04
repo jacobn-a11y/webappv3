@@ -304,32 +304,24 @@ export function AnalyticsDashboardPage() {
       {savedViews.length > 0 && (
         <div className="analytics__saved-views">
           {savedViews.map((view) => (
-            <button
-              key={view.id}
-              type="button"
-              className="analytics__saved-pill"
-              onClick={() => applySavedView(view.id)}
-              title={`${view.segment} • ${view.focus}`}
-            >
-              {view.name}
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  deleteSavedView(view.id);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    deleteSavedView(view.id);
-                  }
-                }}
+            <div key={view.id} className="analytics__saved-pill-group">
+              <button
+                type="button"
+                className="analytics__saved-pill"
+                onClick={() => applySavedView(view.id)}
+                title={`${view.segment} • ${view.focus}`}
+              >
+                {view.name}
+              </button>
+              <button
+                type="button"
+                className="analytics__saved-pill-delete"
+                onClick={() => deleteSavedView(view.id)}
+                aria-label={`Delete saved view ${view.name}`}
               >
                 ×
-              </span>
-            </button>
+              </button>
+            </div>
           ))}
         </div>
       )}

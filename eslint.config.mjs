@@ -28,8 +28,7 @@ export default tseslint.config(
       // Relax unused vars — allow _-prefixed names
       "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
 
-      // Allow console in a Node.js backend
-      "no-console": "off",
+      "no-console": ["warn", { allow: ["warn", "error"] }],
 
       // Allow explicit `any` — too many to fix in one pass
       "@typescript-eslint/no-explicit-any": "warn",
@@ -45,8 +44,11 @@ export default tseslint.config(
       "src/api/dashboard/**/*.{ts,mts,cts}",
       "src/api/setup/**/*.{ts,mts,cts}",
       "src/api/ai-settings/**/*.{ts,mts,cts}",
+      "src/api/*.{ts,mts,cts}",
       "src/services/**/*.{ts,mts,cts}",
       "src/integrations/**/*.{ts,mts,cts}",
+      "src/middleware/**/*.{ts,mts,cts}",
+      "src/webhooks/**/*.{ts,mts,cts}",
     ],
     ignores: ["**/*.test.ts", "**/*.test.mts", "**/__tests__/**"],
     rules: {

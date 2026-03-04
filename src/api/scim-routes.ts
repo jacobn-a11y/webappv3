@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import type { PrismaClient, UserRole } from "@prisma/client";
 import { z } from "zod";
 import crypto from "crypto";
+import { sendSuccess, sendCreated, sendNoContent } from "./_shared/responses.js";
 
 interface ScimAuthContext {
   organizationId: string;
@@ -55,7 +56,7 @@ export function createScimRoutes(prisma: PrismaClient): Router {
   }
 
   router.get("/ServiceProviderConfig", (_req, res) => {
-    res.json({
+    sendSuccess(res, {
       patch: { supported: true },
       bulk: { supported: false },
       filter: { supported: false },
@@ -137,7 +138,7 @@ export function createScimRoutes(prisma: PrismaClient): Router {
       data: { lastSyncAt: new Date() },
     });
 
-    res.status(201).json({
+    sendCreated(res, {
       id: user.id,
       externalId,
       userName: user.email,
@@ -211,7 +212,7 @@ export function createScimRoutes(prisma: PrismaClient): Router {
       data: { lastSyncAt: new Date() },
     });
 
-    res.json({
+    sendSuccess(res, {
       id: scimIdentity.userId,
       externalId: scimIdentity.externalId,
       active: parsed.data.active ?? scimIdentity.active,
@@ -234,7 +235,7 @@ export function createScimRoutes(prisma: PrismaClient): Router {
       },
     });
     if (!scimIdentity) {
-      res.status(204).send();
+      sendNoContent(res);
       return;
     }
 
@@ -253,7 +254,7 @@ export function createScimRoutes(prisma: PrismaClient): Router {
       data: { lastSyncAt: new Date() },
     });
 
-    res.status(204).send();
+    sendNoContent(res);
   });
 
   return router;

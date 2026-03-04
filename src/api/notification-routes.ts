@@ -7,13 +7,10 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { NotificationService } from "../services/notification-service.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-interface AuthenticatedRequest extends Request {
-  organizationId?: string;
-  userId?: string;
-}
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import { asyncHandler } from "../lib/async-handler.js";
+import logger from "../lib/logger.js";
+import { sendUnauthorized, sendBadRequest, sendSuccess } from "./_shared/responses.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -39,49 +36,41 @@ export function createNotificationRoutes(
    * Lists notifications for the authenticated user.
    * Query params: limit, offset, unread_only
    */
-  router.get("/", async (req: AuthenticatedRequest, res: Response) => {
+  router.get("/", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { organizationId, userId } = req;
     if (!organizationId || !userId) {
-      res.status(401).json({ error: "Authentication required" });
+      sendUnauthorized(res, "Authentication required");
       return;
     }
 
     const parseResult = ListQuerySchema.safeParse(req.query);
     if (!parseResult.success) {
-      res.status(400).json({
-        error: "validation_error",
-        details: parseResult.error.issues,
-      });
+      sendBadRequest(res, "validation_error", parseResult.error.issues);
       return;
     }
 
     const { limit, offset, unread_only } = parseResult.data;
 
-    try {
-      const result = await notificationService.listForUser(
-        organizationId,
-        userId,
-        { limit, offset, unreadOnly: unread_only }
-      );
+    const result = await notificationService.listForUser(
+      organizationId,
+      userId,
+      { limit, offset, unreadOnly: unread_only }
+    );
 
-      res.json({
-        notifications: result.notifications.map((n) => ({
-          id: n.id,
-          type: n.type,
-          title: n.title,
-          body: n.body,
-          metadata: n.metadata,
-          read: n.read,
-          created_at: n.createdAt.toISOString(),
-        })),
-        unread_count: result.unreadCount,
-        total: result.total,
-      });
-    } catch (err) {
-      console.error("Notification list error:", err);
-      res.status(500).json({ error: "Failed to retrieve notifications" });
-    }
-  });
+    sendSuccess(res, {
+      notifications: result.notifications.map((n) => ({
+        id: n.id,
+        type: n.type,
+        title: n.title,
+        body: n.body,
+        metadata: n.metadata,
+        read: n.read,
+        created_at: n.createdAt.toISOString(),
+      })),
+      unread_count: result.unreadCount,
+      total: result.total,
+    });
+  }));
 
   /**
    * GET /api/notifications/unread-count
@@ -90,24 +79,19 @@ export function createNotificationRoutes(
    */
   router.get(
     "/unread-count",
-    async (req: AuthenticatedRequest, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const { organizationId, userId } = req;
       if (!organizationId || !userId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      try {
-        const count = await notificationService.getUnreadCount(
-          organizationId,
-          userId
-        );
-        res.json({ unread_count: count });
-      } catch (err) {
-        console.error("Unread count error:", err);
-        res.status(500).json({ error: "Failed to get unread count" });
-      }
-    }
+      const count = await notificationService.getUnreadCount(
+        organizationId,
+        userId
+      );
+      sendSuccess(res, { unread_count: count });
+    })
   );
 
   /**
@@ -117,22 +101,17 @@ export function createNotificationRoutes(
    */
   router.post(
     "/:id/read",
-    async (req: AuthenticatedRequest, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const { userId } = req;
       if (!userId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      try {
-        const notificationId = req.params.id as string;
-        await notificationService.markAsRead(notificationId, userId);
-        res.json({ success: true });
-      } catch (err) {
-        console.error("Mark read error:", err);
-        res.status(500).json({ error: "Failed to mark notification as read" });
-      }
-    }
+      const notificationId = req.params.id as string;
+      await notificationService.markAsRead(notificationId, userId);
+      sendSuccess(res, { success: true });
+    })
   );
 
   /**
@@ -142,26 +121,19 @@ export function createNotificationRoutes(
    */
   router.post(
     "/read-all",
-    async (req: AuthenticatedRequest, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const { organizationId, userId } = req;
       if (!organizationId || !userId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      try {
-        const result = await notificationService.markAllAsRead(
-          organizationId,
-          userId
-        );
-        res.json({ success: true, marked_read: result.count });
-      } catch (err) {
-        console.error("Mark all read error:", err);
-        res
-          .status(500)
-          .json({ error: "Failed to mark notifications as read" });
-      }
-    }
+      const result = await notificationService.markAllAsRead(
+        organizationId,
+        userId
+      );
+      sendSuccess(res, { success: true, marked_read: result.count });
+    })
   );
 
   return router;

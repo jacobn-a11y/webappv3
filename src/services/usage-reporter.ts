@@ -15,6 +15,7 @@ import cron from "node-cron";
 import Stripe from "stripe";
 import type { PrismaClient } from "@prisma/client";
 import { reportUsageToStripe, isBillingEnabled } from "../middleware/billing.js";
+import logger from "../lib/logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -97,7 +98,7 @@ export async function runDailyUsageReport(
   targetDate?: Date
 ): Promise<{ processed: number; reported: number; errors: number }> {
   if (!isBillingEnabled()) {
-    console.log("[usage-reporter] Billing disabled, skipping usage report");
+    logger.info("[usage-reporter] Billing disabled, skipping usage report");
     return { processed: 0, reported: 0, errors: 0 };
   }
 
@@ -106,7 +107,7 @@ export async function runDailyUsageReport(
     Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
   );
 
-  console.log(`[usage-reporter] Aggregating usage for ${dateKey.toISOString().split("T")[0]}`);
+  logger.info(`[usage-reporter] Aggregating usage for ${dateKey.toISOString().split("T")[0]}`);
 
   const orgUsages = await aggregateDailyUsage(prisma, date);
   let reported = 0;
@@ -147,7 +148,7 @@ export async function runDailyUsageReport(
 
       // Skip if already reported to Stripe
       if (record.reportedToStripe) {
-        console.log(
+        logger.info(
           `[usage-reporter] Skipping org=${usage.organizationId} (already reported)`
         );
         continue;
@@ -169,20 +170,20 @@ export async function runDailyUsageReport(
           data: { reportedToStripe: true, stripeRecordId },
         });
         reported++;
-        console.log(
+        logger.info(
           `[usage-reporter] Reported org=${usage.organizationId}: ${usage.totalMinutes} min, ${usage.callCount} calls`
         );
       }
     } catch (err) {
       errors++;
-      console.error(
-        `[usage-reporter] Error processing org=${usage.organizationId}:`,
-        err
+      logger.error(
+        `[usage-reporter] Error processing org=${usage.organizationId}`,
+        { error: err }
       );
     }
   }
 
-  console.log(
+  logger.info(
     `[usage-reporter] Done: ${orgUsages.length} orgs processed, ${reported} reported to Stripe, ${errors} errors`
   );
 
@@ -205,12 +206,12 @@ export function startUsageReportingCron(
       try {
         await runDailyUsageReport(prisma, stripe);
       } catch (err) {
-        console.error("[usage-reporter] Cron job failed:", err);
+        logger.error("[usage-reporter] Cron job failed", { error: err });
       }
     },
     { timezone: "UTC" }
   );
 
-  console.log("[usage-reporter] Daily cron scheduled at 02:00 UTC");
+  logger.info("[usage-reporter] Daily cron scheduled at 02:00 UTC");
   return task;
 }

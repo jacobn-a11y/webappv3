@@ -1,21 +1,8 @@
 import type { NextFunction, Request, Response } from "express";
 import type { PrismaClient, UserRole } from "@prisma/client";
+import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import { hashSessionToken } from "../lib/session-token.js";
 import { AuditLogService } from "../services/audit-log.js";
-
-interface AuthenticatedRequest extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-  impersonation?: {
-    sessionId: string;
-    actorUserId: string;
-    targetUserId: string;
-    scope: string[];
-    reason: string;
-    expiresAt: string;
-  };
-}
 
 const ADMIN_ROLES: UserRole[] = ["OWNER", "ADMIN"];
 const SUPPORT_IMPERSONATION_HEADER = "x-support-impersonation-token";

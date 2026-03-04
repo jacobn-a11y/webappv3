@@ -1,14 +1,11 @@
-import { type Request, type Response, type Router } from "express";
-import type { CRMProvider, PrismaClient, UserRole } from "@prisma/client";
+import { type Response, type Router } from "express";
+import type { CRMProvider, PrismaClient } from "@prisma/client";
 import { requirePermission } from "../../middleware/permissions.js";
 import logger from "../../lib/logger.js";
 import { parseCRMReportProvider } from "../../services/provider-policy.js";
-
-interface AuthReq extends Request {
-  organizationId?: string;
-  userId?: string;
-  userRole?: UserRole;
-}
+import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
+import { asyncHandler } from "../../lib/async-handler.js";
+import { sendSuccess, sendBadRequest } from "../_shared/responses.js";
 
 interface RegisterAccountReportingRoutesOptions {
   router: Router;
@@ -29,32 +26,29 @@ export function registerAccountReportingRoutes({
   router.get(
     "/accounts/search",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const q = ((req.query.q as string) || "").trim();
-      try {
-        const accounts = await prisma.account.findMany({
-          where: {
-            organizationId: req.organizationId!,
-            ...(q
-              ? {
-                  OR: [
-                    { name: { contains: q, mode: "insensitive" as const } },
-                    { domain: { contains: q, mode: "insensitive" as const } },
-                  ],
-                }
-              : {}),
-          },
-          select: { id: true, name: true, domain: true, industry: true },
-          orderBy: { name: "asc" },
-          take: 50,
-        });
-        res.json({ accounts });
-      } catch (err) {
-        logger.error("Account search error", { error: err });
-        res.status(500).json({ error: "Failed to search accounts" });
-      }
+
+      const accounts = await prisma.account.findMany({
+      where: {
+        organizationId: req.organizationId,
+        ...(q
+          ? {
+              OR: [
+                { name: { contains: q, mode: "insensitive" as const } },
+                { domain: { contains: q, mode: "insensitive" as const } },
+              ],
+            }
+          : {}),
+      },
+      select: { id: true, name: true, domain: true, industry: true },
+      orderBy: { name: "asc" },
+      take: 50,
+      });
+      sendSuccess(res, { accounts });
+      
     }
-  );
+  ));
 
   // ── CRM Reports ──────────────────────────────────────────────────
 
@@ -66,17 +60,16 @@ export function registerAccountReportingRoutes({
   router.get(
     "/crm-reports",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const provider = parseCRMReportProvider(req.query.provider);
       if (!provider) {
-        res.status(400).json({ error: "Invalid provider. Use SALESFORCE or HUBSPOT." });
+        sendBadRequest(res, "Invalid provider. Use SALESFORCE or HUBSPOT.");
         return;
       }
 
-      try {
         const accessRecords = await prisma.userAccountAccess.findMany({
           where: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             scopeType: "CRM_REPORT",
             crmProvider: provider as CRMProvider,
             crmReportId: { not: null },
@@ -85,7 +78,7 @@ export function registerAccountReportingRoutes({
           distinct: ["crmReportId"],
           orderBy: { crmReportName: "asc" },
         });
-        res.json({
+        sendSuccess(res, {
           reports: accessRecords.map(
             (r: { crmReportId: string | null; crmReportName: string | null; crmProvider: string | null }) => ({
               id: r.crmReportId,
@@ -94,10 +87,7 @@ export function registerAccountReportingRoutes({
             })
           ),
         });
-      } catch (err) {
-        logger.error("CRM reports error", { error: err });
-        res.status(500).json({ error: "Failed to load CRM reports" });
-      }
+      
     }
-  );
+  ));
 }

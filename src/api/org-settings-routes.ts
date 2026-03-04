@@ -15,8 +15,10 @@ import type { PrismaClient, UserRole } from "@prisma/client";
 import { Resend } from "resend";
 import { requirePermission } from "../middleware/permissions.js";
 import { buildPublicAppUrl } from "../lib/public-app-url.js";
-import type { AuthenticatedRequest } from "../types/authenticated-request.js";
+import type { OrgRequest } from "../types/authenticated-request.js";
+import { asyncHandler } from "../lib/async-handler.js";
 import logger from "../lib/logger.js";
+import { sendSuccess, sendCreated, sendBadRequest, sendUnauthorized, sendForbidden, sendNotFound, sendConflict } from "./_shared/responses.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -33,7 +35,7 @@ const UpdateMemberRoleSchema = z.object({
   role: z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"]),
 });
 
-type AuthReq = AuthenticatedRequest;
+type AuthReq = OrgRequest;
 
 function renderInviteEmailHtml(options: {
   orgName: string;
@@ -81,37 +83,32 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
   router.get(
     "/",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      try {
-        const org = await prisma.organization.findUnique({
-          where: { id: req.organizationId },
-          include: { _count: { select: { users: true } } },
-        });
+      const org = await prisma.organization.findUnique({
+        where: { id: req.organizationId },
+        include: { _count: { select: { users: true } } },
+      });
 
-        if (!org) {
-          res.status(404).json({ error: "Organization not found" });
-          return;
-        }
-
-        res.json({
-          organization: {
-            id: org.id,
-            name: org.name,
-            plan: org.plan,
-            member_count: org._count.users,
-            created_at: org.createdAt,
-          },
-        });
-      } catch (err) {
-        logger.error("Get org error", { error: err });
-        res.status(500).json({ error: "Failed to load organization" });
+      if (!org) {
+        sendNotFound(res, "Organization not found");
+        return;
       }
-    }
+
+      sendSuccess(res, {
+        organization: {
+          id: org.id,
+          name: org.name,
+          plan: org.plan,
+          member_count: org._count.users,
+          created_at: org.createdAt,
+        },
+      });
+    })
   );
 
   // ── Anonymization Setting ────────────────────────────────────────────
@@ -124,26 +121,21 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
   router.get(
     "/anonymization",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
-      try {
-        const settings = await prisma.orgSettings.findUnique({
-          where: { organizationId: req.organizationId },
-          select: { anonymizationEnabled: true },
-        });
+      const settings = await prisma.orgSettings.findUnique({
+        where: { organizationId: req.organizationId },
+        select: { anonymizationEnabled: true },
+      });
 
-        res.json({
-          anonymization_enabled: settings?.anonymizationEnabled ?? true,
-        });
-      } catch (err) {
-        logger.error("Get anonymization setting error", { error: err });
-        res.status(500).json({ error: "Failed to load anonymization setting" });
-      }
-    }
+      sendSuccess(res, {
+        anonymization_enabled: settings?.anonymizationEnabled ?? true,
+      });
+    })
   );
 
   /**
@@ -157,40 +149,35 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
   router.patch(
     "/anonymization",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       if (!req.organizationId) {
-        res.status(401).json({ error: "Authentication required" });
+        sendUnauthorized(res, "Authentication required");
         return;
       }
 
       const schema = z.object({ enabled: z.boolean() });
       const parse = schema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
-      try {
-        await prisma.orgSettings.upsert({
-          where: { organizationId: req.organizationId },
-          create: {
-            organizationId: req.organizationId,
-            anonymizationEnabled: parse.data.enabled,
-          },
-          update: {
-            anonymizationEnabled: parse.data.enabled,
-          },
-        });
+      await prisma.orgSettings.upsert({
+        where: { organizationId: req.organizationId },
+        create: {
+          organizationId: req.organizationId,
+          anonymizationEnabled: parse.data.enabled,
+        },
+        update: {
+          anonymizationEnabled: parse.data.enabled,
+        },
+      });
 
-        res.json({
-          updated: true,
-          anonymization_enabled: parse.data.enabled,
-        });
-      } catch (err) {
-        logger.error("Update anonymization setting error", { error: err });
-        res.status(500).json({ error: "Failed to update anonymization setting" });
-      }
-    }
+      sendSuccess(res, {
+        updated: true,
+        anonymization_enabled: parse.data.enabled,
+      });
+    })
   );
 
   // ── Update Organization Name ─────────────────────────────────────────
@@ -203,25 +190,20 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
   router.patch(
     "/",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const parse = UpdateOrgNameSchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
-      try {
-        await prisma.organization.update({
-          where: { id: req.organizationId! },
-          data: { name: parse.data.name },
-        });
+      await prisma.organization.update({
+        where: { id: req.organizationId },
+        data: { name: parse.data.name },
+      });
 
-        res.json({ updated: true });
-      } catch (err) {
-        logger.error("Update org name error", { error: err });
-        res.status(500).json({ error: "Failed to update organization name" });
-      }
-    }
+      sendSuccess(res, { updated: true });
+    })
   );
 
   // ── List Members ─────────────────────────────────────────────────────
@@ -234,26 +216,21 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
   router.get(
     "/members",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const members = await prisma.user.findMany({
-          where: { organizationId: req.organizationId! },
-          select: {
-            id: true,
-            email: true,
-            name: true,
-            role: true,
-            createdAt: true,
-          },
-          orderBy: { createdAt: "asc" },
-        });
+    asyncHandler(async (req: AuthReq, res: Response) => {
+      const members = await prisma.user.findMany({
+        where: { organizationId: req.organizationId },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: "asc" },
+      });
 
-        res.json({ members });
-      } catch (err) {
-        logger.error("List members error", { error: err });
-        res.status(500).json({ error: "Failed to load members" });
-      }
-    }
+      sendSuccess(res, { members });
+    })
   );
 
   // ── Update Member Role ───────────────────────────────────────────────
@@ -266,64 +243,50 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
   router.patch(
     "/members/:memberId/role",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const parse = UpdateMemberRoleSchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
       const memberId = req.params.memberId as string;
       const newRole = parse.data.role as UserRole;
 
-      try {
-        // Verify target user belongs to this org
-        const targetUser = await prisma.user.findFirst({
-          where: { id: memberId, organizationId: req.organizationId! },
-        });
+      const targetUser = await prisma.user.findFirst({
+        where: { id: memberId, organizationId: req.organizationId },
+      });
 
-        if (!targetUser) {
-          res.status(404).json({ error: "Member not found" });
-          return;
-        }
-
-        // Only OWNER can assign/revoke OWNER role
-        if (
-          (newRole === "OWNER" || targetUser.role === "OWNER") &&
-          req.userRole !== "OWNER"
-        ) {
-          res.status(403).json({
-            error: "permission_denied",
-            message: "Only owners can assign or revoke the OWNER role.",
-          });
-          return;
-        }
-
-        // Prevent demoting the last OWNER
-        if (targetUser.role === "OWNER" && newRole !== "OWNER") {
-          const ownerCount = await prisma.user.count({
-            where: { organizationId: req.organizationId!, role: "OWNER" },
-          });
-          if (ownerCount <= 1) {
-            res.status(400).json({
-              error: "last_owner",
-              message: "Cannot remove the last owner. Transfer ownership first.",
-            });
-            return;
-          }
-        }
-
-        await prisma.user.update({
-          where: { id: memberId },
-          data: { role: newRole },
-        });
-
-        res.json({ updated: true, role: newRole });
-      } catch (err) {
-        logger.error("Update member role error", { error: err });
-        res.status(500).json({ error: "Failed to update member role" });
+      if (!targetUser) {
+        sendNotFound(res, "Member not found");
+        return;
       }
-    }
+
+      if (
+        (newRole === "OWNER" || targetUser.role === "OWNER") &&
+        req.userRole !== "OWNER"
+      ) {
+        sendForbidden(res, "Only owners can assign or revoke the OWNER role.");
+        return;
+      }
+
+      if (targetUser.role === "OWNER" && newRole !== "OWNER") {
+        const ownerCount = await prisma.user.count({
+          where: { organizationId: req.organizationId, role: "OWNER" },
+        });
+        if (ownerCount <= 1) {
+          sendBadRequest(res, "Cannot remove the last owner. Transfer ownership first.");
+          return;
+        }
+      }
+
+      await prisma.user.update({
+        where: { id: memberId },
+        data: { role: newRole },
+      });
+
+      sendSuccess(res, { updated: true, role: newRole });
+    })
   );
 
   // ── Remove Member ────────────────────────────────────────────────────
@@ -336,49 +299,36 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
   router.delete(
     "/members/:memberId",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const memberId = req.params.memberId as string;
 
-      try {
-        const targetUser = await prisma.user.findFirst({
-          where: { id: memberId, organizationId: req.organizationId! },
-        });
+      const targetUser = await prisma.user.findFirst({
+        where: { id: memberId, organizationId: req.organizationId },
+      });
 
-        if (!targetUser) {
-          res.status(404).json({ error: "Member not found" });
-          return;
-        }
-
-        // Cannot remove yourself
-        if (memberId === req.userId) {
-          res.status(400).json({
-            error: "cannot_remove_self",
-            message: "You cannot remove yourself from the organization.",
-          });
-          return;
-        }
-
-        // Cannot remove the last OWNER
-        if (targetUser.role === "OWNER") {
-          const ownerCount = await prisma.user.count({
-            where: { organizationId: req.organizationId!, role: "OWNER" },
-          });
-          if (ownerCount <= 1) {
-            res.status(400).json({
-              error: "last_owner",
-              message: "Cannot remove the last owner.",
-            });
-            return;
-          }
-        }
-
-        await prisma.user.delete({ where: { id: memberId } });
-        res.json({ removed: true });
-      } catch (err) {
-        logger.error("Remove member error", { error: err });
-        res.status(500).json({ error: "Failed to remove member" });
+      if (!targetUser) {
+        sendNotFound(res, "Member not found");
+        return;
       }
-    }
+
+      if (memberId === req.userId) {
+        sendBadRequest(res, "You cannot remove yourself from the organization.");
+        return;
+      }
+
+      if (targetUser.role === "OWNER") {
+        const ownerCount = await prisma.user.count({
+          where: { organizationId: req.organizationId, role: "OWNER" },
+        });
+        if (ownerCount <= 1) {
+          sendBadRequest(res, "Cannot remove the last owner.");
+          return;
+        }
+      }
+
+      await prisma.user.delete({ where: { id: memberId } });
+      sendSuccess(res, { removed: true });
+    })
   );
 
   // ── Invite Member ────────────────────────────────────────────────────
@@ -393,27 +343,22 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
   router.post(
     "/invites",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
+    asyncHandler(async (req: AuthReq, res: Response) => {
       const parse = InviteMemberSchema.safeParse(req.body);
       if (!parse.success) {
-        res.status(400).json({ error: "validation_error", details: parse.error.issues });
+        sendBadRequest(res, "validation_error", parse.error.issues);
         return;
       }
 
-      try {
-        // Check if user already exists in the org
-        const existingUser = await prisma.user.findFirst({
+      const existingUser = await prisma.user.findFirst({
           where: {
             email: parse.data.email,
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
           },
         });
 
         if (existingUser) {
-          res.status(409).json({
-            error: "already_member",
-            message: "This email is already a member of the organization.",
-          });
+          sendConflict(res, "This email is already a member of the organization.");
           return;
         }
 
@@ -423,21 +368,21 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
         const invite = await prisma.orgInvite.upsert({
           where: {
             organizationId_email: {
-              organizationId: req.organizationId!,
+              organizationId: req.organizationId,
               email: parse.data.email,
             },
           },
           create: {
-            organizationId: req.organizationId!,
+            organizationId: req.organizationId,
             email: parse.data.email,
             role: parse.data.role as UserRole,
-            invitedById: req.userId!,
+            invitedById: req.userId,
             token,
             expiresAt,
           },
           update: {
             role: parse.data.role as UserRole,
-            invitedById: req.userId!,
+            invitedById: req.userId,
             token,
             expiresAt,
             acceptedAt: null,
@@ -452,11 +397,11 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
           try {
             const [org, inviter] = await Promise.all([
               prisma.organization.findUnique({
-                where: { id: req.organizationId! },
+                where: { id: req.organizationId },
                 select: { name: true },
               }),
               prisma.user.findUnique({
-                where: { id: req.userId! },
+                where: { id: req.userId },
                 select: { name: true, email: true },
               }),
             ]);
@@ -480,7 +425,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
           }
         }
 
-        res.status(201).json({
+        sendCreated(res, {
           invite: {
             id: invite.id,
             email: invite.email,
@@ -491,11 +436,7 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
           email_sent: emailSent,
           email_delivery_error: emailDeliveryError,
         });
-      } catch (err) {
-        logger.error("Create invite error", { error: err });
-        res.status(500).json({ error: "Failed to create invite" });
-      }
-    }
+    })
   );
 
   // ── List Pending Invites ─────────────────────────────────────────────
@@ -508,34 +449,29 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
   router.get(
     "/invites",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const invites = await prisma.orgInvite.findMany({
-          where: {
-            organizationId: req.organizationId!,
-            acceptedAt: null,
-          },
-          select: {
-            id: true,
-            email: true,
-            role: true,
-            expiresAt: true,
-            createdAt: true,
-          },
-          orderBy: { createdAt: "desc" },
-        });
+    asyncHandler(async (req: AuthReq, res: Response) => {
+      const invites = await prisma.orgInvite.findMany({
+        where: {
+          organizationId: req.organizationId,
+          acceptedAt: null,
+        },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          expiresAt: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: "desc" },
+      });
 
-        res.json({
-          invites: invites.map((inv) => ({
-            ...inv,
-            expired: new Date() > inv.expiresAt,
-          })),
-        });
-      } catch (err) {
-        logger.error("List invites error", { error: err });
-        res.status(500).json({ error: "Failed to load invites" });
-      }
-    }
+      sendSuccess(res, {
+        invites: invites.map((inv) => ({
+          ...inv,
+          expired: new Date() > inv.expiresAt,
+        })),
+      });
+    })
   );
 
   // ── Revoke Invite ────────────────────────────────────────────────────
@@ -548,27 +484,22 @@ export function createOrgSettingsRoutes(prisma: PrismaClient): Router {
   router.delete(
     "/invites/:inviteId",
     requirePermission(prisma, "manage_permissions"),
-    async (req: AuthReq, res: Response) => {
-      try {
-        const invite = await prisma.orgInvite.findFirst({
-          where: {
-            id: req.params.inviteId as string,
-            organizationId: req.organizationId!,
-          },
-        });
+    asyncHandler(async (req: AuthReq, res: Response) => {
+      const invite = await prisma.orgInvite.findFirst({
+        where: {
+          id: req.params.inviteId as string,
+          organizationId: req.organizationId,
+        },
+      });
 
-        if (!invite) {
-          res.status(404).json({ error: "Invite not found" });
-          return;
-        }
-
-        await prisma.orgInvite.delete({ where: { id: invite.id } });
-        res.json({ revoked: true });
-      } catch (err) {
-        logger.error("Revoke invite error", { error: err });
-        res.status(500).json({ error: "Failed to revoke invite" });
+      if (!invite) {
+        sendNotFound(res, "Invite not found");
+        return;
       }
-    }
+
+      await prisma.orgInvite.delete({ where: { id: invite.id } });
+      sendSuccess(res, { revoked: true });
+    })
   );
 
   return router;

@@ -11,6 +11,8 @@ import { Router, type Request, type Response } from "express";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import type { MergeApiClient } from "../services/merge-api-client.js";
 import type { PrismaClient } from "@prisma/client";
+import logger from "../lib/logger.js";
+import { sendSuccess, sendUnauthorized, sendBadRequest, sendNotFound } from "./_shared/responses.js";
 
 export function createMergeRoutes(
   mergeClient: MergeApiClient,
@@ -32,14 +34,14 @@ export function createMergeRoutes(
     const organizationId = authReq.organizationId;
 
     if (!organizationId) {
-      res.status(401).json({ error: "Missing organization context" });
+      sendUnauthorized(res, "Missing organization context");
       return;
     }
 
     const { publicToken } = req.body as { publicToken?: string };
 
     if (!publicToken) {
-      res.status(400).json({ error: "publicToken is required" });
+      sendBadRequest(res, "publicToken is required");
       return;
     }
 
@@ -49,7 +51,7 @@ export function createMergeRoutes(
         publicToken
       );
 
-      res.json({
+      sendSuccess(res, {
         id: linkedAccount.id,
         integrationSlug: linkedAccount.integrationSlug,
         category: linkedAccount.category,
@@ -57,7 +59,7 @@ export function createMergeRoutes(
         createdAt: linkedAccount.createdAt,
       });
     } catch (err) {
-      console.error("Merge Link token exchange failed:", err);
+      logger.error("Merge Link token exchange failed", { error: err });
       res.status(502).json({ error: "Failed to link integration" });
     }
   });
@@ -72,7 +74,7 @@ export function createMergeRoutes(
     const organizationId = authReq.organizationId;
 
     if (!organizationId) {
-      res.status(401).json({ error: "Missing organization context" });
+      sendUnauthorized(res, "Missing organization context");
       return;
     }
 
@@ -90,7 +92,7 @@ export function createMergeRoutes(
       orderBy: { createdAt: "desc" },
     });
 
-    res.json({ linkedAccounts: accounts });
+    sendSuccess(res, { linkedAccounts: accounts });
   });
 
   /**
@@ -104,7 +106,7 @@ export function createMergeRoutes(
     const organizationId = authReq.organizationId;
 
     if (!organizationId) {
-      res.status(401).json({ error: "Missing organization context" });
+      sendUnauthorized(res, "Missing organization context");
       return;
     }
 
@@ -115,7 +117,7 @@ export function createMergeRoutes(
     });
 
     if (!linkedAccount) {
-      res.status(404).json({ error: "Linked account not found" });
+      sendNotFound(res, "Linked account not found");
       return;
     }
 
@@ -128,9 +130,9 @@ export function createMergeRoutes(
         await mergeClient.pollAllLinkedAccounts();
       }
 
-      res.json({ success: true, message: "Sync triggered" });
+      sendSuccess(res, { success: true, message: "Sync triggered" });
     } catch (err) {
-      console.error(`Manual sync failed for ${linkedAccountId}:`, err);
+      logger.error(`Manual sync failed for ${linkedAccountId}`, { error: err });
       res.status(502).json({ error: "Sync failed" });
     }
   });
