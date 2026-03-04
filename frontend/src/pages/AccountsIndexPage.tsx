@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getAccountsList, type AccountsListResponse } from "../lib/api";
+import { TableSkeleton } from "../components/PageSkeleton";
 
 export function AccountsIndexPage() {
   const [loading, setLoading] = useState(true);
@@ -110,10 +111,7 @@ export function AccountsIndexPage() {
       </div>
 
       {loading && (
-        <div className="state-view" role="status" aria-live="polite">
-          <div className="spinner" />
-          <div className="state-view__title">Loading your accounts...</div>
-        </div>
+        <TableSkeleton rows={pageSize} />
       )}
 
       {!loading && error && (

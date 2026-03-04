@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getContentQueue, type ContentQueueItem } from "../lib/api";
 import { badgeClass, formatEnumLabel } from "../lib/format";
+import { TableSkeleton } from "../components/PageSkeleton";
 
 const STAGES = ["DRAFT", "IN_REVIEW", "APPROVED", "PUBLISHED"] as const;
 
@@ -92,10 +93,7 @@ export function ContentQueuePage() {
       </div>
 
       {loading ? (
-        <div className="state-view" role="status" aria-live="polite">
-          <div className="spinner" />
-          <div className="state-view__title">Loading content queue...</div>
-        </div>
+        <TableSkeleton rows={8} />
       ) : error ? (
         <div className="state-view state-view--error" role="alert">
           <div className="state-view__title">Failed to load content queue</div>

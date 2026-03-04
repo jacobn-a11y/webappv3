@@ -17,6 +17,7 @@ import {
 import { PageStatsCards } from "./dashboard-pages/PageStatsCards";
 import { PageFilters } from "./dashboard-pages/PageFilters";
 import { PageTable, type SortField, type SortDir } from "./dashboard-pages/PageTable";
+import { TableSkeleton } from "../components/PageSkeleton";
 
 // Re-export sub-components for backward compatibility
 export { PageStatsCards } from "./dashboard-pages/PageStatsCards";
@@ -264,10 +265,7 @@ export function DashboardPagesPage({ userRole }: { userRole?: string }) {
 
   if (loading) {
     return (
-      <div className="dash-pages__loading" role="status" aria-live="polite">
-        <div className="dash-pages__spinner" aria-hidden="true" />
-        <span>Loading dashboard...</span>
-      </div>
+      <TableSkeleton rows={8} />
     );
   }
 

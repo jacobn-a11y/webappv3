@@ -9,6 +9,7 @@ import {
 import { badgeClass, formatEnumLabel } from "../lib/format";
 import { AdminErrorState } from "../components/admin/AdminErrorState";
 import { AdminSection } from "../components/admin/AdminLayoutPrimitives";
+import { TableSkeleton } from "../components/PageSkeleton";
 
 export function AdminPublishApprovalsPage() {
   const [rows, setRows] = useState<PublishApprovalRequestRow[]>([]);
@@ -161,9 +162,7 @@ export function AdminPublishApprovalsPage() {
         subtitle={`${rows.length} request${rows.length === 1 ? "" : "s"}`}
       >
         {loading ? (
-          <div className="state-view" style={{ minHeight: 120 }} role="status" aria-live="polite">
-            <div className="spinner spinner--sm" />
-          </div>
+          <TableSkeleton rows={5} />
         ) : (
           <table className="data-table" aria-label="Publish approval requests">
             <thead>

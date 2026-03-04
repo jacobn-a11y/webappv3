@@ -4,6 +4,7 @@
  */
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { TableSkeleton } from "../components/PageSkeleton";
 import { StoryFilters } from "./story-library/StoryFilters";
 import { StoryCard } from "./story-library/StoryCard";
 import { StoryTable } from "./story-library/StoryTable";
@@ -94,10 +95,7 @@ export function StoryLibraryPage({ userRole }: { userRole: string }) {
       )}
 
       {lib.loading && (
-        <div className="state-view" role="status" aria-live="polite">
-          <div className="spinner" />
-          <div className="state-view__title">Loading story library...</div>
-        </div>
+        <TableSkeleton rows={lib.pageSize} />
       )}
 
       {!lib.loading && lib.error && (
