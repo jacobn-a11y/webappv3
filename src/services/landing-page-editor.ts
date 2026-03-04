@@ -16,17 +16,10 @@ import type { PrismaClient, PageVisibility, PageStatus } from "@prisma/client";
 import { CompanyScrubber } from "./company-scrubber.js";
 import { normalizeCompanyName } from "./entity-resolution.js";
 import { hashPagePassword, verifyPagePassword } from "../lib/page-password.js";
-import {
-  decodeCalloutBoxes,
-  decodeProvenance,
-  encodeJsonValue,
-} from "../types/json-boundaries.js";
+import { decodeCalloutBoxes, decodeProvenance, encodeJsonValue } from "../types/json-boundaries.js";
 import { collectLinkCandidates, validateLinkSyntax } from "./publish-link-utils.js";
 import { LifecycleStageService } from "./lifecycle-stage-service.js";
-import type {
-  PublishedBrandingSettings,
-  StoryContextSettings,
-} from "../types/story-generation.js";
+import type { PublishedBrandingSettings, StoryContextSettings } from "../types/story-generation.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -186,12 +179,8 @@ export class LandingPageEditor {
     const defaultCallouts: CalloutBox[] =
       input.calloutBoxes ??
       story.quotes.slice(0, 3).map((q) => ({
-        title: q.metricType
-          ? formatMetricTitle(q.metricType)
-          : "Key Insight",
-        body: q.metricValue
-          ? `**${q.metricValue}** — ${q.quoteText}`
-          : q.quoteText,
+        title: q.metricType ? formatMetricTitle(q.metricType) : "Key Insight",
+        body: q.metricValue ? `**${q.metricValue}** — ${q.quoteText}` : q.quoteText,
         icon: q.metricValue ? ("metric" as const) : ("quote" as const),
       }));
 
@@ -252,9 +241,7 @@ export class LandingPageEditor {
       subtitle: input.subtitle,
       editableBody: input.editableBody,
       heroImageUrl: input.heroImageUrl,
-      calloutBoxes: input.calloutBoxes
-        ? encodeJsonValue(input.calloutBoxes)
-        : undefined,
+      calloutBoxes: input.calloutBoxes ? encodeJsonValue(input.calloutBoxes) : undefined,
       customCss: input.customCss,
     };
 
@@ -326,10 +313,7 @@ export class LandingPageEditor {
    * For anonymous pages, scrubs and stores anonymized versions in dedicated
    * fields (scrubbedBody, scrubbedTitle, etc.) while preserving the originals.
    */
-  async publish(
-    pageId: string,
-    options: PublishOptions
-  ): Promise<{ slug: string; url: string }> {
+  async publish(pageId: string, options: PublishOptions): Promise<{ slug: string; url: string }> {
     const page = await this.prisma.landingPage.findUniqueOrThrow({
       where: { id: pageId },
       include: { story: { select: { id: true, accountId: true } } },
@@ -344,11 +328,10 @@ export class LandingPageEditor {
       title: page.title,
       subtitle: page.subtitle,
       body: page.editableBody,
-      calloutBoxes:
-        decodeCalloutBoxes(page.calloutBoxes).map((box) => ({
-          title: box.title,
-          body: box.body,
-        })),
+      calloutBoxes: decodeCalloutBoxes(page.calloutBoxes).map((box) => ({
+        title: box.title,
+        body: box.body,
+      })),
       fieldPrefix: "editable",
     });
     if (prePublishIssues.length > 0) {
@@ -366,17 +349,11 @@ export class LandingPageEditor {
       );
       scrubbedBody = scrubResult.scrubbedText;
 
-      const titleScrub = await this.scrubber.scrubForAccount(
-        page.story.accountId,
-        page.title
-      );
+      const titleScrub = await this.scrubber.scrubForAccount(page.story.accountId, page.title);
       scrubbedTitle = titleScrub.scrubbedText;
 
       const subtitleScrub = page.subtitle
-        ? await this.scrubber.scrubForAccount(
-            page.story.accountId,
-            page.subtitle
-          )
+        ? await this.scrubber.scrubForAccount(page.story.accountId, page.subtitle)
         : null;
       scrubbedSubtitle = subtitleScrub?.scrubbedText ?? null;
 
@@ -384,10 +361,7 @@ export class LandingPageEditor {
         const callouts = decodeCalloutBoxes(page.calloutBoxes);
         scrubbedCallouts = [];
         for (const box of callouts) {
-          const bodyScrub = await this.scrubber.scrubForAccount(
-            page.story.accountId,
-            box.body
-          );
+          const bodyScrub = await this.scrubber.scrubForAccount(page.story.accountId, box.body);
           const boxTitleScrub = await this.scrubber.scrubForAccount(
             page.story.accountId,
             box.title
@@ -402,15 +376,12 @@ export class LandingPageEditor {
     }
 
     if (!page.includeCompanyName) {
-      const leakageTerms = await this.detectScrubLeakage(
-        page.story.accountId,
-        [
-          scrubbedBody,
-          scrubbedTitle,
-          scrubbedSubtitle ?? "",
-          ...(scrubbedCallouts ?? []).flatMap((box) => [box.title, box.body]),
-        ]
-      );
+      const leakageTerms = await this.detectScrubLeakage(page.story.accountId, [
+        scrubbedBody,
+        scrubbedTitle,
+        scrubbedSubtitle ?? "",
+        ...(scrubbedCallouts ?? []).flatMap((box) => [box.title, box.body]),
+      ]);
       if (leakageTerms.length > 0) {
         throw new ScrubValidationError(leakageTerms);
       }
@@ -438,9 +409,7 @@ export class LandingPageEditor {
         scrubbedBody,
         scrubbedTitle,
         scrubbedSubtitle,
-        scrubbedCalloutBoxes: scrubbedCallouts
-          ? encodeJsonValue(scrubbedCallouts)
-          : undefined,
+        scrubbedCalloutBoxes: scrubbedCallouts ? encodeJsonValue(scrubbedCallouts) : undefined,
         status: "PUBLISHED",
         visibility: options.visibility,
         password: options.password ? hashPagePassword(options.password) : null,
@@ -449,7 +418,11 @@ export class LandingPageEditor {
         noIndex: true,
       },
     });
-    await this.syncStoryPublishedAtFromLandingPages(page.story.id);
+    try {
+      await this.syncStoryPublishedAtFromLandingPages(page.story.id);
+    } catch {
+      // Non-critical: story publishedAt sync failure should not block publishing
+    }
 
     await this.createArtifactVersion(page.id, {
       releaseNotes: options.releaseNotes,
@@ -559,9 +532,7 @@ export class LandingPageEditor {
     });
 
     // Check org-level anonymization + branding settings
-    const pagePresentation = await this.getPagePresentationSettings(
-      page.organizationId
-    );
+    const pagePresentation = await this.getPagePresentationSettings(page.organizationId);
     const shouldAnonymize = pagePresentation.anonymizationEnabled;
 
     // When anonymization is off, or the page was explicitly set to include
@@ -569,20 +540,14 @@ export class LandingPageEditor {
     const useOriginal = !shouldAnonymize || page.includeCompanyName;
 
     return {
-      title: useOriginal
-        ? page.title
-        : (page.scrubbedTitle ?? page.title),
-      subtitle: useOriginal
-        ? page.subtitle
-        : (page.scrubbedSubtitle ?? page.subtitle),
-      body: useOriginal
-        ? page.editableBody
-        : (page.scrubbedBody || page.editableBody),
+      title: useOriginal ? page.title : (page.scrubbedTitle ?? page.title),
+      subtitle: useOriginal ? page.subtitle : (page.scrubbedSubtitle ?? page.subtitle),
+      body: useOriginal ? page.editableBody : page.scrubbedBody || page.editableBody,
       calloutBoxes: useOriginal
         ? decodeCalloutBoxes(page.calloutBoxes)
-        : (decodeCalloutBoxes(page.scrubbedCalloutBoxes).length > 0
-            ? decodeCalloutBoxes(page.scrubbedCalloutBoxes)
-            : decodeCalloutBoxes(page.calloutBoxes)),
+        : decodeCalloutBoxes(page.scrubbedCalloutBoxes).length > 0
+          ? decodeCalloutBoxes(page.scrubbedCalloutBoxes)
+          : decodeCalloutBoxes(page.calloutBoxes),
       totalCallHours: page.totalCallHours,
       heroImageUrl: page.heroImageUrl,
       customCss: page.customCss,
@@ -611,9 +576,7 @@ export class LandingPageEditor {
       include: { story: { select: { accountId: true } } },
     });
 
-    const pagePresentation = await this.getPagePresentationSettings(
-      page.organizationId
-    );
+    const pagePresentation = await this.getPagePresentationSettings(page.organizationId);
     const shouldAnonymize = pagePresentation.anonymizationEnabled;
     const skipScrub = !shouldAnonymize || page.includeCompanyName;
     const scrubOpts = { skipScrub };
@@ -634,11 +597,7 @@ export class LandingPageEditor {
 
     // Scrub subtitle
     const subtitleScrub = page.subtitle
-      ? await this.scrubber.scrubForAccount(
-          page.story.accountId,
-          page.subtitle,
-          scrubOpts
-        )
+      ? await this.scrubber.scrubForAccount(page.story.accountId, page.subtitle, scrubOpts)
       : null;
 
     // Scrub callout boxes
@@ -705,29 +664,27 @@ export class LandingPageEditor {
       orderBy: { updatedAt: "desc" },
     });
 
-    const lifecycle = await new LifecycleStageService(
-      this.prisma
-    ).resolveLandingPageLifecycle(
+    const lifecycle = await new LifecycleStageService(this.prisma).resolveLandingPageLifecycle(
       organizationId,
       pages.map((p) => ({ id: p.id, publishedAt: p.publishedAt }))
     );
 
     return pages
       .map((p) => ({
-      id: p.id,
-      slug: p.slug,
-      title: p.title,
-      subtitle: p.subtitle,
-      status: p.status,
-      lifecycleStage: lifecycle.get(p.id)?.stage ?? "DRAFT",
-      visibility: p.visibility,
-      viewCount: p.viewCount,
-      createdByName: p.createdBy.name,
-      createdByEmail: p.createdBy.email,
-      accountName: p.story.account.name,
-      publishedAt: p.publishedAt,
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
+        id: p.id,
+        slug: p.slug,
+        title: p.title,
+        subtitle: p.subtitle,
+        status: p.status,
+        lifecycleStage: lifecycle.get(p.id)?.stage ?? "DRAFT",
+        visibility: p.visibility,
+        viewCount: p.viewCount,
+        createdByName: p.createdBy.name,
+        createdByEmail: p.createdBy.email,
+        accountName: p.story.account.name,
+        publishedAt: p.publishedAt,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
       }))
       .filter((p) => (filters?.includeArchived ? true : p.status !== "ARCHIVED"))
       .filter((p) => (filters?.status ? p.lifecycleStage === filters.status : true));
@@ -818,11 +775,7 @@ export class LandingPageEditor {
     }));
   }
 
-  async rollbackToVersion(
-    pageId: string,
-    versionId: string,
-    actorUserId: string
-  ): Promise<void> {
+  async rollbackToVersion(pageId: string, versionId: string, actorUserId: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const page = await tx.landingPage.findUniqueOrThrow({
         where: { id: pageId },
@@ -920,10 +873,7 @@ export class LandingPageEditor {
    * Finds a landing page by ID scoped to an organization.
    * Returns null if not found.
    */
-  async findPageForOrg(
-    pageId: string,
-    organizationId: string
-  ): Promise<{ id: string } | null> {
+  async findPageForOrg(pageId: string, organizationId: string): Promise<{ id: string } | null> {
     return this.prisma.landingPage.findFirst({
       where: { id: pageId, organizationId },
     });
@@ -937,7 +887,11 @@ export class LandingPageEditor {
       where: { id: pageId },
       select: { storyId: true },
     });
-    await this.syncStoryPublishedAtFromLandingPages(page.storyId);
+    try {
+      await this.syncStoryPublishedAtFromLandingPages(page.storyId);
+    } catch {
+      // Non-critical: story publishedAt sync failure should not block deletion
+    }
   }
 
   // ─── Approval workflow ──────────────────────────────────────────────
@@ -1190,10 +1144,7 @@ export class LandingPageEditor {
     });
   }
 
-  private async detectScrubLeakage(
-    accountId: string,
-    textFragments: string[]
-  ): Promise<string[]> {
+  private async detectScrubLeakage(accountId: string, textFragments: string[]): Promise<string[]> {
     const account = await this.prisma.account.findUniqueOrThrow({
       where: { id: accountId },
       include: {
@@ -1250,8 +1201,7 @@ export class LandingPageEditor {
 
     if (!body) {
       issues.push({
-        field:
-          input.fieldPrefix === "editable" ? "editable_body" : "scrubbed_body",
+        field: input.fieldPrefix === "editable" ? "editable_body" : "scrubbed_body",
         code: "body_required",
         message: "Body content is required before publish.",
       });
@@ -1263,11 +1213,9 @@ export class LandingPageEditor {
       const words = plainText.length > 0 ? plainText.split(" ") : [];
       if (plainText.length < 40 || words.length < 8) {
         issues.push({
-          field:
-            input.fieldPrefix === "editable" ? "editable_body" : "scrubbed_body",
+          field: input.fieldPrefix === "editable" ? "editable_body" : "scrubbed_body",
           code: "body_too_short",
-          message:
-            "Body content is too short to publish. Add more narrative context.",
+          message: "Body content is too short to publish. Add more narrative context.",
         });
       }
     }
@@ -1291,12 +1239,9 @@ export class LandingPageEditor {
       }
     });
 
-    const bodyField =
-      input.fieldPrefix === "editable" ? "editable_body" : "scrubbed_body";
-    const titleField =
-      input.fieldPrefix === "editable" ? "title" : "scrubbed_title";
-    const subtitleField =
-      input.fieldPrefix === "editable" ? "subtitle" : "scrubbed_subtitle";
+    const bodyField = input.fieldPrefix === "editable" ? "editable_body" : "scrubbed_body";
+    const titleField = input.fieldPrefix === "editable" ? "title" : "scrubbed_title";
+    const subtitleField = input.fieldPrefix === "editable" ? "subtitle" : "scrubbed_subtitle";
     const linkCandidates = collectLinkCandidates([
       { field: titleField, text: input.title },
       { field: subtitleField, text: input.subtitle },

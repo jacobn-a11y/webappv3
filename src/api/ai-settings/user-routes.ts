@@ -1,12 +1,7 @@
 import type { Response } from "express";
-import { sendUnauthorized, sendSuccess, sendNotFound } from "../_shared/responses.js";
-import {
-  DEFAULT_MODELS,
-  PROVIDER_MODELS,
-  type AIProviderName,
-} from "../../services/ai-client.js";
+import { sendUnauthorized, sendSuccess, sendError } from "../_shared/responses.js";
+import { DEFAULT_MODELS, PROVIDER_MODELS, type AIProviderName } from "../../services/ai-client.js";
 import type { AISettingsRouteContext, AuthReq } from "./types.js";
-import logger from "../../lib/logger.js";
 import { asyncHandler } from "../../lib/async-handler.js";
 
 export function registerAISettingsUserRoutes({
@@ -14,11 +9,13 @@ export function registerAISettingsUserRoutes({
   router,
   usageTracker,
 }: Pick<AISettingsRouteContext, "configService" | "router" | "usageTracker">): void {
-  router.get("/providers", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId! || !req.userId! || !req.userRole) {
-      sendUnauthorized(res);
-      return;
-    }
+  router.get(
+    "/providers",
+    asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId! || !req.userRole) {
+        sendUnauthorized(res);
+        return;
+      }
 
       const access = await configService.resolveUserAccess(
         req.organizationId!,
@@ -51,14 +48,16 @@ export function registerAISettingsUserRoutes({
         })),
         user_access: access,
       });
-    
-  }));
+    })
+  );
 
-  router.get("/usage/me", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId! || !req.userId!) {
-      sendUnauthorized(res);
-      return;
-    }
+  router.get(
+    "/usage/me",
+    asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res);
+        return;
+      }
 
       const status = await usageTracker.getLimitStatus(req.organizationId!, req.userId!);
 
@@ -86,14 +85,16 @@ export function registerAISettingsUserRoutes({
             }
           : null,
       });
-    
-  }));
+    })
+  );
 
-  router.get("/balance/me", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId! || !req.userId!) {
-      sendUnauthorized(res);
-      return;
-    }
+  router.get(
+    "/balance/me",
+    asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res);
+        return;
+      }
 
       const balance = await usageTracker.getBalance(req.organizationId!, req.userId!);
       if (!balance) {
@@ -114,14 +115,16 @@ export function registerAISettingsUserRoutes({
           })),
         },
       });
-    
-  }));
+    })
+  );
 
-  router.get("/notifications", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId! || !req.userId!) {
-      sendUnauthorized(res);
-      return;
-    }
+  router.get(
+    "/notifications",
+    asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res);
+        return;
+      }
 
       const notifications = await usageTracker.getPendingNotifications(
         req.organizationId!,
@@ -139,14 +142,16 @@ export function registerAISettingsUserRoutes({
           created_at: notice.createdAt.toISOString(),
         })),
       });
-    
-  }));
+    })
+  );
 
-  router.post("/notifications/:id/acknowledge", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId! || !req.userId!) {
-      sendUnauthorized(res);
-      return;
-    }
+  router.post(
+    "/notifications/:id/acknowledge",
+    asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res);
+        return;
+      }
 
       const acknowledged = await usageTracker.acknowledgeNotification(
         req.organizationId!,
@@ -154,25 +159,27 @@ export function registerAISettingsUserRoutes({
         req.params.id as string
       );
       if (!acknowledged) {
-        sendNotFound(res, "notification_not_found");
+        sendError(res, 404, "notification_not_found");
         return;
       }
 
       sendSuccess(res, { acknowledged: true });
-    
-  }));
+    })
+  );
 
-  router.post("/notifications/acknowledge-all", asyncHandler(async (req: AuthReq, res: Response) => {
-    if (!req.organizationId! || !req.userId!) {
-      sendUnauthorized(res);
-      return;
-    }
+  router.post(
+    "/notifications/acknowledge-all",
+    asyncHandler(async (req: AuthReq, res: Response) => {
+      if (!req.organizationId! || !req.userId!) {
+        sendUnauthorized(res);
+        return;
+      }
 
       const acknowledgedCount = await usageTracker.acknowledgeAllNotifications(
         req.organizationId!,
         req.userId!
       );
       sendSuccess(res, { acknowledged: true, count: acknowledgedCount });
-    
-  }));
+    })
+  );
 }

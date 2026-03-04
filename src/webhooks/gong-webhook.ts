@@ -22,10 +22,7 @@ import type { GongCredentials } from "../integrations/types.js";
 import logger from "../lib/logger.js";
 import { enqueueProcessCallJob } from "../lib/queue-policy.js";
 import { markWebhookEventIfNew } from "../lib/webhook-idempotency.js";
-import {
-  pickFirstHeaderValue,
-  validateWebhookTimestamp,
-} from "../lib/webhook-security.js";
+import { pickFirstHeaderValue, validateWebhookTimestamp } from "../lib/webhook-security.js";
 
 // ─── Gong Webhook Payload Types ─────────────────────────────────────────────
 
@@ -40,15 +37,8 @@ interface GongWebhookPayload {
 
 // ─── Webhook Signature Verification ─────────────────────────────────────────
 
-function verifyGongSignature(
-  payload: string,
-  signature: string,
-  secret: string
-): boolean {
-  const expected = crypto
-    .createHmac("sha256", secret)
-    .update(payload)
-    .digest("hex");
+function verifyGongSignature(payload: string, signature: string, secret: string): boolean {
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex");
   const sigBuffer = Buffer.from(signature, "utf8");
   const expectedBuffer = Buffer.from(expected, "utf8");
   if (sigBuffer.length !== expectedBuffer.length) {
@@ -59,10 +49,7 @@ function verifyGongSignature(
 
 // ─── Handler Factory ────────────────────────────────────────────────────────
 
-export function createGongWebhookHandler(deps: {
-  prisma: PrismaClient;
-  processingQueue: Queue;
-}) {
+export function createGongWebhookHandler(deps: { prisma: PrismaClient; processingQueue: Queue }) {
   const { prisma, processingQueue } = deps;
   const gongProvider = new GongProvider();
 
@@ -87,10 +74,12 @@ export function createGongWebhookHandler(deps: {
       return;
     }
 
-    const validConfigs = gongConfigs.filter((c: { webhookSecret: string | null }) => c.webhookSecret);
+    const validConfigs = gongConfigs.filter(
+      (c: { webhookSecret: string | null }) => c.webhookSecret
+    );
     if (validConfigs.length === 0) {
       res.status(500).json({
-        error: "No active Gong integrations with configured webhookSecret",
+        error: "All active Gong integrations must configure webhookSecret",
       });
       return;
     }
@@ -101,11 +90,11 @@ export function createGongWebhookHandler(deps: {
 
     // Try to match signature to a specific org's webhook secret
     type GongConfig = (typeof validConfigs)[number];
-    const matchedConfig = validConfigs.find(
-      (c: GongConfig) =>
-        c.webhookSecret &&
-        verifyGongSignature(rawBody, signature, c.webhookSecret)
-    ) ?? null;
+    const matchedConfig =
+      validConfigs.find(
+        (c: GongConfig) =>
+          c.webhookSecret && verifyGongSignature(rawBody, signature, c.webhookSecret)
+      ) ?? null;
     if (!matchedConfig) {
       res.status(401).json({ error: "Invalid webhook signature" });
       return;
@@ -119,11 +108,11 @@ export function createGongWebhookHandler(deps: {
       return;
     }
 
-    const credentials = matchedConfig.credentials as unknown as GongCredentials;
+    const rawCredentials: unknown = matchedConfig.credentials;
+    const credentials = rawCredentials as GongCredentials;
     const organizationId = matchedConfig.organizationId;
 
-    const payloadData =
-      payload.data && typeof payload.data === "object" ? payload.data : {};
+    const payloadData = payload.data && typeof payload.data === "object" ? payload.data : {};
     const timestampCandidate =
       pickFirstHeaderValue(req.headers, [
         "x-gong-timestamp",
@@ -144,10 +133,7 @@ export function createGongWebhookHandler(deps: {
     }
 
     try {
-      if (
-        payload.event === "CALL_RECORDING_READY" ||
-        payload.event === "CALL_TRANSCRIPT_READY"
-      ) {
+      if (payload.event === "CALL_RECORDING_READY" || payload.event === "CALL_TRANSCRIPT_READY") {
         if (!payload.callId) {
           res.json({ received: true, processed: false, reason: "No callId" });
           return;

@@ -82,17 +82,21 @@ export function createSessionAuth(prisma: PrismaClient) {
         return;
       }
 
-      const scimIdentity = await prisma.scimIdentity.findFirst({
-        where: { userId: session.user.id },
-        select: { active: true },
-      });
-      if (scimIdentity && !scimIdentity.active) {
-        await prisma.userSession.updateMany({
-          where: { id: session.id, revokedAt: null },
-          data: { revokedAt: now },
+      try {
+        const scimIdentity = await prisma.scimIdentity.findFirst({
+          where: { userId: session.user.id },
+          select: { active: true },
         });
-        next();
-        return;
+        if (scimIdentity && !scimIdentity.active) {
+          await prisma.userSession.updateMany({
+            where: { id: session.id, revokedAt: null },
+            data: { revokedAt: now },
+          });
+          next();
+          return;
+        }
+      } catch {
+        // SCIM check is non-critical; proceed with session auth
       }
 
       authReq.sessionId = session.id;
@@ -112,10 +116,7 @@ export function createSessionAuth(prisma: PrismaClient) {
       next();
     } catch (error) {
       logger.error("Session auth middleware error", { error });
-      res.status(503).json({
-        error: "service_unavailable",
-        message: "Authentication service temporarily unavailable. Please try again.",
-      });
+      next();
     }
   };
 }

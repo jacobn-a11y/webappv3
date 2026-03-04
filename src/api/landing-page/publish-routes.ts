@@ -29,10 +29,7 @@ import type { RoleProfileService } from "../../services/role-profiles.js";
 import type { AuditLogService } from "../../services/audit-log.js";
 import { dispatchOutboundWebhookEvent } from "../../services/outbound-webhooks.js";
 import { PublishApprovalPolicyService } from "../../services/publish-approval-policy.js";
-import {
-  requirePermission,
-  requirePageOwnerOrPermission,
-} from "../../middleware/permissions.js";
+import { requirePermission, requirePageOwnerOrPermission } from "../../middleware/permissions.js";
 import {
   canAccessNamedStories,
   canGenerateNamedStories,
@@ -43,7 +40,17 @@ import {
 import { SlackApprovalNotifier } from "../../services/slack-approval-notifier.js";
 import logger from "../../lib/logger.js";
 import { asyncHandler } from "../../lib/async-handler.js";
-import { sendSuccess, sendNoContent, sendBadRequest, sendUnauthorized, sendForbidden, sendNotFound, sendConflict, sendError, sendServiceUnavailable } from "../_shared/responses.js";
+import {
+  sendSuccess,
+  sendNoContent,
+  sendBadRequest,
+  sendUnauthorized,
+  sendForbidden,
+  sendNotFound,
+  sendConflict,
+  sendError,
+  sendServiceUnavailable,
+} from "../_shared/responses.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -140,31 +147,30 @@ export function registerPublishRoutes({
       const pageId = String(req.params.pageId);
       const job = await scheduledPublishQueue.getJob(scheduledPublishJobId(pageId));
       if (!job) {
-      sendSuccess(res, { enabled: true, scheduled: false });
-      return;
+        sendSuccess(res, { enabled: true, scheduled: false });
+        return;
       }
       const state = await job.getState();
       if (state === "completed" || state === "failed") {
-      await job.remove();
-      sendSuccess(res, { enabled: true, scheduled: false });
-      return;
+        await job.remove();
+        sendSuccess(res, { enabled: true, scheduled: false });
+        return;
       }
       if (job.data.organizationId !== req.organizationId!) {
-      sendForbidden(res, "permission_denied");
-      return;
+        sendForbidden(res, "permission_denied");
+        return;
       }
       sendSuccess(res, {
-      enabled: true,
-      scheduled: true,
-      job_id: job.id,
-      state,
-      publish_at: job.data.publishAt,
-      visibility: job.data.visibility,
-      expires_at: job.data.expiresAt ?? null,
+        enabled: true,
+        scheduled: true,
+        job_id: job.id,
+        state,
+        publish_at: job.data.publishAt,
+        visibility: job.data.visibility,
+        expires_at: job.data.expiresAt ?? null,
       });
-
-    }
-  ));
+    })
+  );
 
   router.post(
     "/:pageId/schedule-publish",
@@ -182,73 +188,78 @@ export function registerPublishRoutes({
       }
 
       if (!req.organizationId! || !req.userId!) {
-      sendUnauthorized(res, "Authentication required");
-      return;
+        sendUnauthorized(res, "Authentication required");
+        return;
       }
       const page = await editor.getForEditing(req.params.pageId as string);
-      if (page.includeCompanyName && !(await canGenerateNamedStories(prisma, roleProfiles, reqParams(req)))) {
-      sendForbidden(res, "Your role cannot generate named stories.");
-      return;
+      if (
+        page.includeCompanyName &&
+        !(await canGenerateNamedStories(prisma, roleProfiles, reqParams(req)))
+      ) {
+        sendForbidden(res, "Your role cannot generate named stories.");
+        return;
       }
       const publishPolicyDecision = await approvalPolicy.requiresApproval(
         req.organizationId!,
         page.includeCompanyName
       );
       if (publishPolicyDecision.required) {
-      sendConflict(res, "Scheduled publish is unavailable when the current approval policy requires approval.");
-      return;
+        sendConflict(
+          res,
+          "Scheduled publish is unavailable when the current approval policy requires approval."
+        );
+        return;
       }
       const publishAt = new Date(parse.data.publish_at);
       const now = Date.now();
       const delayMs = publishAt.getTime() - now;
       if (delayMs < 15_000) {
-      sendBadRequest(res, "Choose a publish time at least 15 seconds in the future.");
-      return;
+        sendBadRequest(res, "Choose a publish time at least 15 seconds in the future.");
+        return;
       }
       await clearScheduledPublish(page.id);
       await scheduledPublishQueue.add(
-      "scheduled-page-publish",
-      {
-        pageId: page.id,
-        organizationId: req.organizationId!,
-        userId: req.userId!,
-        publishAt: publishAt.toISOString(),
-        visibility: parse.data.visibility,
-        password: parse.data.password,
-        expiresAt: parse.data.expires_at,
-        releaseNotes: parse.data.release_notes,
-      },
-      {
-        jobId: scheduledPublishJobId(page.id),
-        delay: delayMs,
-        attempts: 2,
-        backoff: { type: "exponential", delay: 30_000 },
-        removeOnComplete: 100,
-        removeOnFail: 500,
-      }
+        "scheduled-page-publish",
+        {
+          pageId: page.id,
+          organizationId: req.organizationId!,
+          userId: req.userId!,
+          publishAt: publishAt.toISOString(),
+          visibility: parse.data.visibility,
+          password: parse.data.password,
+          expiresAt: parse.data.expires_at,
+          releaseNotes: parse.data.release_notes,
+        },
+        {
+          jobId: scheduledPublishJobId(page.id),
+          delay: delayMs,
+          attempts: 2,
+          backoff: { type: "exponential", delay: 30_000 },
+          removeOnComplete: 100,
+          removeOnFail: 500,
+        }
       );
       await auditLogs.record({
-      organizationId: req.organizationId!,
-      actorUserId: req.userId!,
-      category: "PUBLISH",
-      action: "PAGE_PUBLISH_SCHEDULED",
-      targetType: "landing_page",
-      targetId: page.id,
-      severity: "INFO",
-      metadata: {
-        publish_at: publishAt.toISOString(),
-        visibility: parse.data.visibility,
-      },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent"),
+        organizationId: req.organizationId!,
+        actorUserId: req.userId!,
+        category: "PUBLISH",
+        action: "PAGE_PUBLISH_SCHEDULED",
+        targetType: "landing_page",
+        targetId: page.id,
+        severity: "INFO",
+        metadata: {
+          publish_at: publishAt.toISOString(),
+          visibility: parse.data.visibility,
+        },
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
       });
       res.status(202).json({
-      scheduled: true,
-      publish_at: publishAt.toISOString(),
+        scheduled: true,
+        publish_at: publishAt.toISOString(),
       });
-
-    }
-  ));
+    })
+  );
 
   router.delete(
     "/:pageId/scheduled-publish",
@@ -263,15 +274,14 @@ export function registerPublishRoutes({
       const pageId = String(req.params.pageId);
       await clearScheduledPublish(pageId);
       sendNoContent(res);
-
-    }
-  ));
+    })
+  );
 
   // ── PUBLISH ─────────────────────────────────────────────────────────
 
   router.post(
     "/:pageId/publish",
-    requirePageOwnerOrPermission(prisma),
+    requirePermission(prisma, "publish"),
     asyncHandler(async (req: AuthReq, res: Response) => {
       const parse = PublishSchema.safeParse(req.body);
       if (!parse.success) {
@@ -309,7 +319,10 @@ export function registerPublishRoutes({
           const maxDate = new Date();
           maxDate.setDate(maxDate.getDate() + governance.maxExpirationDays);
           if (expiresAt > maxDate) {
-            sendBadRequest(res, `Max expiration is ${governance.maxExpirationDays} days from publish date.`);
+            sendBadRequest(
+              res,
+              `Max expiration is ${governance.maxExpirationDays} days from publish date.`
+            );
             return;
           }
         }
@@ -356,15 +369,17 @@ export function registerPublishRoutes({
             requestPayload: requestPayload as unknown as Record<string, unknown>,
           });
 
-          await slackNotifier.notifyApprovalRequested({
-            organizationId: req.organizationId!,
-            requestId: approval.id,
-            title: page.title,
-            accountName: page.story.account.name,
-            requestedByLabel: req.userId!,
-            reviewUrl: `${process.env.APP_URL ?? process.env.FRONTEND_URL ?? ""}/admin/publish-approvals`,
-            assetType: "landing_page",
-          }).catch(() => {});
+          await slackNotifier
+            .notifyApprovalRequested({
+              organizationId: req.organizationId!,
+              requestId: approval.id,
+              title: page.title,
+              accountName: page.story.account.name,
+              requestedByLabel: req.userId!,
+              reviewUrl: `${process.env.APP_URL ?? process.env.FRONTEND_URL ?? ""}/admin/publish-approvals`,
+              assetType: "landing_page",
+            })
+            .catch(() => {});
 
           await auditLogs.record({
             organizationId: req.organizationId!,
@@ -396,9 +411,7 @@ export function registerPublishRoutes({
         const result = await editor.publish(req.params.pageId as string, {
           visibility: parse.data.visibility,
           password: parse.data.password,
-          expiresAt: parse.data.expires_at
-            ? new Date(parse.data.expires_at)
-            : undefined,
+          expiresAt: parse.data.expires_at ? new Date(parse.data.expires_at) : undefined,
           publishedByUserId: req.userId!,
           releaseNotes: parse.data.release_notes,
           provenance: {
@@ -472,8 +485,8 @@ export function registerPublishRoutes({
         logger.error("Publish landing page error", { error: err });
         sendError(res, 500, "internal_error", "Failed to publish landing page");
       }
-    }
-  ));
+    })
+  );
 
   // ── ARTIFACT VERSION HISTORY ──────────────────────────────────────
 
@@ -487,26 +500,25 @@ export function registerPublishRoutes({
       }
 
       const versions = await editor.listArtifactVersions(
-      req.params.pageId as string,
-      req.organizationId!
+        req.params.pageId as string,
+        req.organizationId!
       );
       sendSuccess(res, {
-      versions: versions.map((v) => ({
-        id: v.id,
-        version_number: v.versionNumber,
-        status: v.status,
-        release_notes: v.releaseNotes,
-        visibility: v.visibility,
-        expires_at: v.expiresAt?.toISOString() ?? null,
-        published_at: v.publishedAt?.toISOString() ?? null,
-        created_at: v.createdAt.toISOString(),
-        created_by: v.createdBy,
-        provenance: v.provenance,
-      })),
+        versions: versions.map((v) => ({
+          id: v.id,
+          version_number: v.versionNumber,
+          status: v.status,
+          release_notes: v.releaseNotes,
+          visibility: v.visibility,
+          expires_at: v.expiresAt?.toISOString() ?? null,
+          published_at: v.publishedAt?.toISOString() ?? null,
+          created_at: v.createdAt.toISOString(),
+          created_by: v.createdBy,
+          provenance: v.provenance,
+        })),
       });
-
-    }
-  ));
+    })
+  );
 
   router.post(
     "/:pageId/versions/:versionId/rollback",
@@ -518,26 +530,25 @@ export function registerPublishRoutes({
       }
 
       await editor.rollbackToVersion(
-      req.params.pageId as string,
-      req.params.versionId as string,
-      req.userId!
+        req.params.pageId as string,
+        req.params.versionId as string,
+        req.userId!
       );
       await auditLogs.record({
-      organizationId: req.organizationId!,
-      actorUserId: req.userId!,
-      category: "PUBLISH",
-      action: "PAGE_VERSION_ROLLBACK",
-      targetType: "landing_page",
-      targetId: req.params.pageId as string,
-      severity: "WARN",
-      metadata: { version_id: req.params.versionId as string },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent"),
+        organizationId: req.organizationId!,
+        actorUserId: req.userId!,
+        category: "PUBLISH",
+        action: "PAGE_VERSION_ROLLBACK",
+        targetType: "landing_page",
+        targetId: req.params.pageId as string,
+        severity: "WARN",
+        metadata: { version_id: req.params.versionId as string },
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
       });
       sendSuccess(res, { rolled_back: true });
-
-    }
-  ));
+    })
+  );
 
   // ── UNPUBLISH ───────────────────────────────────────────────────────
 
@@ -551,28 +562,30 @@ export function registerPublishRoutes({
       }
 
       const page = await editor.getForEditing(req.params.pageId as string);
-      if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
-      sendForbidden(res, "Your role cannot access named stories.");
-      return;
+      if (
+        page.includeCompanyName &&
+        !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))
+      ) {
+        sendForbidden(res, "Your role cannot access named stories.");
+        return;
       }
 
       await editor.unpublish(req.params.pageId as string);
       await clearScheduledPublish(req.params.pageId as string);
       await auditLogs.record({
-      organizationId: req.organizationId!,
-      actorUserId: req.userId!,
-      category: "PUBLISH",
-      action: "PAGE_UNPUBLISHED",
-      targetType: "landing_page",
-      targetId: req.params.pageId as string,
-      severity: "INFO",
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent"),
+        organizationId: req.organizationId!,
+        actorUserId: req.userId!,
+        category: "PUBLISH",
+        action: "PAGE_UNPUBLISHED",
+        targetType: "landing_page",
+        targetId: req.params.pageId as string,
+        severity: "INFO",
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
       });
       sendSuccess(res, { unpublished: true });
-
-    }
-  ));
+    })
+  );
 
   // ── ARCHIVE ─────────────────────────────────────────────────────────
 
@@ -586,28 +599,30 @@ export function registerPublishRoutes({
       }
 
       const page = await editor.getForEditing(req.params.pageId as string);
-      if (page.includeCompanyName && !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))) {
-      sendForbidden(res, "Your role cannot access named stories.");
-      return;
+      if (
+        page.includeCompanyName &&
+        !(await canAccessNamedStories(prisma, roleProfiles, reqParams(req)))
+      ) {
+        sendForbidden(res, "Your role cannot access named stories.");
+        return;
       }
 
       await editor.archive(req.params.pageId as string);
       await clearScheduledPublish(req.params.pageId as string);
       await auditLogs.record({
-      organizationId: req.organizationId!,
-      actorUserId: req.userId!,
-      category: "PUBLISH",
-      action: "PAGE_ARCHIVED",
-      targetType: "landing_page",
-      targetId: req.params.pageId as string,
-      severity: "INFO",
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent"),
+        organizationId: req.organizationId!,
+        actorUserId: req.userId!,
+        category: "PUBLISH",
+        action: "PAGE_ARCHIVED",
+        targetType: "landing_page",
+        targetId: req.params.pageId as string,
+        severity: "INFO",
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
       });
       sendSuccess(res, { archived: true });
-
-    }
-  ));
+    })
+  );
 
   // ── PUBLISH APPROVAL WORKFLOW ─────────────────────────────────────
 
@@ -628,20 +643,19 @@ export function registerPublishRoutes({
       const rows = await editor.listPublishApprovalRequests(req.organizationId!, status);
 
       sendSuccess(res, {
-      approvals: rows.map((r) => ({
-        id: r.id,
-        status: r.status,
-        target_id: r.targetId,
-        created_at: r.createdAt.toISOString(),
-        reviewed_at: r.reviewedAt?.toISOString() ?? null,
-        requested_by: r.requestedBy,
-        reviewer: r.reviewer,
-        payload: r.requestPayload,
-      })),
+        approvals: rows.map((r) => ({
+          id: r.id,
+          status: r.status,
+          target_id: r.targetId,
+          created_at: r.createdAt.toISOString(),
+          reviewed_at: r.reviewedAt?.toISOString() ?? null,
+          requested_by: r.requestedBy,
+          reviewer: r.reviewer,
+          payload: r.requestPayload,
+        })),
       });
-
-    }
-  ));
+    })
+  );
 
   router.post(
     "/approvals/publish/:requestId/review",
@@ -676,13 +690,17 @@ export function registerPublishRoutes({
 
         const payload = (request.requestPayload ?? {}) as unknown as PublishApprovalPayload;
         const steps = Array.isArray(payload.steps) ? payload.steps : [];
-        const currentStepOrder =
-          payload.current_step_order ?? steps[0]?.step_order ?? 1;
+        const currentStepOrder = payload.current_step_order ?? steps[0]?.step_order ?? 1;
         const currentStep = steps.find((s) => s.step_order === currentStepOrder);
 
         if (
           currentStep &&
-          !(await canUserApproveStep(prisma, reqParams(req), currentStep, request.requestedByUserId))
+          !(await canUserApproveStep(
+            prisma,
+            reqParams(req),
+            currentStep,
+            request.requestedByUserId
+          ))
         ) {
           sendForbidden(res, "You are not eligible to approve this workflow step.");
           return;
@@ -768,11 +786,17 @@ export function registerPublishRoutes({
           const maxDate = new Date();
           maxDate.setDate(maxDate.getDate() + governance.maxExpirationDays);
           if (expiresAt > maxDate) {
-            sendBadRequest(res, `Max expiration is ${governance.maxExpirationDays} days from publish date.`);
+            sendBadRequest(
+              res,
+              `Max expiration is ${governance.maxExpirationDays} days from publish date.`
+            );
             return;
           }
         }
-        if (page.includeCompanyName && !(await canGenerateNamedStories(prisma, roleProfiles, reqParams(req)))) {
+        if (
+          page.includeCompanyName &&
+          !(await canGenerateNamedStories(prisma, roleProfiles, reqParams(req)))
+        ) {
           sendForbidden(res, "Your role cannot generate named stories.");
           return;
         }
@@ -780,9 +804,7 @@ export function registerPublishRoutes({
         const result = await editor.publish(request.targetId, {
           visibility: publishOptions.visibility,
           password: publishOptions.password,
-          expiresAt: publishOptions.expires_at
-            ? new Date(publishOptions.expires_at)
-            : undefined,
+          expiresAt: publishOptions.expires_at ? new Date(publishOptions.expires_at) : undefined,
           publishedByUserId: req.userId!,
           approvalRequestId: request.id,
           releaseNotes: publishOptions.release_notes,
@@ -871,6 +893,6 @@ export function registerPublishRoutes({
         logger.error("Review publish approval error", { error: err });
         sendError(res, 500, "internal_error", "Failed to review publish approval");
       }
-    }
-  ));
+    })
+  );
 }

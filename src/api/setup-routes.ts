@@ -16,7 +16,7 @@ import { registerSetupQuickstartRoutes } from "./setup/quickstart-routes.js";
 import { registerSetupStepRoutes } from "./setup/steps-routes.js";
 import { registerSetupFirstValueRoutes } from "./setup/first-value-routes.js";
 import type { AuthReq, SetupRouteDeps } from "./setup/types.js";
-import { sendForbidden } from "./_shared/responses.js";
+import { sendError } from "./_shared/responses.js";
 
 export function createSetupRoutes(
   prisma: PrismaClient,
@@ -30,7 +30,7 @@ export function createSetupRoutes(
 
   const requireSetupAdmin = (req: AuthReq, res: Response): boolean => {
     if (!req.userRole || (req.userRole !== "OWNER" && req.userRole !== "ADMIN")) {
-      sendForbidden(res, "Admin access required");
+      sendError(res, 403, "Admin access required");
       return false;
     }
     return true;

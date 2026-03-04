@@ -116,10 +116,7 @@ export class EntityResolver {
     const domains = this.extractParticipantDomains(participants);
 
     if (domains.length > 0) {
-      const domainMatch = await this.matchByEmailDomain(
-        organizationId,
-        domains
-      );
+      const domainMatch = await this.matchByEmailDomain(organizationId, domains);
       if (domainMatch) {
         metrics.recordEntityResolution(domainMatch.matchMethod, domainMatch.confidence);
         logger.debug("Entity resolved via email domain", {
@@ -134,10 +131,7 @@ export class EntityResolver {
     const candidateNames = this.buildCandidateNames(participants, callTitle);
 
     if (candidateNames.length > 0) {
-      const fuzzyMatch = await this.matchByFuzzyName(
-        organizationId,
-        candidateNames
-      );
+      const fuzzyMatch = await this.matchByFuzzyName(organizationId, candidateNames);
       if (fuzzyMatch) {
         metrics.recordEntityResolution(fuzzyMatch.matchMethod, fuzzyMatch.confidence);
         logger.debug("Entity resolved via fuzzy name", {
@@ -241,9 +235,7 @@ export class EntityResolver {
 
   // ─── Private Methods ────────────────────────────────────────────────
 
-  private extractParticipantDomains(
-    participants: CallParticipantInput[]
-  ): string[] {
+  private extractParticipantDomains(participants: CallParticipantInput[]): string[] {
     const domains = new Set<string>();
     for (const p of participants) {
       if (p.email) {
@@ -311,10 +303,7 @@ export class EntityResolver {
     return null;
   }
 
-  private buildCandidateNames(
-    participants: CallParticipantInput[],
-    callTitle?: string
-  ): string[] {
+  private buildCandidateNames(participants: CallParticipantInput[], callTitle?: string): string[] {
     const names: string[] = [];
     // Call title often contains the account name
     if (callTitle) {
@@ -368,14 +357,6 @@ export class EntityResolver {
 
     if (accounts.length === 0) return null;
 
-    // Only fall back to full Fuse.js scan if the org has fewer than 500 accounts
-    const totalCount = await this.prisma.account.count({
-      where: { organizationId },
-    });
-    if (totalCount >= 500 && accounts.length < totalCount) {
-      // We have a subset; run Fuse on what we have (pre-filtered or capped)
-    }
-
     const fuse = new Fuse(accounts, {
       keys: ["normalizedName"],
       threshold: 0.3, // lower = stricter; 0.3 is a good balance
@@ -394,7 +375,7 @@ export class EntityResolver {
       }
     }
 
-    if (bestMatch && bestMatch.score !== undefined && bestMatch.score < 0.3) {
+    if (bestMatch && bestMatch.score !== undefined && bestMatch.score <= 0.3) {
       // Convert Fuse score (0 = perfect) to confidence (1 = perfect)
       const confidence = Math.round((1 - bestMatch.score) * 100) / 100;
       return {

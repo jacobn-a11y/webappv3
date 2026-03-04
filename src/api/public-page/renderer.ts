@@ -16,15 +16,8 @@ import type { PrismaClient } from "@prisma/client";
 import { escapeHtml } from "../../lib/html-utils.js";
 import { LandingPageEditor, type CalloutBox } from "../../services/landing-page-editor.js";
 import { verifyPagePassword } from "../../lib/page-password.js";
-import {
-  sanitizeCustomCss,
-  sanitizeHeroImageUrl,
-  sanitizeBrandingSettings,
-} from "./sanitizers.js";
-import {
-  getLandingPageStyles,
-  PASSWORD_PAGE_STYLES,
-} from "./styles.js";
+import { sanitizeCustomCss, sanitizeHeroImageUrl, sanitizeBrandingSettings } from "./sanitizers.js";
+import { getLandingPageStyles, PASSWORD_PAGE_STYLES } from "./styles.js";
 
 // ─── Markdown to HTML (simple converter) ─────────────────────────────────────
 
@@ -42,7 +35,7 @@ function markdownToHtml(md: string): string {
     // Italic
     .replace(/\*(.+?)\*/g, "<em>$1</em>")
     // Blockquotes
-    .replace(/^> (.+)$/gm, '<blockquote><p>$1</p></blockquote>')
+    .replace(/^> (.+)$/gm, "<blockquote><p>$1</p></blockquote>")
     // Unordered lists
     .replace(/^- (.+)$/gm, "<li>$1</li>")
     // Horizontal rules
@@ -77,10 +70,7 @@ function markdownToHtml(md: string): string {
   html = html.replace(/<p>(<hr>)<\/p>/g, "$1");
 
   // Wrap adjacent <tr> in <table>
-  html = html.replace(
-    /(<tr>.*?<\/tr>(?:\s*<tr>.*?<\/tr>)*)/g,
-    '<table>$1</table>'
-  );
+  html = html.replace(/(<tr>.*?<\/tr>(?:\s*<tr>.*?<\/tr>)*)/g, "<table>$1</table>");
 
   return html;
 }
@@ -147,17 +137,15 @@ export function renderLandingPageHtml(page: {
   // Reading time estimate (~200 words/min average reading speed)
   const wordCount = page.body.split(/\s+/).filter(Boolean).length;
   const readingTimeMinutes = Math.max(1, Math.ceil(wordCount / 200));
-  const readingTimeLabel = readingTimeMinutes === 1 ? "1 min read" : `${readingTimeMinutes} min read`;
-  const calloutBoxes = Array.isArray(page.calloutBoxes)
-    ? page.calloutBoxes
-    : [];
+  const readingTimeLabel =
+    readingTimeMinutes === 1 ? "1 min read" : `${readingTimeMinutes} min read`;
+  const calloutBoxes = Array.isArray(page.calloutBoxes) ? page.calloutBoxes : [];
 
   const calloutsHtml = calloutBoxes
-    .map(
-      (box) => {
-        const iconType = box.icon ?? "insight";
-        const label = CALLOUT_LABELS[iconType] ?? "Insight";
-        return `
+    .map((box) => {
+      const iconType = box.icon ?? "insight";
+      const label = CALLOUT_LABELS[iconType] ?? "Insight";
+      return `
       <div class="callout callout--${iconType}" role="region" aria-label="${label}: ${escapeHtml(box.title)}">
         <div class="callout__icon">
           ${CALLOUT_ICONS[iconType] ?? CALLOUT_ICONS.insight}
@@ -167,8 +155,7 @@ export function renderLandingPageHtml(page: {
           <div class="callout__body">${markdownToHtml(box.body)}</div>
         </div>
       </div>`;
-      }
-    )
+    })
     .join("\n");
 
   const heroSection = safeHeroImageUrl
@@ -261,9 +248,7 @@ export function renderLandingPageHtml(page: {
     <p>
       Powered by <strong>StoryEngine</strong>
       ${
-        safeBranding?.brandName
-          ? ` for <strong>${escapeHtml(safeBranding.brandName)}</strong>`
-          : ""
+        safeBranding?.brandName ? ` for <strong>${escapeHtml(safeBranding.brandName)}</strong>` : ""
       }
     </p>
   </footer>
@@ -316,9 +301,9 @@ function renderPasswordPage(slug: string, showError = false): string {
         <path d="M7 11V7a5 5 0 0110 0v4"/>
       </svg>
     </div>
-    <h1>Story unavailable or restricted</h1>
+    <h1>This page is protected</h1>
     <p class="card__description">If you were given a password, enter it below.</p>
-    <div class="error" role="alert" ${showError ? '' : 'hidden'}>Unable to access this story with the provided password.</div>
+    <div class="error" role="alert" ${showError ? "" : "hidden"}>Unable to access this story with the provided password.</div>
     <form method="POST" action="/s/${escapeHtml(slug)}">
       <div class="form-group">
         <label for="password-input">Password</label>
@@ -333,10 +318,7 @@ function renderPasswordPage(slug: string, showError = false): string {
 
 // ─── Route Registration ──────────────────────────────────────────────────────
 
-export function registerRoutes(deps: {
-  router: Router;
-  prisma: PrismaClient;
-}): void {
+export function registerRoutes(deps: { router: Router; prisma: PrismaClient }): void {
   const { router, prisma } = deps;
   const editor = new LandingPageEditor(prisma);
 
@@ -381,12 +363,16 @@ export function registerRoutes(deps: {
     // Password check
     if (rawPage.password) {
       if (!password) {
-        sendUnavailable(false);
+        res.setHeader("X-Robots-Tag", "noindex, nofollow");
+        res.setHeader("Cache-Control", "private, no-store");
+        res.status(200).send(renderPasswordPage(slug, false));
         return;
       }
 
       if (!verifyPagePassword(password, rawPage.password)) {
-        sendUnavailable(true);
+        res.setHeader("X-Robots-Tag", "noindex, nofollow");
+        res.setHeader("Cache-Control", "private, no-store");
+        res.status(200).send(renderPasswordPage(slug, true));
         return;
       }
     }

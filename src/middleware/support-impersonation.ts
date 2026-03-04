@@ -7,7 +7,10 @@ import { AuditLogService } from "../services/audit-log.js";
 const ADMIN_ROLES: UserRole[] = ["OWNER", "ADMIN"];
 const SUPPORT_IMPERSONATION_HEADER = "x-support-impersonation-token";
 
-async function actorCanImpersonate(prisma: PrismaClient, req: AuthenticatedRequest): Promise<boolean> {
+async function actorCanImpersonate(
+  prisma: PrismaClient,
+  req: AuthenticatedRequest
+): Promise<boolean> {
   if (!req.userId) return false;
   if (req.userRole && ADMIN_ROLES.includes(req.userRole)) return true;
   const grant = await prisma.userPermission.findUnique({
@@ -52,10 +55,10 @@ export function applySupportImpersonation(prisma: PrismaClient) {
       return;
     }
 
-    const optOut = await prisma.tenantSupportOptOut.findUnique({
+    const orgSettings = await prisma.orgSettings.findUnique({
       where: { organizationId },
     });
-    if (optOut) {
+    if (orgSettings?.supportAccessDisabled) {
       res.status(403).json({
         error: "support_access_disabled",
         message: "This organization has opted out of support access.",
@@ -131,11 +134,7 @@ export function applySupportImpersonation(prisma: PrismaClient) {
   };
 }
 
-export function requireImpersonationWriteScope(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
+export function requireImpersonationWriteScope(req: Request, res: Response, next: NextFunction) {
   const authReq = req as AuthenticatedRequest;
   if (!authReq.impersonation) {
     next();

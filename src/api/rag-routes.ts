@@ -11,7 +11,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
 import type { RAGEngine } from "../services/rag-engine.js";
 import { AccountAccessService } from "../services/account-access.js";
-import { sendSuccess, sendUnauthorized, sendForbidden, sendBadRequest } from "./_shared/responses.js";
+import { sendSuccess, sendUnauthorized, sendBadRequest, sendError } from "./_shared/responses.js";
 import { asyncHandler } from "../lib/async-handler.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -26,7 +26,7 @@ const ChatSchema = z.object({
     .string()
     .min(3, "Query must be at least 3 characters")
     .max(1000, "Query must be under 1000 characters"),
-  account_id: z.string().min(1),
+  account_id: z.string().min(1).nullable(),
   history: z.array(ChatMessageSchema).max(50).default([]),
   top_k: z.number().int().min(1).max(20).optional(),
   funnel_stages: z.array(z.string()).optional(),
@@ -81,24 +81,30 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    *     "tokens_used": 1234
    *   }
    */
-  router.post("/query", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const orgId = req.organizationId!;
-    if (!orgId) {
-      sendUnauthorized(res, "Authentication required");
-      return;
-    }
+  router.post(
+    "/query",
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+      const orgId = req.organizationId!;
+      if (!orgId) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
 
-    const parseResult = QuerySchema.safeParse(req.body);
-    if (!parseResult.success) {
-      sendBadRequest(res, "validation_error", parseResult.error.issues);
-      return;
-    }
+      const parseResult = QuerySchema.safeParse(req.body);
+      if (!parseResult.success) {
+        sendBadRequest(res, "validation_error", parseResult.error.issues);
+        return;
+      }
 
-    const { query, account_id, organization_id, top_k, funnel_stages } =
-      parseResult.data;
+      const { query, account_id, organization_id, top_k, funnel_stages } = parseResult.data;
 
       if (organization_id && organization_id !== orgId) {
-        sendForbidden(res, "organization_id does not match the authenticated tenant.");
+        sendError(
+          res,
+          403,
+          "organization_mismatch",
+          "organization_id does not match the authenticated tenant."
+        );
         return;
       }
 
@@ -110,7 +116,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
           req.userRole
         );
         if (!canAccessAccount) {
-          sendForbidden(res, "You do not have access to this account.");
+          sendError(res, 403, "permission_denied", "You do not have access to this account.");
           return;
         }
       }
@@ -136,8 +142,8 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
         })),
         tokens_used: result.tokensUsed,
       });
-    
-  }));
+    })
+  );
 
   /**
    * POST /api/rag/chat
@@ -145,21 +151,22 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    * Conversation-aware chat endpoint. Carries message history so
    * follow-up questions are resolved with context.
    */
-  router.post("/chat", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const orgId = req.organizationId!;
-    if (!orgId) {
-      sendUnauthorized(res, "Authentication required");
-      return;
-    }
+  router.post(
+    "/chat",
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+      const orgId = req.organizationId!;
+      if (!orgId) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
 
-    const parseResult = ChatSchema.safeParse(req.body);
-    if (!parseResult.success) {
-      sendBadRequest(res, "validation_error", parseResult.error.issues);
-      return;
-    }
+      const parseResult = ChatSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        sendBadRequest(res, "validation_error", parseResult.error.issues);
+        return;
+      }
 
-    const { query, account_id, history, top_k, funnel_stages } =
-      parseResult.data;
+      const { query, account_id, history, top_k, funnel_stages } = parseResult.data;
 
       if (req.userId!) {
         const canAccessAccount = await accessService.canAccessAccount(
@@ -169,7 +176,7 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
           req.userRole
         );
         if (!canAccessAccount) {
-          sendForbidden(res, "You do not have access to this account.");
+          sendError(res, 403, "permission_denied", "You do not have access to this account.");
           return;
         }
       }
@@ -196,8 +203,8 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
         })),
         tokens_used: result.tokensUsed,
       });
-    
-  }));
+    })
+  );
 
   /**
    * GET /api/rag/accounts
@@ -206,12 +213,14 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
    * context selector in the chat UI.
    * Query params: search (optional text filter)
    */
-  router.get("/accounts", asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const orgId = req.organizationId!;
-    if (!orgId || !req.userId!) {
-      sendUnauthorized(res, "Authentication required");
-      return;
-    }
+  router.get(
+    "/accounts",
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+      const orgId = req.organizationId!;
+      if (!orgId || !req.userId!) {
+        sendUnauthorized(res, "Authentication required");
+        return;
+      }
 
       const accessibleIds = await accessService.getAccessibleAccountIds(
         req.userId!,
@@ -251,8 +260,8 @@ export function createRAGRoutes(ragEngine: RAGEngine, prisma: PrismaClient): Rou
           call_count: a._count.calls,
         })),
       });
-    
-  }));
+    })
+  );
 
   /**
    * GET /api/rag/health
