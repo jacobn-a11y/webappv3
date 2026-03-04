@@ -22,7 +22,6 @@ Index of documentation for the StoryEngine webapp. Docs are organized by purpose
 |----------|-------------|
 | [MISSING_FEATURES.md](./MISSING_FEATURES.md) | Feature status — implemented vs. still missing |
 | [StoryEngine-Consolidated-Roadmap.md](./StoryEngine-Consolidated-Roadmap.md) | Canonical roadmap (T01–T73), execution status |
-| [MERGE-DEV-INTEGRATION-ROADMAP.md](../MERGE-DEV-INTEGRATION-ROADMAP.md) | Merge.dev integration plan (Settings, Setup Wizard) |
 
 ---
 

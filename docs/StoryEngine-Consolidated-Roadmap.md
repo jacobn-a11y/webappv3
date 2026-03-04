@@ -32,10 +32,10 @@ It preserves the full `T01-T61` sequence and adds a new additive sales-adoption 
 - `T02` split `src/api/setup-routes.ts`: create `src/api/setup/` with status, quickstart, steps, first-value modules; keep `createSetupRoutes()` API unchanged; ensure `/api/setup/*` behavior remains identical.
 - `T03` split `src/api/ai-settings-routes.ts`: create `src/api/ai-settings/` with user, admin, billing modules; keep `createAISettingsRoutes()` compatibility.
 - `T04` shared API helpers: add `src/api/_shared/` for pagination parser, zod request validators, and consistent error envelope helper; replace duplicated patterns in dashboard, setup, ai-settings, then expand to other route files.
-- `T05` split `frontend/src/App.tsx`: create `frontend/src/app/` with `AppShell.tsx`, `routes.tsx`, `nav-config.ts`, `global-modals.tsx`; reduce `App.tsx` to composition only.
+- `T05` split `frontend/src/App.tsx`: create `frontend/src/app/` with `AppShell.tsx`, `routes.tsx`, `nav-config.tsx`, `global-modals.tsx`; reduce `App.tsx` to composition only.
 - `T06` split `frontend/src/lib/api.ts`: create `frontend/src/lib/api/` domain clients (auth, dashboard, stories, pages, setup, ai-settings, admin, integrations), plus shared `http.ts`; keep temporary re-export layer from `frontend/src/lib/api.ts`.
 - `T07` decompose `frontend/src/components/StoryGeneratorModal.tsx`: move state + async orchestration to hooks (`useStoryGeneration`, `useQuoteSelection`, `usePublishFlow`) and split UI sections into subcomponents.
-- `T08` CSS architecture: create `frontend/src/styles/` with `tokens.css`, `reset.css`, `utilities.css`, feature-level styles; make `frontend/src/index.css` an import orchestrator only.
+- `T08` CSS architecture: create `frontend/src/styles/` with `themes.css`, `reset.css`, `utilities.css`, feature-level styles; make `frontend/src/index.css` an import orchestrator only.
 - `T09` file-size guardrails: add `scripts/contracts/file-size-guard.mjs` + config JSON; wire warn-only CI step first; switch to blocking after `T01-T08` land.
 - `T10` AI development map: add `docs/AI_DEVELOPMENT_GUIDE.md` with module map, ownership, “where to change X” table, test matrix, and route/client dependency graph.
 

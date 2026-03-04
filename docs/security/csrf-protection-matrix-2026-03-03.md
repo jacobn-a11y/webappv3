@@ -11,7 +11,7 @@ In `/src/app.ts`, `createCsrfProtection()` is mounted after:
 and before:
 - `/api/platform`
 - `/api/setup`
-- all authenticated app routes (`/api/billing`, `/api/keys`, `/api/rag`, `/api/stories`, `/api/pages`, `/api/dashboard`, `/api/admin/*`, `/api/merge`, `/api/integrations`, `/api/ai-settings`, `/api/notifications`, `/api/analytics`, `/api/accounts`, `/api/account-journey`, `/api/account-merge`, `/api/chatbot`)
+- all authenticated app routes (`/api/billing`, `/api/keys`, `/api/rag`, `/api/stories`, `/api/pages`, `/api/dashboard`, `/api/admin/*`, `/api/merge`, `/api/integrations`, `/api/ai`, `/api/notifications`, `/api/analytics`, `/api/accounts`, `/api/account-journey`, `/api/account-merge`, `/chat`)
 
 This confirms CSRF is evaluated before state-changing session-authenticated app endpoints.
 

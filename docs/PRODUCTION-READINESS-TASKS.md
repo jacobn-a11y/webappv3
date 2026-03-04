@@ -72,22 +72,15 @@ Fix all identified issues to make StoryEngine production-ready. Ordered by prior
 ## Phase 2: Code Quality (P1)
 
 ### 2.1 Lint Warnings
-**Issue:** 17 `@typescript-eslint/no-unused-vars` warnings.
+**Issue:** 96 warnings (0 errors) — mix of `@typescript-eslint/no-unused-vars` (logger, Request, etc.) and `@typescript-eslint/no-explicit-any` in tests.
 
 **Tasks:**
-- [ ] `analytics-routes.ts` — prefix `escapeHtml` with `_` or remove
-- [ ] `api-key-routes.ts` — prefix `hashApiKey` with `_` or remove
-- [ ] `dashboard-page-renderer.ts` — prefix `currentUserId`, `isOwner`, `canManage` with `_`
-- [ ] `billing.ts` — prefix `stripe`, `err` with `_`
-- [ ] `ai-tagger.ts` — prefix `STAGE_TOPICS`, `TOPIC_LABELS`, `wasCalibrated` with `_`
-- [ ] `company-scrubber.test.ts` — prefix `beforeEach`, `ScrubConfig` with `_`
-- [ ] `entity-resolution.test.ts` — prefix `CallParticipantInput`, `result` with `_`
-- [ ] `entity-resolution.ts` — prefix `DomainRecord` with `_`
-- [ ] `pricing.ts` — prefix `metadata` with `_`
-- [ ] `transcript-processor.ts` — prefix `aiClient` with `_`
+- [ ] Run `npm run lint` — review current output
+- [ ] Fix unused vars: prefix with `_` or remove (e.g. `logger`, `Request`, `sendError` in various route files)
+- [ ] Fix `no-explicit-any` in test files: use proper types or `unknown` where appropriate
 - [ ] Run `npm run lint` — verify 0 warnings
 
-**Estimate:** 30 min
+**Estimate:** 30–60 min
 
 ---
 
@@ -105,7 +98,7 @@ Fix all identified issues to make StoryEngine production-ready. Ordered by prior
 ## Phase 3: Security & Dependencies (P2)
 
 ### 3.1 npm Vulnerabilities
-**Issue:** 19 vulnerabilities (4 low, 1 moderate, 14 high).
+**Issue:** 4 low severity vulnerabilities (cookie, iron-session, qs via @workos-inc/node). *Previously 19; most addressed.*
 
 **Tasks:**
 - [ ] Run `npm audit` — review findings
@@ -211,4 +204,4 @@ Fix all identified issues to make StoryEngine production-ready. Ordered by prior
 - [x] `npm test` — all tests pass (782+)
 - [x] CI/CD pipeline — green on main
 - [ ] `npm run smoke:test` — passes against deployed app
-- [ ] No critical/high npm audit vulnerabilities
+- [ ] No critical/high npm audit vulnerabilities (currently 4 low only)

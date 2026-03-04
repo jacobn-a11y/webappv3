@@ -6,13 +6,13 @@ This document defines ownership and migration operating rules for `prisma/schema
 
 | Domain | Prisma models (representative) | Primary owner |
 | --- | --- | --- |
-| Identity & tenant core | `Organization`, `User`, `OrgSettings`, `UserPermissionOverride` | Platform Backend |
+| Identity & tenant core | `Organization`, `User`, `OrgSettings`, `UserPermission` | Platform Backend |
 | CRM account graph | `Account`, `AccountDomain`, `Contact`, `UserAccountAccess` | Platform Backend |
-| Story pipeline | `Story`, `HighValueQuote`, `StoryTheme`, `StoryIssue`, `StorySignal` | Product Backend |
-| Landing/public experience | `LandingPage`, `LandingPageVersion`, `PublicPageView` | Product Backend |
-| Ingestion & integrations | `LinkedAccount`, `Call`, `CallParticipant`, `TaxonomyTag`, `IntegrationRun` | Integrations Backend |
-| Governance & enterprise controls | `AuditLog`, `SecurityPolicy`, `DataGovernancePolicy`, `Artifact*`, `PublishApproval*`, `SupportImpersonationSession` | Platform Backend |
-| Billing, notifications, operations | `Billing*`, `AiUsage*`, `Incident*`, `SystemNotification` | Platform Backend |
+| Story pipeline | `Story`, `HighValueQuote` | Product Backend |
+| Landing/public experience | `LandingPage`, `LandingPageEdit`, `PublishedArtifactVersion` | Product Backend |
+| Ingestion & integrations | `LinkedAccount`, `Call`, `CallParticipant`, `CallTag`, `ChunkTag`, `IntegrationRun` | Integrations Backend |
+| Governance & enterprise controls | `AuditLog`, `ArtifactGovernancePolicy`, `ArtifactApprovalStep`, `PublishedArtifactVersion`, `ApprovalRequest`, `ApprovalGroup`, `SupportImpersonationSession` (security/data governance as `Json` in `OrgSettings`) | Platform Backend |
+| Billing, notifications, operations | `Subscription`, `UsageRecord`, `AiUsageRecord`, `AiUsageLimit`, `AiUsageNotification`, `Incident`, `IncidentUpdate`, `Notification` | Platform Backend |
 
 Escalation rule:
 - If ownership is unclear, default to `Platform Backend` and add an explicit owner assignment in the PR before merge.

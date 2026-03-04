@@ -214,11 +214,11 @@ See `src/services/company-scrubber.ts` for implementation.
 
 | Layer | Implementation | Notes |
 |-------|----------------|-------|
-| CSRF | `csrf-protection.ts` | Protects state-changing endpoints with double-submit cookie |
-| Rate limiting | `rate-limiter.ts` | API, webhook, password, export limiters; Redis or in-memory |
-| Security policy | `security-policy.ts` | Per-org MFA, IP allowlist, session requirements |
-| Webhook signatures | `webhook-security.ts` | HMAC SHA256 for Merge, Gong, Grain, Stripe |
-| PII masking | `pii-masker.ts` | Pre-LLM redaction of emails, phones, SSNs, etc. |
+| CSRF | `src/middleware/csrf-protection.ts` | Protects state-changing endpoints with double-submit cookie |
+| Rate limiting | `src/middleware/rate-limiter.ts` | API, webhook, password, export limiters; Redis or in-memory |
+| Security policy | `src/middleware/security-policy.ts` | Per-org MFA, IP allowlist, session requirements |
+| Webhook signatures | `src/lib/webhook-security.ts` | HMAC SHA256 for Merge, Gong, Grain, Stripe |
+| PII masking | `src/middleware/pii-masker.ts` | Pre-LLM redaction of emails, phones, SSNs, etc. |
 
 ### Observability
 

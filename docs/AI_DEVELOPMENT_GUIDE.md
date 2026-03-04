@@ -36,7 +36,7 @@ This guide is the fast path for making safe changes in this codebase during road
 - `frontend/src/lib/api/`: domain client modules (`http`, `auth`, `stories`, `setup`, `platform`, plus pending splits).
 - `frontend/src/components/StoryGeneratorModal.tsx`: story generation UI composition.
 - `frontend/src/components/story-generator/`: extracted story generation hooks.
-- `frontend/src/styles/`: CSS architecture (`tokens`, `reset`, `utilities`, `features`).
+- `frontend/src/styles/`: CSS architecture (`themes`, `reset`, `utilities`, `features`).
 
 ## Ownership map (working convention)
 
@@ -56,7 +56,7 @@ This guide is the fast path for making safe changes in this codebase during road
 | Update auth/session handling in client | `frontend/src/lib/api/http.ts` and `frontend/src/lib/api/auth.ts` |
 | Update app navigation/routes | `frontend/src/app/nav-config.tsx` and `frontend/src/app/routes.tsx` |
 | Change Story Generator behavior | `frontend/src/components/story-generator/*.ts` and `frontend/src/components/StoryGeneratorModal.tsx` |
-| Modify CSS tokens/reset/utilities | `frontend/src/styles/tokens.css`, `frontend/src/styles/reset.css`, `frontend/src/styles/utilities.css` |
+| Modify CSS tokens/reset/utilities | `frontend/src/styles/themes.css`, `frontend/src/styles/reset.css`, `frontend/src/styles/utilities.css` |
 | Add feature-level styles | `frontend/src/styles/features.css` |
 
 ## Test matrix

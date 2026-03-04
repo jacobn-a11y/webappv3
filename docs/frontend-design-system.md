@@ -6,11 +6,11 @@ This document defines the shared frontend styling contract used in the Vite app.
 
 ## Theme Tokens
 
-- Base tokens live in `frontend/src/index.css` under `:root`.
+- Base tokens live in `frontend/src/styles/themes.css` under `:root` (imported via `frontend/src/styles/features.css` → `frontend/src/index.css`).
 - Theme variants:
   - `.theme-light`: light surface and text token overrides.
   - `.theme-high-contrast`: high-contrast accessibility overrides.
-- Runtime toggle classes are applied to `document.documentElement` in `frontend/src/App.tsx`.
+- Runtime toggle classes are applied to `document.documentElement` in `frontend/src/app/ThemeProvider.tsx` (via `useTheme`), consumed by `frontend/src/app/Shell.tsx`.
 
 ## Core Token Groups
 

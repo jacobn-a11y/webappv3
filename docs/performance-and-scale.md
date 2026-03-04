@@ -17,12 +17,12 @@ Standardized limit bounds:
 - Export endpoints: default `5000`, max `10000`
 
 ## Query/Index Optimizations
-Added indexes for heavy read paths:
-- `stories(organizationId, generatedAt DESC)`
-- `high_value_quotes(storyId, metricType)`
-- `transcript_chunks(transcriptId, startMs)`
-- `landing_pages(organizationId, updatedAt DESC)`
-- `integration_runs(organizationId, runType, startedAt DESC)`
+Existing indexes for heavy read paths:
+- `stories(organizationId, accountId)`, `stories(organizationId, generatedById)`
+- `high_value_quotes(storyId)`, `high_value_quotes(storyId, tier, createdAt)`
+- `transcript_chunks(transcriptId, chunkIndex)` (unique)
+- `landing_pages(organizationId, status)`, `landing_pages(slug)`
+- `integration_runs(organizationId, provider, startedAt)`, `integration_runs(organizationId, status, startedAt)`
 
 ## Vector Retention Controls
 - Data retention sweep now prunes stale Pinecone vectors before deleting old records.

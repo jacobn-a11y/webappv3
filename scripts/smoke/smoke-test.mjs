@@ -4,7 +4,7 @@ const cookie = process.env.SMOKE_AUTH_COOKIE || "";
 const sessionToken = process.env.SMOKE_SESSION_TOKEN || "";
 const supportImpersonationToken = process.env.SMOKE_SUPPORT_IMPERSONATION_TOKEN || "";
 const smokeOrgId = process.env.SMOKE_ORGANIZATION_ID || "";
-const hasAuth = !!(bearer || cookie);
+const hasAuth = !!(bearer || cookie || sessionToken);
 
 function headers() {
   const h = { "content-type": "application/json" };
@@ -42,6 +42,7 @@ const checks = [
   { path: "/api/dashboard/customer-success/health", required: false },
   { path: "/api/dashboard/customer-success/renewal-value-report", required: false },
   { path: "/api/dashboard/ops/diagnostics", required: false },
+  { path: "/api/dashboard/ops/incidents", required: false, authOnly: true },
   { path: "/api/dashboard/security/sessions", required: false, authOnly: true },
   { path: "/api/dashboard/support/impersonation/sessions", required: false, authOnly: true },
   ...(smokeOrgId
