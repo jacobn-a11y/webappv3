@@ -119,9 +119,7 @@ describe("billing handlers", () => {
     await handler(req as any, res);
 
     expect(res.status).toHaveBeenCalledWith(403);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ error: "permission_denied" })
-    );
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "permission_denied" }));
   });
 
   it("creates portal session with frontend billing return route", async () => {
@@ -167,9 +165,7 @@ describe("billing handlers", () => {
     await handler(req as any, res);
 
     expect(res.status).toHaveBeenCalledWith(403);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ error: "permission_denied" })
-    );
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "permission_denied" }));
   });
 
   it("returns 500 so Stripe retries when webhook processing fails", async () => {
@@ -185,6 +181,7 @@ describe("billing handlers", () => {
     const stripe = {
       webhooks: {
         constructEvent: vi.fn().mockReturnValue({
+          id: "evt_test_webhook_failure",
           type: "checkout.session.completed",
           data: {
             object: {

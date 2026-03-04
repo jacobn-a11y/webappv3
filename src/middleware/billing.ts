@@ -389,6 +389,11 @@ export function createStripeWebhookHandler(prisma: PrismaClient, stripe: Stripe)
       return;
     }
 
+    if (!event.id) {
+      res.status(400).json({ error: "Missing event ID" });
+      return;
+    }
+
     const isNew = await markWebhookEventIfNew(`stripe:${event.id}`);
     if (!isNew) {
       res.json({ received: true, deduplicated: true });

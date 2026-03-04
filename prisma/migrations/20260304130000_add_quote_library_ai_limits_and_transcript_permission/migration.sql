@@ -59,6 +59,18 @@ BEGIN
   END IF;
 END $$;
 
+-- Backfill high_value_quotes with new quote library columns
+ALTER TABLE "high_value_quotes"
+  ADD COLUMN IF NOT EXISTS "sourceChunkId" TEXT,
+  ADD COLUMN IF NOT EXISTS "tier" "QuoteTier" NOT NULL DEFAULT 'AUTO',
+  ADD COLUMN IF NOT EXISTS "createdByType" "QuoteCreatedByType" NOT NULL DEFAULT 'SYSTEM',
+  ADD COLUMN IF NOT EXISTS "curatedByUserId" TEXT,
+  ADD COLUMN IF NOT EXISTS "curatedAt" TIMESTAMP(3),
+  ADD COLUMN IF NOT EXISTS "curationNote" TEXT;
+
+CREATE INDEX IF NOT EXISTS "high_value_quotes_storyId_tier_createdAt_idx"
+  ON "high_value_quotes"("storyId", "tier", "createdAt");
+
 ALTER TABLE "users"
   ADD COLUMN IF NOT EXISTS "quoteAttributionDisplay" "QuoteAttributionDisplay" NOT NULL DEFAULT 'DISPLAYED';
 

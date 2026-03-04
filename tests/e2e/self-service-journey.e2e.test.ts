@@ -72,7 +72,10 @@ function createHarness() {
   const subscriptionsByStripeId = new Map<string, SubscriptionRecord>();
   const invitesByToken = new Map<string, InviteRecord>();
   const inviteIndexByOrgEmail = new Map<string, InviteRecord>();
-  const workosByEmail = new Map<string, { id: string; email: string; firstName: string | null; lastName: string | null }>();
+  const workosByEmail = new Map<
+    string,
+    { id: string; email: string; firstName: string | null; lastName: string | null }
+  >();
 
   let orgSeq = 1;
   let userSeq = 1;
@@ -165,8 +168,7 @@ function createHarness() {
           name: data.name ?? org.name,
           plan: data.plan ?? org.plan,
           stripeCustomerId: data.stripeCustomerId ?? org.stripeCustomerId,
-          trialEndsAt:
-            data.trialEndsAt !== undefined ? data.trialEndsAt : org.trialEndsAt,
+          trialEndsAt: data.trialEndsAt !== undefined ? data.trialEndsAt : org.trialEndsAt,
           billingChannel: data.billingChannel ?? org.billingChannel,
         };
         organizations.set(updated.id, updated);
@@ -409,19 +411,13 @@ function createHarness() {
           acceptedAt: data.acceptedAt ?? target.acceptedAt,
         };
         invitesByToken.set(updated.token, updated);
-        inviteIndexByOrgEmail.set(
-          `${updated.organizationId}:${updated.email}`,
-          updated
-        );
+        inviteIndexByOrgEmail.set(`${updated.organizationId}:${updated.email}`, updated);
         return updated;
       }),
       findMany: vi.fn(async () => []),
       findFirst: vi.fn(async ({ where }: any) => {
         for (const invite of invitesByToken.values()) {
-          if (
-            invite.id === where.id &&
-            invite.organizationId === where.organizationId
-          ) {
+          if (invite.id === where.id && invite.organizationId === where.organizationId) {
             return invite;
           }
         }
@@ -574,19 +570,17 @@ describe("self-service user journey", () => {
     const { request, close } = await requestServer(app);
     try {
       const signup = await request.post("/api/auth/signup").send({
-      email: "owner@acme.com",
-      password: "secret123",
-      name: "Owner User",
-      organizationName: "Acme Cloud",
-    });
+        email: "owner@acme.com",
+        password: "secret123",
+        name: "Owner User",
+        organizationName: "Acme Cloud",
+      });
       expect(signup.status).toBe(201);
       expect(signup.body.user.role).toBe("OWNER");
       expect(signup.body.sessionToken).toBeTruthy();
       const ownerSessionToken = signup.body.sessionToken as string;
 
-      const me = await request
-        .get("/api/auth/me")
-        .set("x-session-token", ownerSessionToken);
+      const me = await request.get("/api/auth/me").set("x-session-token", ownerSessionToken);
       expect(me.status).toBe(200);
       expect(me.body.user.email).toBe("owner@acme.com");
 
@@ -631,20 +625,21 @@ describe("self-service user journey", () => {
       expect(gatedBeforeWebhook.body.error).toBe("trial_expired");
 
       const stripeSubscriptionId = "sub_self_service_1";
-    stripe.__setSubscription(stripeSubscriptionId, {
-      metadata: { organizationId },
-      items: { data: [{ price: { id: "price_starter" } }] },
-    });
-    stripe.__setWebhookEvent({
-      type: "checkout.session.completed",
-      data: {
-        object: {
-          id: "cs_test_1",
-          subscription: stripeSubscriptionId,
-          metadata: { organizationId },
+      stripe.__setSubscription(stripeSubscriptionId, {
+        metadata: { organizationId },
+        items: { data: [{ price: { id: "price_starter" } }] },
+      });
+      stripe.__setWebhookEvent({
+        id: "evt_self_service_checkout",
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            id: "cs_test_1",
+            subscription: stripeSubscriptionId,
+            metadata: { organizationId },
+          },
         },
-      },
-    });
+      });
 
       const webhook = await request
         .post("/api/webhooks/stripe")
