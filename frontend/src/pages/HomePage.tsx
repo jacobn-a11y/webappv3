@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { request } from "../lib/api/http";
 import {
   getCustomerSuccessHealth,
   getRenewalValueReport,
-  getRoleAwareHome,
   getStoryLibrary,
   type StoryLibraryItem,
   type CustomerSuccessHealth,
@@ -12,6 +12,9 @@ import {
 } from "../lib/api";
 import { formatEnumLabel, formatNumber, badgeClass } from "../lib/format";
 import { STORY_TYPE_LABELS } from "../types/taxonomy";
+
+/** Data returned by the `/dashboard/home` endpoint. */
+type DashboardData = RoleAwareHome;
 
 const PERSONA_LABELS: Record<RoleAwareHome["persona"], string> = {
   REVOPS_ADMIN: "RevOps Admin",
@@ -97,82 +100,55 @@ function buildFirstValueActions(data: RoleAwareHome): FirstValueAction[] {
 }
 
 export function HomePage() {
-  const [data, setData] = useState<RoleAwareHome | null>(null);
-  const [csHealth, setCsHealth] = useState<CustomerSuccessHealth | null>(null);
-  const [renewal, setRenewal] = useState<RenewalValueReport | null>(null);
-  const [recentStories, setRecentStories] = useState<StoryLibraryItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  // Primary dashboard data
+  const {
+    data,
+    error,
+    isLoading,
+  } = useQuery({
+    queryKey: ["dashboard"],
+    queryFn: () => request<DashboardData>("/dashboard/home"),
+  });
 
-  useEffect(() => {
-    let cancelled = false;
+  // Conditional: fetch recent stories for admin/owner roles
+  const isAdminOrOwner =
+    data?.user.base_role === "OWNER" || data?.user.base_role === "ADMIN";
 
-    getRoleAwareHome()
-      .then((home) => {
-        if (cancelled) return;
-        setData(home);
-        if (home.user.base_role === "OWNER" || home.user.base_role === "ADMIN") {
-          void getStoryLibrary({ page: 1, limit: 5 })
-            .then((res) => {
-              if (cancelled) return;
-              setRecentStories(res.stories);
-            })
-            .catch(() => {
-              if (cancelled) return;
-              setRecentStories([]);
-            });
-        } else {
-          setRecentStories([]);
-        }
+  const { data: storiesData } = useQuery({
+    queryKey: ["dashboard", "recentStories"],
+    queryFn: () => getStoryLibrary({ page: 1, limit: 5 }),
+    enabled: !!data && isAdminOrOwner,
+  });
+  const recentStories: StoryLibraryItem[] = storiesData?.stories ?? [];
 
-        const needsHealthPanels =
-          home.persona === "EXEC" ||
-          home.persona === "CSM" ||
-          home.persona === "REVOPS_ADMIN" ||
-          home.persona === "SALES_MANAGER";
+  // Conditional: fetch health panels for specific personas
+  const needsHealthPanels =
+    data?.persona === "EXEC" ||
+    data?.persona === "CSM" ||
+    data?.persona === "REVOPS_ADMIN" ||
+    data?.persona === "SALES_MANAGER";
 
-        if (!needsHealthPanels) {
-          setCsHealth(null);
-          setRenewal(null);
-          return;
-        }
+  const { data: csHealth = null } = useQuery({
+    queryKey: ["dashboard", "csHealth"],
+    queryFn: () => getCustomerSuccessHealth(),
+    enabled: !!data && needsHealthPanels,
+  });
 
-        void Promise.allSettled([
-          getCustomerSuccessHealth(),
-          getRenewalValueReport(),
-        ]).then((results) => {
-          if (cancelled) return;
-          const [healthResult, renewalResult] = results;
-
-          if (healthResult.status === "fulfilled") {
-            setCsHealth(healthResult.value);
-          } else {
-            setCsHealth(null);
-          }
-
-          if (renewalResult.status === "fulfilled") {
-            setRenewal(renewalResult.value);
-          } else {
-            setRenewal(null);
-          }
-        });
-      })
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : "Failed to load home")
-      );
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: renewal = null } = useQuery({
+    queryKey: ["dashboard", "renewal"],
+    queryFn: () => getRenewalValueReport(),
+    enabled: !!data && needsHealthPanels,
+  });
 
   if (error) {
+    const errorMessage = error instanceof Error ? error.message : "Failed to load dashboard";
     return (
       <div className="state-view state-view--error" role="alert">
         <div className="state-view__icon">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
         </div>
         <div className="state-view__title">Failed to load dashboard</div>
-        <div className="state-view__message">{error}</div>
+        <div className="state-view__message">{errorMessage}</div>
         <div className="state-view__actions">
           <button className="btn btn--primary" onClick={() => window.location.reload()}>Retry</button>
           <Link className="btn btn--secondary" to="/accounts">Go to Accounts</Link>
@@ -182,7 +158,7 @@ export function HomePage() {
     );
   }
 
-  if (!data) {
+  if (isLoading || !data) {
     return (
       <div className="state-view" role="status" aria-live="polite">
         <div className="spinner" />

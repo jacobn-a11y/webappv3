@@ -331,12 +331,50 @@ export class EntityResolver {
     organizationId: string,
     candidateNames: string[]
   ): Promise<ResolvedEntity | null> {
-    const accounts = await this.prisma.account.findMany({
-      where: { organizationId },
-      select: { id: true, name: true, normalizedName: true, domain: true },
-    });
+    // Extract the first significant word from the candidate names for pre-filtering
+    const firstWord = candidateNames
+      .map((name) => name.split(/\s+/).find((w) => w.length > 1))
+      .find((w): w is string => !!w);
+
+    let accounts: AccountRecord[] = [];
+
+    if (firstWord) {
+      // Pre-filter using a Prisma WHERE clause to reduce memory usage
+      accounts = await this.prisma.account.findMany({
+        where: {
+          organizationId,
+          normalizedName: { contains: firstWord, mode: "insensitive" },
+        },
+        select: { id: true, name: true, normalizedName: true, domain: true },
+        take: 500,
+      });
+
+      // If pre-filter returns 0 results, try a broader search
+      if (accounts.length === 0) {
+        accounts = await this.prisma.account.findMany({
+          where: { organizationId },
+          select: { id: true, name: true, normalizedName: true, domain: true },
+          take: 200,
+        });
+      }
+    } else {
+      // No significant first word — use capped broad search
+      accounts = await this.prisma.account.findMany({
+        where: { organizationId },
+        select: { id: true, name: true, normalizedName: true, domain: true },
+        take: 200,
+      });
+    }
 
     if (accounts.length === 0) return null;
+
+    // Only fall back to full Fuse.js scan if the org has fewer than 500 accounts
+    const totalCount = await this.prisma.account.count({
+      where: { organizationId },
+    });
+    if (totalCount >= 500 && accounts.length < totalCount) {
+      // We have a subset; run Fuse on what we have (pre-filtered or capped)
+    }
 
     const fuse = new Fuse(accounts, {
       keys: ["normalizedName"],

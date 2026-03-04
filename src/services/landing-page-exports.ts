@@ -17,8 +17,23 @@ import type { StoryContextSettings } from "../types/story-generation.js";
 
 // ─── PDF Concurrency Limiter ─────────────────────────────────────────────────
 
-let activePdfJobs = 0;
 const MAX_PDF_CONCURRENCY = 3;
+
+class Semaphore {
+  private queue: (() => void)[] = [];
+  private active = 0;
+  constructor(private readonly max: number) {}
+  async acquire(): Promise<void> {
+    if (this.active < this.max) { this.active++; return; }
+    return new Promise<void>((resolve) => this.queue.push(resolve));
+  }
+  release(): void {
+    const next = this.queue.shift();
+    if (next) { next(); } else { this.active--; }
+  }
+}
+
+const pdfSemaphore = new Semaphore(MAX_PDF_CONCURRENCY);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -61,10 +76,7 @@ export class LandingPageExporter {
     const page = await this.getExportablePage(pageId);
     const html = renderLandingPageHtml(page);
 
-    while (activePdfJobs >= MAX_PDF_CONCURRENCY) {
-      await new Promise(r => setTimeout(r, 500));
-    }
-    activePdfJobs++;
+    await pdfSemaphore.acquire();
 
     try {
       const executablePath =
@@ -103,7 +115,7 @@ export class LandingPageExporter {
         await browser.close();
       }
     } finally {
-      activePdfJobs--;
+      pdfSemaphore.release();
     }
   }
 

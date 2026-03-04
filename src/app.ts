@@ -78,6 +78,7 @@ import {
 import { createApiUsageLogger } from "./middleware/api-usage-logger.js";
 import { requirePermission } from "./middleware/permissions.js";
 import { requireOrgSecurityPolicy } from "./middleware/security-policy.js";
+import { requireOrganization } from "./middleware/require-organization.js";
 
 // ─── Observability ───────────────────────────────────────────────────────────
 import { Sentry } from "./lib/sentry.js";
@@ -271,6 +272,7 @@ export function createApp(deps: AppDeps): express.Application {
 
   // ─── Authenticated Routes ──────────────────────────────────────────────
   app.use(requireAuth);
+  app.use(requireOrganization);
 
   const trialGate = createTrialGate(prisma, stripe);
 

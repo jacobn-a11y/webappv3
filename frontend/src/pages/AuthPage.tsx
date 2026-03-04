@@ -1,5 +1,8 @@
 import { useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import {
   getSsoAuthorizationUrl,
   loginWithPassword,
@@ -7,6 +10,11 @@ import {
 } from "../lib/api";
 
 type Mode = "login" | "signup";
+
+const authSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+});
 
 function resolveMode(search: string): Mode {
   const params = new URLSearchParams(search);
@@ -18,26 +26,32 @@ export function AuthPage() {
   const navigate = useNavigate();
   const mode = useMemo(() => resolveMode(location.search), [location.search]);
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const {
+    register,
+    handleSubmit,
+    formState: { errors: fieldErrors },
+  } = useForm<z.infer<typeof authSchema>>({
+    resolver: zodResolver(authSchema),
+  });
+
   const [name, setName] = useState("");
   const [organizationName, setOrganizationName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = async () => {
+  const submit = async (values: z.infer<typeof authSchema>) => {
     setSubmitting(true);
     setError(null);
     try {
       if (mode === "signup") {
         await signupWithPassword({
-          email,
-          password,
+          email: values.email,
+          password: values.password,
           name: name || undefined,
           organizationName: organizationName || undefined,
         });
       } else {
-        await loginWithPassword({ email, password });
+        await loginWithPassword({ email: values.email, password: values.password });
       }
       navigate("/", { replace: true });
     } catch (err) {
@@ -61,10 +75,9 @@ export function AuthPage() {
     }
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    void submit();
-  };
+  const onSubmit = handleSubmit((values) => {
+    void submit(values);
+  });
 
   return (
     <div className="auth-page">
@@ -84,18 +97,22 @@ export function AuthPage() {
           </div>
         )}
 
-        <form onSubmit={handleFormSubmit} noValidate>
+        <form onSubmit={onSubmit} noValidate>
           <label className="auth-card__field">
             Email
             <input
               type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              {...register("email")}
               autoComplete="email"
               required
-              aria-invalid={error ? true : undefined}
-              aria-describedby={error ? "auth-error" : undefined}
+              aria-invalid={fieldErrors.email ? true : undefined}
+              aria-describedby={fieldErrors.email ? "email-error" : error ? "auth-error" : undefined}
             />
+            {fieldErrors.email && (
+              <span className="auth-card__field-error" id="email-error" role="alert">
+                {fieldErrors.email.message}
+              </span>
+            )}
           </label>
 
           {mode === "signup" && (
@@ -123,13 +140,17 @@ export function AuthPage() {
             Password
             <input
               type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              {...register("password")}
               autoComplete={mode === "signup" ? "new-password" : "current-password"}
               required
-              aria-invalid={error ? true : undefined}
-              aria-describedby={error ? "auth-error" : undefined}
+              aria-invalid={fieldErrors.password ? true : undefined}
+              aria-describedby={fieldErrors.password ? "password-error" : error ? "auth-error" : undefined}
             />
+            {fieldErrors.password && (
+              <span className="auth-card__field-error" id="password-error" role="alert">
+                {fieldErrors.password.message}
+              </span>
+            )}
           </label>
 
           <button type="submit" className="btn btn--primary auth-card__submit" disabled={submitting}>

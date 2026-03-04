@@ -779,14 +779,10 @@ export class SyncEngine {
         { attempts: 4, baseDelayMs: 1000 }
       );
 
-      const PAGE_CONCURRENCY = 10;
-      for (let i = 0; i < result.data.length; i += PAGE_CONCURRENCY) {
-        const batch = result.data.slice(i, i + PAGE_CONCURRENCY);
-        await Promise.all(
-          batch.map((account) =>
-            this.persistAccount(config.organizationId, account)
-          )
-        );
+      const BATCH_SIZE = 50;
+      for (let i = 0; i < result.data.length; i += BATCH_SIZE) {
+        const batch = result.data.slice(i, i + BATCH_SIZE);
+        await this.persistAccountBatch(config.organizationId, batch);
         total += batch.length;
       }
 
@@ -794,6 +790,102 @@ export class SyncEngine {
       hasMore = result.hasMore && !!cursor;
     }
     return total;
+  }
+
+  private async persistAccountBatch(
+    organizationId: string,
+    accounts: NormalizedAccount[]
+  ): Promise<void> {
+    const externalIds = accounts.map((a) => a.externalId);
+
+    // Batch lookup: find all existing accounts by externalId in one query
+    const existingAccounts = await this.prisma.account.findMany({
+      where: { organizationId, salesforceId: { in: externalIds } },
+    });
+    const existingByExternalId = new Map(
+      existingAccounts.map((a) => [a.salesforceId, a])
+    );
+
+    const toUpdate: { account: NormalizedAccount; existingId: string }[] = [];
+    const toCreate: NormalizedAccount[] = [];
+    const toConflictCheck: NormalizedAccount[] = [];
+
+    for (const account of accounts) {
+      const existing = existingByExternalId.get(account.externalId);
+      if (existing) {
+        toUpdate.push({ account, existingId: existing.id });
+      } else {
+        toConflictCheck.push(account);
+      }
+    }
+
+    // Batch update existing accounts
+    await Promise.all(
+      toUpdate.map(({ account, existingId }) => {
+        const normalized = normalizeCompanyName(account.name);
+        return this.prisma.account.update({
+          where: { id: existingId },
+          data: {
+            name: account.name,
+            normalizedName: normalized,
+            domain: account.domain ?? undefined,
+            industry: account.industry ?? undefined,
+            employeeCount: account.employeeCount ?? undefined,
+            annualRevenue: account.annualRevenue ?? undefined,
+          },
+        });
+      })
+    );
+
+    // For new accounts, check for conflicts individually (requires per-record logic)
+    for (const account of toConflictCheck) {
+      const normalized = normalizeCompanyName(account.name);
+      const potentialConflict = await this.prisma.account.findFirst({
+        where: {
+          organizationId,
+          OR: [
+            { normalizedName: normalized },
+            ...(account.domain ? [{ domain: account.domain }] : []),
+          ],
+          salesforceId: { not: account.externalId },
+        },
+      });
+
+      if (potentialConflict) {
+        await this.queueMergeConflictReview({
+          organizationId,
+          targetType: "account",
+          targetId: potentialConflict.id,
+          requestPayload: {
+            conflict_type: "ACCOUNT_EXTERNAL_ID_COLLISION",
+            existing_account_id: potentialConflict.id,
+            existing_salesforce_id: potentialConflict.salesforceId,
+            incoming_external_id: account.externalId,
+            incoming_name: account.name,
+            incoming_domain: account.domain,
+          },
+        });
+      } else {
+        toCreate.push(account);
+      }
+    }
+
+    // Batch create new accounts using createMany with skipDuplicates
+    if (toCreate.length > 0) {
+      await this.prisma.account.createMany({
+        data: toCreate.map((account) => ({
+          organizationId,
+          name: account.name,
+          normalizedName: normalizeCompanyName(account.name),
+          domain: account.domain,
+          salesforceId: account.externalId,
+          industry: account.industry,
+          employeeCount: account.employeeCount,
+          annualRevenue: account.annualRevenue,
+        })),
+        skipDuplicates: true,
+      });
+    }
   }
 
   private async persistAccount(
@@ -879,14 +971,10 @@ export class SyncEngine {
         { attempts: 4, baseDelayMs: 1000 }
       );
 
-      const PAGE_CONCURRENCY = 10;
-      for (let i = 0; i < result.data.length; i += PAGE_CONCURRENCY) {
-        const batch = result.data.slice(i, i + PAGE_CONCURRENCY);
-        await Promise.all(
-          batch.map((contact) =>
-            this.persistContact(config.organizationId, contact)
-          )
-        );
+      const BATCH_SIZE = 50;
+      for (let i = 0; i < result.data.length; i += BATCH_SIZE) {
+        const batch = result.data.slice(i, i + BATCH_SIZE);
+        await this.persistContactBatch(config.organizationId, batch);
         total += batch.length;
       }
 
@@ -894,6 +982,146 @@ export class SyncEngine {
       hasMore = result.hasMore && !!cursor;
     }
     return total;
+  }
+
+  private async persistContactBatch(
+    organizationId: string,
+    contacts: NormalizedContact[]
+  ): Promise<void> {
+    // Filter to contacts with valid emails and domains
+    const validContacts = contacts
+      .filter((c) => c.email)
+      .map((c) => ({ contact: c, domain: extractEmailDomain(c.email!) }))
+      .filter((c): c is { contact: NormalizedContact; domain: string } => !!c.domain);
+
+    if (validContacts.length === 0) return;
+
+    // Batch resolve accounts: collect all external IDs and domains for lookup
+    const accountExternalIds = validContacts
+      .map((c) => c.contact.accountExternalId)
+      .filter((id): id is string => !!id);
+    const contactDomains = [...new Set(validContacts.map((c) => c.domain))];
+
+    const [accountsByExternalId, accountsByDomain] = await Promise.all([
+      accountExternalIds.length > 0
+        ? this.prisma.account.findMany({
+            where: { organizationId, salesforceId: { in: accountExternalIds } },
+          })
+        : Promise.resolve([]),
+      this.prisma.account.findMany({
+        where: { organizationId, domain: { in: contactDomains } },
+      }),
+    ]);
+
+    const externalIdMap = new Map(accountsByExternalId.map((a) => [a.salesforceId, a]));
+    const domainMap = new Map(accountsByDomain.map((a) => [a.domain, a]));
+
+    // Batch collision detection: find all existing contacts by email across org
+    const allEmails = validContacts.map((c) => c.contact.email!.toLowerCase());
+    const existingContacts = await this.prisma.contact.findMany({
+      where: {
+        email: { in: allEmails },
+        account: { organizationId },
+      },
+      select: { id: true, email: true, accountId: true, salesforceId: true },
+    });
+    const existingContactByEmail = new Map(
+      existingContacts.map((c) => [c.email, c])
+    );
+
+    const toCreate: Array<{
+      accountId: string;
+      email: string;
+      emailDomain: string;
+      name: string | null;
+      title: string | null;
+      phone: string | null;
+      salesforceId: string | null;
+    }> = [];
+
+    const upsertOps: Promise<unknown>[] = [];
+
+    for (const { contact, domain } of validContacts) {
+      // Resolve account
+      let account = contact.accountExternalId
+        ? externalIdMap.get(contact.accountExternalId) ?? null
+        : null;
+      if (!account) {
+        account = domainMap.get(domain) ?? null;
+      }
+      if (!account) continue;
+
+      const email = contact.email!.toLowerCase();
+      const existingElsewhere = existingContactByEmail.get(email);
+
+      // Check for cross-account collision
+      if (existingElsewhere && existingElsewhere.accountId !== account.id) {
+        await this.queueMergeConflictReview({
+          organizationId,
+          targetType: "contact",
+          targetId: existingElsewhere.id,
+          requestPayload: {
+            conflict_type: "CONTACT_EMAIL_COLLISION",
+            existing_contact_id: existingElsewhere.id,
+            existing_account_id: existingElsewhere.accountId,
+            incoming_account_id: account.id,
+            incoming_external_id: contact.externalId,
+            email,
+          },
+        });
+        continue;
+      }
+
+      // If existing contact belongs to same account, upsert to update
+      if (existingElsewhere && existingElsewhere.accountId === account.id) {
+        upsertOps.push(
+          this.prisma.contact.upsert({
+            where: {
+              accountId_email: { accountId: account.id, email },
+            },
+            create: {
+              accountId: account.id,
+              email,
+              emailDomain: domain,
+              name: contact.name,
+              title: contact.title,
+              phone: contact.phone,
+              salesforceId: contact.externalId,
+            },
+            update: {
+              name: contact.name ?? undefined,
+              title: contact.title ?? undefined,
+              phone: contact.phone ?? undefined,
+              salesforceId: contact.externalId,
+            },
+          })
+        );
+      } else {
+        // New contact — collect for batch createMany
+        toCreate.push({
+          accountId: account.id,
+          email,
+          emailDomain: domain,
+          name: contact.name,
+          title: contact.title,
+          phone: contact.phone,
+          salesforceId: contact.externalId,
+        });
+      }
+    }
+
+    // Execute upserts in parallel
+    if (upsertOps.length > 0) {
+      await Promise.all(upsertOps);
+    }
+
+    // Batch create new contacts
+    if (toCreate.length > 0) {
+      await this.prisma.contact.createMany({
+        data: toCreate,
+        skipDuplicates: true,
+      });
+    }
   }
 
   private async persistContact(

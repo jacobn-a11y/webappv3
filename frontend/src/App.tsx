@@ -1,5 +1,7 @@
 import { BrowserRouter, useLocation } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/Toast";
 import { Shell } from "./app/Shell";
@@ -7,6 +9,7 @@ import { ensureAccessibleFormLabels } from "./app/Sidebar";
 import { PublicRoutes } from "./app/routes";
 import { useAuth } from "./hooks/useAuth";
 import { useI18n } from "./i18n";
+import { queryClient } from "./lib/queryClient";
 
 // Re-export for backward compatibility (used by tests)
 export { Sidebar } from "./app/Sidebar";
@@ -72,10 +75,13 @@ export default function App() {
   }
 
   return (
-    <BrowserRouter>
-      <ToastProvider>
-        {user ? <Shell user={user} onLogout={handleLogout} /> : <PublicApp />}
-      </ToastProvider>
-    </BrowserRouter>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <ToastProvider>
+          {user ? <Shell user={user} onLogout={handleLogout} /> : <PublicApp />}
+        </ToastProvider>
+      </BrowserRouter>
+      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+    </QueryClientProvider>
   );
 }

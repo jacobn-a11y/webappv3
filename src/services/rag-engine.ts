@@ -18,12 +18,30 @@ import OpenAI from "openai";
 import { Pinecone } from "@pinecone-database/pinecone";
 import type { PrismaClient } from "@prisma/client";
 import crypto from "crypto";
+import { createClient, type RedisClientType } from "redis";
 import { resolveOperationRuntimePolicy } from "./ai-operation-policy.js";
 import {
   ensureGroundedCitations,
   filterGroundedSources,
 } from "./rag-quality-guardrails.js";
 import logger from "../lib/logger.js";
+
+// ─── Redis Singleton ─────────────────────────────────────────────────────────
+
+let redisClient: RedisClientType | null = null;
+
+async function getRedisClient(): Promise<RedisClientType | null> {
+  if (redisClient) return redisClient;
+  const url = process.env.REDIS_URL;
+  if (!url) return null;
+  try {
+    redisClient = createClient({ url }) as RedisClientType;
+    await redisClient.connect();
+    return redisClient;
+  } catch {
+    return null;
+  }
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -125,6 +143,12 @@ export class RAGEngine {
   async query(input: RAGQuery): Promise<RAGResponse> {
     const topK = input.topK ?? 8;
     const cacheKey = this.buildQueryCacheKey(input, topK);
+    const redisKey = `rag:query:${cacheKey}`;
+
+    // Try Redis first, fall back to in-memory
+    const redisCached = await this.getRedisCache<RAGResponse>(redisKey);
+    if (redisCached) return redisCached;
+
     const cached = this.getCacheEntry(this.queryCache, cacheKey);
     if (cached) {
       return cached;
@@ -165,6 +189,7 @@ export class RAGEngine {
         sources: [],
         tokensUsed: 0,
       };
+      await this.setRedisCache(redisKey, empty);
       this.setCacheEntry(this.queryCache, cacheKey, empty);
       return empty;
     }
@@ -211,6 +236,7 @@ ${contextBlock}`,
     const tokensUsed = response.usage?.total_tokens ?? 0;
 
     const result: RAGResponse = { answer, sources, tokensUsed };
+    await this.setRedisCache(redisKey, result);
     this.setCacheEntry(this.queryCache, cacheKey, result);
     return result;
   }
@@ -223,6 +249,12 @@ ${contextBlock}`,
   async chat(input: RAGChatQuery): Promise<RAGChatResponse> {
     const topK = input.topK ?? 8;
     const cacheKey = this.buildChatCacheKey(input, topK);
+    const redisKey = `rag:chat:${cacheKey}`;
+
+    // Try Redis first, fall back to in-memory
+    const redisCached = await this.getRedisCache<RAGChatResponse>(redisKey);
+    if (redisCached) return redisCached;
+
     const cached = this.getCacheEntry(this.chatCache, cacheKey);
     if (cached) {
       return cached;
@@ -265,6 +297,7 @@ ${contextBlock}`,
         sources: [],
         tokensUsed: 0,
       };
+      await this.setRedisCache(redisKey, empty);
       this.setCacheEntry(this.chatCache, cacheKey, empty);
       return empty;
     }
@@ -321,6 +354,7 @@ ${contextBlock}`,
     const tokensUsed = response.usage?.total_tokens ?? 0;
 
     const result: RAGChatResponse = { answer, sources, tokensUsed };
+    await this.setRedisCache(redisKey, result);
     this.setCacheEntry(this.chatCache, cacheKey, result);
     return result;
   }
@@ -521,6 +555,30 @@ ${contextBlock}`,
       normalizeArrayKey(input.funnelStages),
       normalizeHistoryKey(input.history)
     );
+  }
+
+  private async getRedisCache<T>(redisKey: string): Promise<T | null> {
+    try {
+      const redis = await getRedisClient();
+      if (!redis) return null;
+      const raw = await redis.get(redisKey);
+      if (!raw) return null;
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  private async setRedisCache<T>(redisKey: string, value: T): Promise<boolean> {
+    try {
+      const redis = await getRedisClient();
+      if (!redis) return false;
+      const ttlSeconds = Math.max(1, Math.ceil(this.cacheTtlMs / 1000));
+      await redis.set(redisKey, JSON.stringify(value), { EX: ttlSeconds });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private getCacheEntry<T>(
