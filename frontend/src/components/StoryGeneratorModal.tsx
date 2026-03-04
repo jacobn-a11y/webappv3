@@ -63,7 +63,9 @@ export function StoryGeneratorModal({
     stream: streamedMarkdown,
   } = useStoryGeneration(onClose);
 
-  // ── Telemetry ───────────────────────────────────────────────────────────
+  // ── Telemetry (ref-based to break circular dep with form state) ──────
+
+  const telemetryContextRef = useRef({ stageLabel: "Evaluation", visibilityMode: "ANONYMOUS" as string });
 
   const trackSellerEvent = useCallback(
     (
@@ -81,8 +83,8 @@ export function StoryGeneratorModal({
         flow_id: flowIdRef.current,
         account_id: accountId,
         story_id: metadata?.story_id,
-        stage_preset: form.stageLabel,
-        visibility_mode: form.visibilityMode,
+        stage_preset: telemetryContextRef.current.stageLabel,
+        visibility_mode: telemetryContextRef.current.visibilityMode,
         step: metadata?.step,
         action_name: metadata?.action_name,
         duration_ms: metadata?.duration_ms,
@@ -91,8 +93,6 @@ export function StoryGeneratorModal({
         // Telemetry should never block story generation UX.
       });
     },
-    // form.stageLabel and form.visibilityMode are stable refs via the hook
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [accountId],
   );
 
@@ -107,6 +107,10 @@ export function StoryGeneratorModal({
     runStoryGeneration,
     trackSellerEvent,
   });
+
+  // Keep telemetry context in sync with form state.
+  telemetryContextRef.current.stageLabel = form.stageLabel;
+  telemetryContextRef.current.visibilityMode = form.visibilityMode;
 
   // ── Onboarding state ────────────────────────────────────────────────────
 
