@@ -12,18 +12,9 @@
 
 import type { Request, Response, NextFunction } from "express";
 import Stripe from "stripe";
-import type {
-  PrismaClient,
-  Plan,
-  SubscriptionStatus,
-  UserRole,
-} from "@prisma/client";
+import type { PrismaClient, Plan, SubscriptionStatus, UserRole } from "@prisma/client";
 import { z } from "zod";
-import {
-  PLAN_CONFIGS,
-  getStripePriceId,
-  getPlanByPriceId,
-} from "../config/stripe-plans.js";
+import { PLAN_CONFIGS, getStripePriceId, getPlanByPriceId } from "../config/stripe-plans.js";
 import { buildPublicAppUrl } from "../lib/public-app-url.js";
 import logger from "../lib/logger.js";
 import { markWebhookEventIfNew } from "../lib/webhook-idempotency.js";
@@ -54,11 +45,7 @@ export function isBillingEnabled(): boolean {
  * requests pass through without billing checks.
  */
 export function createTrialGate(prisma: PrismaClient, _stripe: Stripe) {
-  return async (
-    req: AuthenticatedRequest,
-    res: Response,
-    next: NextFunction
-  ) => {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     // Billing kill switch: when disabled, skip all billing enforcement
     if (!isBillingEnabled()) {
       next();
@@ -79,11 +66,6 @@ export function createTrialGate(prisma: PrismaClient, _stripe: Stripe) {
           plan: true,
           trialEndsAt: true,
           billingChannel: true,
-          subscriptions: {
-            orderBy: [{ currentPeriodEnd: "desc" }, { createdAt: "desc" }],
-            take: 1,
-            select: { status: true },
-          },
         },
       });
 
@@ -99,7 +81,11 @@ export function createTrialGate(prisma: PrismaClient, _stripe: Stripe) {
           return;
         }
 
-        const latestSubscription = org.subscriptions[0];
+        const latestSubscription = await prisma.subscription.findFirst({
+          where: { organizationId: orgId },
+          orderBy: [{ currentPeriodEnd: "desc" }, { createdAt: "desc" }],
+          select: { status: true },
+        });
 
         if (!latestSubscription) {
           res.status(402).json({
@@ -294,7 +280,8 @@ export function createPortalHandler(prisma: PrismaClient, stripe: Stripe) {
     if (!org.stripeCustomerId) {
       res.status(400).json({
         error: "No billing account",
-        message: "Your organization does not have an active billing account. Subscribe to a plan first.",
+        message:
+          "Your organization does not have an active billing account. Subscribe to a plan first.",
       });
       return;
     }
@@ -344,14 +331,11 @@ export async function reportUsageToStripe(
   if (!meteredItem) return null;
 
   // Report usage (in minutes, rounded up)
-  const usageRecord = await stripe.subscriptionItems.createUsageRecord(
-    meteredItem.id,
-    {
-      quantity: Math.ceil(transcriptMinutes),
-      timestamp,
-      action: "increment",
-    }
-  );
+  const usageRecord = await stripe.subscriptionItems.createUsageRecord(meteredItem.id, {
+    quantity: Math.ceil(transcriptMinutes),
+    timestamp,
+    action: "increment",
+  });
 
   return usageRecord.id;
 }
@@ -361,9 +345,7 @@ export async function reportUsageToStripe(
 /**
  * Maps a Stripe subscription status string to our SubscriptionStatus enum.
  */
-function mapStripeStatus(
-  status: Stripe.Subscription.Status
-): SubscriptionStatus {
+function mapStripeStatus(status: Stripe.Subscription.Status): SubscriptionStatus {
   const statusMap: Record<string, SubscriptionStatus> = {
     active: "ACTIVE",
     past_due: "PAST_DUE",
@@ -385,10 +367,7 @@ function mapStripeStatus(
  *  - customer.subscription.updated → sync plan/status changes
  *  - customer.subscription.deleted → cancel and revert to free trial
  */
-export function createStripeWebhookHandler(
-  prisma: PrismaClient,
-  stripe: Stripe
-) {
+export function createStripeWebhookHandler(prisma: PrismaClient, stripe: Stripe) {
   return async (req: Request, res: Response) => {
     const sig = req.headers["stripe-signature"] as string;
     const webhookSecrets = resolveWebhookSecrets(
@@ -423,11 +402,7 @@ export function createStripeWebhookHandler(
           const session = event.data.object as Stripe.Checkout.Session;
           const orgId = session.subscription
             ? (session.metadata?.organizationId ??
-               (await resolveOrgFromSubscription(
-                 stripe,
-                 prisma,
-                 session.subscription as string
-               )))
+              (await resolveOrgFromSubscription(stripe, prisma, session.subscription as string)))
             : session.metadata?.organizationId;
 
           if (!orgId || !session.subscription) break;
@@ -438,9 +413,7 @@ export function createStripeWebhookHandler(
           );
 
           const priceId = stripeSubscription.items.data[0]?.price.id;
-          const plan: Plan = priceId
-            ? (getPlanByPriceId(priceId) ?? "STARTER")
-            : "STARTER";
+          const plan: Plan = priceId ? (getPlanByPriceId(priceId) ?? "STARTER") : "STARTER";
 
           // Upsert local subscription record
           await prisma.subscription.upsert({
@@ -451,21 +424,13 @@ export function createStripeWebhookHandler(
               pricingModel: "METERED",
               billingChannel: "SELF_SERVE",
               status: mapStripeStatus(stripeSubscription.status),
-              currentPeriodStart: new Date(
-                stripeSubscription.current_period_start * 1000
-              ),
-              currentPeriodEnd: new Date(
-                stripeSubscription.current_period_end * 1000
-              ),
+              currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
+              currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
             },
             update: {
               status: mapStripeStatus(stripeSubscription.status),
-              currentPeriodStart: new Date(
-                stripeSubscription.current_period_start * 1000
-              ),
-              currentPeriodEnd: new Date(
-                stripeSubscription.current_period_end * 1000
-              ),
+              currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
+              currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
             },
           });
 
@@ -505,12 +470,8 @@ export function createStripeWebhookHandler(
               where: { stripeSubscriptionId: subscriptionId },
               data: {
                 status: "ACTIVE",
-                currentPeriodStart: new Date(
-                  stripeSub.current_period_start * 1000
-                ),
-                currentPeriodEnd: new Date(
-                  stripeSub.current_period_end * 1000
-                ),
+                currentPeriodStart: new Date(stripeSub.current_period_start * 1000),
+                currentPeriodEnd: new Date(stripeSub.current_period_end * 1000),
               },
             });
 
@@ -561,12 +522,8 @@ export function createStripeWebhookHandler(
               where: { stripeSubscriptionId: subscriptionId },
               data: {
                 status: mapStripeStatus(stripeSub.status),
-                currentPeriodStart: new Date(
-                  stripeSub.current_period_start * 1000
-                ),
-                currentPeriodEnd: new Date(
-                  stripeSub.current_period_end * 1000
-                ),
+                currentPeriodStart: new Date(stripeSub.current_period_start * 1000),
+                currentPeriodEnd: new Date(stripeSub.current_period_end * 1000),
               },
             });
           }
@@ -580,8 +537,7 @@ export function createStripeWebhookHandler(
 
         // ── Subscription updated ────────────────────────────────────────
         case "customer.subscription.updated": {
-          const incomingSubscription = event.data
-            .object as Stripe.Subscription;
+          const incomingSubscription = event.data.object as Stripe.Subscription;
           const existing = await prisma.subscription.findUnique({
             where: { stripeSubscriptionId: incomingSubscription.id },
             select: { updatedAt: true },
@@ -595,22 +551,15 @@ export function createStripeWebhookHandler(
             break;
           }
 
-          const stripeSubscription = await stripe.subscriptions.retrieve(
-            incomingSubscription.id
-          );
+          const stripeSubscription = await stripe.subscriptions.retrieve(incomingSubscription.id);
           const orgId =
             stripeSubscription.metadata.organizationId ??
-            (await resolveOrgFromCustomer(
-              prisma,
-              stripeSubscription.customer as string
-            ));
+            (await resolveOrgFromCustomer(prisma, stripeSubscription.customer as string));
 
           if (!orgId) break;
 
           const priceId = stripeSubscription.items.data[0]?.price.id;
-          const plan: Plan = priceId
-            ? (getPlanByPriceId(priceId) ?? "STARTER")
-            : "STARTER";
+          const plan: Plan = priceId ? (getPlanByPriceId(priceId) ?? "STARTER") : "STARTER";
           const status = mapStripeStatus(stripeSubscription.status);
 
           await prisma.subscription.upsert({
@@ -621,24 +570,16 @@ export function createStripeWebhookHandler(
               pricingModel: "METERED",
               billingChannel: "SELF_SERVE",
               status,
-              currentPeriodStart: new Date(
-                stripeSubscription.current_period_start * 1000
-              ),
-              currentPeriodEnd: new Date(
-                stripeSubscription.current_period_end * 1000
-              ),
+              currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
+              currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
               canceledAt: stripeSubscription.canceled_at
                 ? new Date(stripeSubscription.canceled_at * 1000)
                 : null,
             },
             update: {
               status,
-              currentPeriodStart: new Date(
-                stripeSubscription.current_period_start * 1000
-              ),
-              currentPeriodEnd: new Date(
-                stripeSubscription.current_period_end * 1000
-              ),
+              currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
+              currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
               canceledAt: stripeSubscription.canceled_at
                 ? new Date(stripeSubscription.canceled_at * 1000)
                 : null,
@@ -663,8 +604,7 @@ export function createStripeWebhookHandler(
 
         // ── Subscription deleted/canceled ───────────────────────────────
         case "customer.subscription.deleted": {
-          const stripeSubscription = event.data
-            .object as Stripe.Subscription;
+          const stripeSubscription = event.data.object as Stripe.Subscription;
           const existing = await prisma.subscription.findUnique({
             where: { stripeSubscriptionId: stripeSubscription.id },
             select: { updatedAt: true },
@@ -679,10 +619,7 @@ export function createStripeWebhookHandler(
           }
           const orgId =
             stripeSubscription.metadata.organizationId ??
-            (await resolveOrgFromCustomer(
-              prisma,
-              stripeSubscription.customer as string
-            ));
+            (await resolveOrgFromCustomer(prisma, stripeSubscription.customer as string));
 
           if (!orgId) break;
 

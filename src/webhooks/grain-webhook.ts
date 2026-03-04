@@ -23,10 +23,7 @@ import type { GrainCredentials } from "../integrations/types.js";
 import logger from "../lib/logger.js";
 import { enqueueProcessCallJob } from "../lib/queue-policy.js";
 import { markWebhookEventIfNew } from "../lib/webhook-idempotency.js";
-import {
-  pickFirstHeaderValue,
-  validateWebhookTimestamp,
-} from "../lib/webhook-security.js";
+import { pickFirstHeaderValue, validateWebhookTimestamp } from "../lib/webhook-security.js";
 
 // ─── Grain Webhook Payload Types ────────────────────────────────────────────
 
@@ -43,15 +40,8 @@ interface GrainWebhookPayload {
 
 // ─── Webhook Signature Verification ─────────────────────────────────────────
 
-function verifyGrainSignature(
-  payload: string,
-  signature: string,
-  secret: string
-): boolean {
-  const expected = crypto
-    .createHmac("sha256", secret)
-    .update(payload)
-    .digest("hex");
+function verifyGrainSignature(payload: string, signature: string, secret: string): boolean {
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex");
   const sigBuffer = Buffer.from(signature, "utf8");
   const expectedBuffer = Buffer.from(expected, "utf8");
   if (sigBuffer.length !== expectedBuffer.length) {
@@ -62,10 +52,7 @@ function verifyGrainSignature(
 
 // ─── Handler Factory ────────────────────────────────────────────────────────
 
-export function createGrainWebhookHandler(deps: {
-  prisma: PrismaClient;
-  processingQueue: Queue;
-}) {
+export function createGrainWebhookHandler(deps: { prisma: PrismaClient; processingQueue: Queue }) {
   const { prisma, processingQueue } = deps;
   const grainProvider = new GrainProvider();
 
@@ -88,10 +75,12 @@ export function createGrainWebhookHandler(deps: {
       return;
     }
 
-    const validConfigs = grainConfigs.filter((c: { webhookSecret: string | null }) => c.webhookSecret);
+    const validConfigs = grainConfigs.filter(
+      (c: { webhookSecret: string | null }) => c.webhookSecret
+    );
     if (validConfigs.length === 0) {
       res.status(500).json({
-        error: "No active Grain integrations with configured webhookSecret",
+        error: "All active Grain integrations must configure webhookSecret",
       });
       return;
     }
@@ -102,11 +91,11 @@ export function createGrainWebhookHandler(deps: {
 
     // Try to match signature to a specific org's webhook secret
     type GrainConfig = (typeof validConfigs)[number];
-    const matchedConfig = validConfigs.find(
-      (c: GrainConfig) =>
-        c.webhookSecret &&
-        verifyGrainSignature(rawBody, signature, c.webhookSecret)
-    ) ?? null;
+    const matchedConfig =
+      validConfigs.find(
+        (c: GrainConfig) =>
+          c.webhookSecret && verifyGrainSignature(rawBody, signature, c.webhookSecret)
+      ) ?? null;
     if (!matchedConfig) {
       res.status(401).json({ error: "Invalid webhook signature" });
       return;
@@ -120,7 +109,8 @@ export function createGrainWebhookHandler(deps: {
       return;
     }
 
-    const credentials = matchedConfig.credentials as unknown as GrainCredentials;
+    const rawCredentials: unknown = matchedConfig.credentials;
+    const credentials = rawCredentials as GrainCredentials;
     const organizationId = matchedConfig.organizationId;
     const timestampCandidate =
       payload.timestamp ??
@@ -145,10 +135,7 @@ export function createGrainWebhookHandler(deps: {
     }
 
     try {
-      if (
-        payload.event === "recording.completed" ||
-        payload.event === "transcript.ready"
-      ) {
+      if (payload.event === "recording.completed" || payload.event === "transcript.ready") {
         if (!payload.recording_id) {
           res.json({
             received: true,

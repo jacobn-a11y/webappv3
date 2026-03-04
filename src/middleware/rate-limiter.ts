@@ -75,39 +75,7 @@ export function createRateLimiter(options: RateLimiterOptions) {
 
   const ttlSeconds = Math.max(1, Math.ceil(windowMs / 1000));
 
-  return async (req: Request, res: Response, next: NextFunction) => {
-    const ip = req.ip ?? req.socket.remoteAddress ?? "unknown";
-
-    const redis = await getRedisClient();
-
-    if (redis) {
-      const redisKey = `ratelimit:${name ?? "default"}:${ip}`;
-      try {
-        const count = await redis.incr(redisKey);
-        if (count === 1) {
-          await redis.expire(redisKey, ttlSeconds);
-        }
-
-        if (count > maxRequests) {
-          const ttl = await redis.ttl(redisKey);
-          const retryAfter = ttl > 0 ? ttl : ttlSeconds;
-          res.setHeader("Retry-After", retryAfter.toString());
-          res.status(429).json({
-            error: "rate_limit_exceeded",
-            message: message ?? "Too many requests. Please try again later.",
-            retry_after_seconds: retryAfter,
-          });
-          return;
-        }
-
-        next();
-        return;
-      } catch {
-        // Redis error — fall through to in-memory
-      }
-    }
-
-    // In-memory fallback
+  function inMemoryCheck(ip: string, res: Response, next: NextFunction) {
     const now = Date.now();
     const entry = store.get(ip);
 
@@ -131,6 +99,49 @@ export function createRateLimiter(options: RateLimiterOptions) {
     }
 
     next();
+  }
+
+  return (req: Request, res: Response, next: NextFunction) => {
+    const ip = req.ip ?? req.socket.remoteAddress ?? "unknown";
+
+    // Synchronous fast-path when Redis is not configured or known-unavailable
+    if (redisUnavailable || !process.env.REDIS_URL) {
+      inMemoryCheck(ip, res, next);
+      return;
+    }
+
+    getRedisClient()
+      .then((redis) => {
+        if (!redis) {
+          inMemoryCheck(ip, res, next);
+          return;
+        }
+
+        const redisKey = `ratelimit:${name ?? "default"}:${ip}`;
+        return redis.incr(redisKey).then((count) => {
+          if (count === 1) {
+            redis.expire(redisKey, ttlSeconds);
+          }
+
+          if (count > maxRequests) {
+            return redis.ttl(redisKey).then((ttl) => {
+              const retryAfter = ttl > 0 ? ttl : ttlSeconds;
+              res.setHeader("Retry-After", retryAfter.toString());
+              res.status(429).json({
+                error: "rate_limit_exceeded",
+                message: message ?? "Too many requests. Please try again later.",
+                retry_after_seconds: retryAfter,
+              });
+            });
+          }
+
+          next();
+        });
+      })
+      .catch(() => {
+        // Redis error — fall through to in-memory
+        inMemoryCheck(ip, res, next);
+      });
   };
 }
 

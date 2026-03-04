@@ -2,7 +2,13 @@ import { Router, type Response } from "express";
 import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
 import type { AuthenticatedRequest } from "../types/authenticated-request.js";
-import { sendSuccess, sendCreated, sendUnauthorized, sendBadRequest } from "./_shared/responses.js";
+import {
+  sendSuccess,
+  sendCreated,
+  sendUnauthorized,
+  sendBadRequest,
+  sendError,
+} from "./_shared/responses.js";
 
 const ListCommentsQuerySchema = z.object({
   target: z.enum(["story", "page"]).default("story"),
@@ -110,9 +116,8 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
         })),
       });
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to load comment thread";
-      sendBadRequest(res, message);
+      const message = err instanceof Error ? err.message : "Failed to load comment thread";
+      sendError(res, 400, message);
     }
   });
 
@@ -176,8 +181,7 @@ export function createStoryCommentRoutes(prisma: PrismaClient): Router {
           : null,
       });
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to post comment";
+      const message = err instanceof Error ? err.message : "Failed to post comment";
       sendBadRequest(res, message);
     }
   });

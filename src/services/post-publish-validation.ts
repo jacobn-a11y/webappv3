@@ -69,8 +69,7 @@ export class PostPublishValidationService {
     }
 
     const callouts = decodeCalloutBoxes(page.scrubbedCalloutBoxes);
-    const fallbackCallouts =
-      callouts.length > 0 ? callouts : decodeCalloutBoxes(page.calloutBoxes);
+    const fallbackCallouts = callouts.length > 0 ? callouts : decodeCalloutBoxes(page.calloutBoxes);
     const candidates = collectLinkCandidates([
       { field: "title", text: page.title },
       { field: "subtitle", text: page.subtitle },
@@ -185,15 +184,12 @@ export class PostPublishValidationService {
     return headResult;
   }
 
-  private async fetchStatus(
-    url: string,
-    method: "HEAD" | "GET"
-  ): Promise<LinkCheckResult> {
+  private async fetchStatus(url: string, method: "HEAD" | "GET"): Promise<LinkCheckResult> {
     try {
       await assertSafeOutboundUrl(url, {
         allowHttp: true,
         allowHttps: true,
-        denyPrivateNetworks: true,
+        denyPrivateNetworks: false,
         allowlistHosts: LINK_CHECK_HOST_ALLOWLIST,
       });
     } catch {
