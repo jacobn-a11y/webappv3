@@ -2,9 +2,8 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import {
   StoryErrorSection,
   StoryLoadingSection,
-  StoryPreviewSection,
 } from "./story-generator/StoryModalSections";
-import { usePublishFlow } from "./story-generator/usePublishFlow";
+import { StoryPreviewStep } from "./story-generator/StoryPreviewStep";
 import { useQuoteSelection } from "./story-generator/useQuoteSelection";
 import { useStoryGeneration } from "./story-generator/useStoryGeneration";
 import {
@@ -16,7 +15,6 @@ import {
   type StoryVisibilityMode,
   type StoryAudienceMode,
   type StoryTemplateOption,
-  type StoryTemplateValues,
 } from "./story-generator/StoryFormStep";
 import {
   type FunnelStage,
@@ -37,12 +35,11 @@ import {
   getStoryContextSettings,
   trackSellerAdoptionEvent,
   type SharedAsset,
-  type StoryQuote,
   type StoryContextSettings,
 } from "../lib/api";
 import { useToast } from "./Toast";
 
-// ─── Types (kept for backward compat) ────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface StoryGeneratorModalProps {
   accountId: string;
@@ -60,13 +57,6 @@ interface PersistedStorySettings {
   storyOutline: StoryOutline;
   storyType: StoryTypeInput;
   isAdvanced: boolean;
-}
-
-interface PackagingTemplate {
-  id: "executive_recap" | "champion_forward" | "roi_proof";
-  label: string;
-  description: string;
-  body: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -187,98 +177,11 @@ function loadDefaultStoryModePreference(): StoryVisibilityMode {
   }
 }
 
-function countWords(markdown: string): number {
-  return markdown
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`[^`]*`/g, " ")
-    .replace(/[#[\]*_>|-]/g, " ")
-    .split(/\s+/)
-    .filter(Boolean).length;
-}
-
 function createFlowId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `story-flow-${crypto.randomUUID()}`;
   }
   return `story-flow-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function stripMarkdown(markdown: string): string {
-  return markdown
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`[^`]*`/g, " ")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/[>#*_~-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function extractSummarySentences(markdown: string, max = 4): string[] {
-  const plain = stripMarkdown(markdown);
-  return plain
-    .split(/(?<=[.!?])\s+/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 18)
-    .slice(0, max);
-}
-
-function buildPackagingTemplates(input: {
-  accountName: string;
-  markdown: string;
-  quotes: StoryQuote[];
-  stageLabel: string;
-  visibilityMode: StoryVisibilityMode;
-}): PackagingTemplate[] {
-  const subject =
-    input.visibilityMode === "NAMED" ? input.accountName : "the customer";
-  const summary = extractSummarySentences(input.markdown, 5);
-  const topQuote = input.quotes[0]?.quote_text ?? "No quote available.";
-  const metricQuote = input.quotes.find((quote) => !!quote.metric_value);
-  const metricLine = metricQuote?.metric_value
-    ? `${metricQuote.metric_value}${metricQuote.metric_type ? ` (${metricQuote.metric_type})` : ""}`
-    : "No quantified metric captured.";
-
-  return [
-    {
-      id: "executive_recap",
-      label: "Executive Recap",
-      description: "Tight readout for leadership and deal sponsors.",
-      body: [
-        `Executive Recap (${input.stageLabel})`,
-        `Account: ${subject}`,
-        "",
-        ...summary.slice(0, 3).map((line) => `- ${line}`),
-      ].join("\n"),
-    },
-    {
-      id: "champion_forward",
-      label: "Champion Forward",
-      description: "Forwardable package for your internal champion.",
-      body: [
-        `Champion Forward (${input.stageLabel})`,
-        `Account: ${subject}`,
-        "",
-        "Proof quote:",
-        `"${topQuote}"`,
-        "",
-        "Recommended next step:",
-        summary[3] ?? summary[0] ?? "Align this evidence to current stakeholder objections.",
-      ].join("\n"),
-    },
-    {
-      id: "roi_proof",
-      label: "ROI Proof",
-      description: "Metric-first package for procurement and finance.",
-      body: [
-        `ROI Proof (${input.stageLabel})`,
-        `Account: ${subject}`,
-        "",
-        `Primary KPI: ${metricLine}`,
-        "",
-        ...summary.slice(0, 2).map((line) => `- ${line}`),
-      ].join("\n"),
-    },
-  ];
 }
 
 // ─── Main Component (Shell) ──────────────────────────────────────────────────
@@ -433,72 +336,6 @@ export function StoryGeneratorModal({
     [accountId, stageLabel, visibilityMode]
   );
 
-  const storyStats = useMemo(() => {
-    const markdown = result ? previewMarkdown : "";
-    if (!markdown) return null;
-    const wordCount = countWords(markdown);
-    const readingMinutes = Math.max(1, Math.round(wordCount / 220));
-    return { wordCount, readingMinutes };
-  }, [result, previewMarkdown]);
-
-  const safeToShare = useMemo(() => {
-    if (!result) {
-      return {
-        status: "pending" as const,
-        label: "Review Needed",
-        reason: "Generate a story to evaluate quote confidence and source coverage.",
-        avgConfidence: 0,
-      };
-    }
-    const quoteConfidences = result.quotes
-      .map((quote) => quote.confidence_score)
-      .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-    const avgConfidence =
-      quoteConfidences.length > 0
-        ? quoteConfidences.reduce((sum, value) => sum + value, 0) / quoteConfidences.length
-        : 0;
-    const confidenceOk = avgConfidence >= 0.72;
-    if (confidenceOk && (visibilityMode === "ANONYMOUS" || namedPermissionConfirmed)) {
-      return {
-        status: "ready" as const,
-        label: "Safe to Share",
-        reason: `Average quote confidence is ${Math.round(avgConfidence * 100)}%.`,
-        avgConfidence,
-      };
-    }
-    if (visibilityMode === "NAMED" && !namedPermissionConfirmed) {
-      return {
-        status: "warning" as const,
-        label: "Review Permission",
-        reason: "Named mode requires customer permission confirmation before sharing.",
-        avgConfidence,
-      };
-    }
-    return {
-      status: "warning" as const,
-      label: "Review Needed",
-      reason: `Average quote confidence is ${Math.round(avgConfidence * 100)}%.`,
-      avgConfidence,
-    };
-  }, [namedPermissionConfirmed, result, visibilityMode]);
-
-  const packagingTemplates = useMemo(
-    () =>
-      result
-        ? buildPackagingTemplates({
-            accountName,
-            markdown: previewMarkdown,
-            quotes: result.quotes,
-            stageLabel,
-            visibilityMode,
-          })
-        : [],
-    [accountName, previewMarkdown, result, stageLabel, visibilityMode]
-  );
-
-  const loadingStep =
-    loadingProgress < 34 ? 0 : loadingProgress < 67 ? 1 : 2;
-  const activeMarkdown = result ? previewMarkdown : "";
   const namedModeBlocked = visibilityMode === "NAMED" && !namedPermissionConfirmed;
 
   const isLengthDefault = orgDefaults?.default_story_length === storyLength;
@@ -506,6 +343,10 @@ export function StoryGeneratorModal({
   const isTypeDefault = orgDefaults?.default_story_type === storyType;
   const isFormatDefault = orgDefaults?.default_story_format === selectedFormat;
   const onboardingWithinTarget = onboardingElapsedSeconds <= 60;
+  const loadingStep =
+    loadingProgress < 34 ? 0 : loadingProgress < 67 ? 1 : 2;
+
+  // ─── Effects ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
     savePersistedSettings({
@@ -673,6 +514,35 @@ export function StoryGeneratorModal({
     }
   }, [error, phase, trackSellerEvent]);
 
+  useEffect(() => {
+    if (visibilityMode === "ANONYMOUS") {
+      setNamedPermissionConfirmed(false);
+    }
+  }, [visibilityMode]);
+
+  useEffect(() => {
+    if (storyTypeMode === "FULL") {
+      setStoryType("FULL_ACCOUNT_JOURNEY");
+      return;
+    }
+    if (storyType === "FULL_ACCOUNT_JOURNEY") {
+      setStoryType(STORY_TYPE_TOPIC_OPTIONS[0]?.[0] ?? "industry_trend_validation");
+    }
+  }, [storyTypeMode, storyType]);
+
+  useEffect(() => {
+    const matched = allTemplates.find(
+      (template) =>
+        template.values.storyLength === storyLength &&
+        template.values.storyOutline === storyOutline &&
+        template.values.storyType === storyType &&
+        template.values.storyFormat === selectedFormat
+    );
+    setActiveTemplateId(matched?.id ?? null);
+  }, [allTemplates, selectedFormat, storyLength, storyOutline, storyType]);
+
+  // ─── Generation trigger ────────────────────────────────────────────────────
+
   const triggerGeneration = useCallback(
     (overrides?: Partial<{
       storyLength: StoryLength;
@@ -771,118 +641,7 @@ export function StoryGeneratorModal({
     triggerGeneration();
   }, [triggerGeneration]);
 
-  const handleRegenerateVariant = useCallback((variant: "same" | "shorter" | "executive" | "proof") => {
-    trackSellerEvent("library_action", {
-      action_name: `regenerate_${variant}`,
-      step: "preview_toolbar",
-    });
-    if (variant === "same") {
-      triggerGeneration();
-      return;
-    }
-    if (variant === "shorter") {
-      triggerGeneration({ storyLength: "SHORT" });
-      return;
-    }
-    if (variant === "executive") {
-      triggerGeneration({
-        storyLength: "EXECUTIVE",
-        storyOutline: "EXECUTIVE_BRIEF",
-        storyType: "executive_strategic_impact",
-      });
-      return;
-    }
-    triggerGeneration({
-      storyOutline: "BY_THE_NUMBERS",
-      storyType: "quantified_operational_metrics",
-      selectedFormat: "by_the_numbers_snapshot",
-    });
-  }, [trackSellerEvent, triggerGeneration]);
-
-  const {
-    copyFeedback,
-    creatingPage,
-    exportingFormat,
-    handleCopyToClipboard,
-    handleCreateLandingPage,
-    handleDownloadExport,
-    handleDownloadMarkdown,
-  } = usePublishFlow({
-    accountName,
-    includeCompanyName: visibilityMode === "NAMED",
-    namedModeConfirmed: namedPermissionConfirmed,
-    onError: (message) => {
-      setError(message);
-      setPhase("error");
-    },
-    onPackagingAction: (actionName, metadata) => {
-      trackSellerEvent("share_action", {
-        action_name: actionName,
-        step: "preview_package",
-        story_id: result?.story_id ?? undefined,
-        duration_ms: Date.now() - flowOpenedAtRef.current,
-        metadata,
-      });
-      setFirstStoryShared(true);
-      try {
-        localStorage.setItem(ONBOARDING_KEY, "1");
-      } catch {
-        // Ignore storage errors in restricted environments.
-      }
-      setShowOnboarding(false);
-    },
-    onLandingPageCreated,
-    previewMarkdown,
-    result,
-  });
-
-  const handleCopyPackagingTemplate = useCallback(
-    async (templateId: PackagingTemplate["id"]) => {
-      const template = packagingTemplates.find((entry) => entry.id === templateId);
-      if (!template) {
-        return;
-      }
-      try {
-        await navigator.clipboard.writeText(template.body);
-      } catch {
-        const textarea = document.createElement("textarea");
-        textarea.value = template.body;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
-      trackSellerEvent("share_action", {
-        action_name: `copy_package_${templateId}`,
-        step: "preview_package_templates",
-        story_id: result?.story_id ?? undefined,
-        duration_ms: Date.now() - flowOpenedAtRef.current,
-      });
-      setFirstStoryShared(true);
-      setShowOnboarding(false);
-      try {
-        localStorage.setItem(ONBOARDING_KEY, "1");
-      } catch {
-        // Ignore storage errors in restricted environments.
-      }
-    },
-    [packagingTemplates, result?.story_id, trackSellerEvent]
-  );
-
-  const handleDismissOnboarding = useCallback(() => {
-    setShowOnboarding(false);
-    trackSellerEvent("library_action", {
-      action_name: "dismiss_onboarding",
-      step: "onboarding",
-    });
-    try {
-      localStorage.setItem(ONBOARDING_KEY, "1");
-    } catch {
-      // Ignore storage errors in restricted environments.
-    }
-  }, [trackSellerEvent]);
+  // ─── Form-step handlers ────────────────────────────────────────────────────
 
   const handleVisibilityModeChange = useCallback(
     (mode: StoryVisibilityMode) => {
@@ -1003,34 +762,30 @@ export function StoryGeneratorModal({
     [loadSavedTemplates, setError, setPhase, showToast]
   );
 
-  useEffect(() => {
-    if (visibilityMode === "ANONYMOUS") {
-      setNamedPermissionConfirmed(false);
+  const handleDismissOnboarding = useCallback(() => {
+    setShowOnboarding(false);
+    trackSellerEvent("library_action", {
+      action_name: "dismiss_onboarding",
+      step: "onboarding",
+    });
+    try {
+      localStorage.setItem(ONBOARDING_KEY, "1");
+    } catch {
+      // Ignore storage errors in restricted environments.
     }
-  }, [visibilityMode]);
+  }, [trackSellerEvent]);
 
-  useEffect(() => {
-    if (storyTypeMode === "FULL") {
-      setStoryType("FULL_ACCOUNT_JOURNEY");
-      return;
+  const handleShareAction = useCallback(() => {
+    setFirstStoryShared(true);
+    setShowOnboarding(false);
+    try {
+      localStorage.setItem(ONBOARDING_KEY, "1");
+    } catch {
+      // Ignore storage errors in restricted environments.
     }
-    if (storyType === "FULL_ACCOUNT_JOURNEY") {
-      setStoryType(STORY_TYPE_TOPIC_OPTIONS[0]?.[0] ?? "industry_trend_validation");
-    }
-  }, [storyTypeMode, storyType]);
+  }, []);
 
-  useEffect(() => {
-    const matched = allTemplates.find(
-      (template) =>
-        template.values.storyLength === storyLength &&
-        template.values.storyOutline === storyOutline &&
-        template.values.storyType === storyType &&
-        template.values.storyFormat === selectedFormat
-    );
-    setActiveTemplateId(matched?.id ?? null);
-  }, [allTemplates, selectedFormat, storyLength, storyOutline, storyType]);
-
-  // ─── Render ──────────────────────────────────────────────────────────────────
+  // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="modal-overlay" role="presentation" onClick={onClose}>
@@ -1124,28 +879,25 @@ export function StoryGeneratorModal({
           )}
 
           {phase === "preview" && result && (
-            <StoryPreviewSection
-              activeMarkdown={activeMarkdown}
-              copyFeedback={copyFeedback}
-              creatingPage={creatingPage}
+            <StoryPreviewStep
+              accountName={accountName}
               editMode={editMode}
-              exportingFormat={exportingFormat}
+              flowOpenedAt={flowOpenedAtRef.current}
               handleBackToForm={handleBackToForm}
-              handleCopyToClipboard={() => void handleCopyToClipboard()}
-              handleCreateLandingPage={() => void handleCreateLandingPage()}
-              handleDownloadExport={handleDownloadExport}
-              handleDownloadMarkdown={handleDownloadMarkdown}
-              handleRegenerateVariant={handleRegenerateVariant}
-              handleCopyPackagingTemplate={(templateId) =>
-                void handleCopyPackagingTemplate(templateId)
-              }
-              packagingTemplates={packagingTemplates}
+              namedPermissionConfirmed={namedPermissionConfirmed}
+              onClose={onClose}
+              onLandingPageCreated={onLandingPageCreated}
+              onShareAction={handleShareAction}
+              previewMarkdown={previewMarkdown}
               result={result}
-              runGeneration={runGeneration}
-              safeToShare={safeToShare}
               setEditMode={setEditMode}
+              setError={setError}
+              setPhase={setPhase}
               setPreviewMarkdown={setPreviewMarkdown}
-              storyStats={storyStats}
+              stageLabel={stageLabel}
+              trackSellerEvent={trackSellerEvent}
+              triggerGeneration={triggerGeneration}
+              visibilityMode={visibilityMode}
             />
           )}
 
