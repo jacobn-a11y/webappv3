@@ -39,6 +39,26 @@ BEGIN
   END IF;
 END $$;
 
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'QuoteTier') THEN
+    CREATE TYPE "QuoteTier" AS ENUM (
+      'AUTO',
+      'CURATED'
+    );
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'QuoteCreatedByType') THEN
+    CREATE TYPE "QuoteCreatedByType" AS ENUM (
+      'SYSTEM',
+      'USER'
+    );
+  END IF;
+END $$;
+
 ALTER TABLE "users"
   ADD COLUMN IF NOT EXISTS "quoteAttributionDisplay" "QuoteAttributionDisplay" NOT NULL DEFAULT 'DISPLAYED';
 

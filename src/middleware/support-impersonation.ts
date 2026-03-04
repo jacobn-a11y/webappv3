@@ -55,10 +55,10 @@ export function applySupportImpersonation(prisma: PrismaClient) {
       return;
     }
 
-    const orgSettings = await prisma.orgSettings.findUnique({
+    const supportOptOut = await prisma.tenantSupportOptOut.findUnique({
       where: { organizationId },
     });
-    if (orgSettings?.supportAccessDisabled) {
+    if (supportOptOut) {
       res.status(403).json({
         error: "support_access_disabled",
         message: "This organization has opted out of support access.",

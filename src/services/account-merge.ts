@@ -14,7 +14,7 @@
  */
 
 import Fuse from "fuse.js";
-import type { PrismaClient, Prisma } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import { normalizeCompanyName } from "./entity-resolution.js";
 import { decodeJsonObject, encodeJsonValue } from "../types/json-boundaries.js";
 
@@ -602,12 +602,12 @@ export class AccountMergeService {
         targetId: secondaryAccountId,
         requestedByUserId,
         status: "PENDING",
-        requestPayload: {
+        requestPayload: encodeJsonValue({
           primary_account_id: primaryAccountId,
           secondary_account_id: secondaryAccountId,
           notes,
           preview,
-        } satisfies Record<string, unknown> as Prisma.InputJsonValue,
+        }),
       },
       select: { id: true, status: true },
     });
