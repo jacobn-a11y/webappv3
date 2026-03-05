@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import express, { type Request, type NextFunction, type Response } from "express";
 import { requestServer } from "../helpers/request-server.js";
-import { createLandingPageRoutes } from "../../src/api/landing-page-routes.js";
+import { createLandingPageRoutes } from "../../src/api/landing-page/routes.js";
 import { AccountAccessService } from "../../src/services/account-access.js";
 
 // ─── Mock Prisma Factory ────────────────────────────────────────────────────

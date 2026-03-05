@@ -17,7 +17,6 @@ import {
   updateDashboardPublishSettings,
   updateArtifactGovernancePolicy,
   updateDataGovernanceSettings,
-  type ApprovalPolicyMode,
   type ArtifactGovernancePolicySettings,
   type ApprovalGroup,
   type DataGovernanceSettings,
@@ -26,8 +25,18 @@ import {
   type DeletionRequest,
   type TeamApprovalAdminScopeRow,
 } from "../lib/api";
-import { badgeClass, formatEnumLabel } from "../lib/format";
 import { AdminErrorState, isPermissionError } from "../components/admin/AdminErrorState";
+import {
+  ArtifactGovernanceSection,
+  PolicySection,
+} from "./admin-data-governance-sections";
+import {
+  ApprovalGroupsSection,
+  DeletionApprovalQueueSection,
+  DeletionRequestSection,
+  GovernanceOverviewSection,
+  TeamApprovalScopesSection,
+} from "./admin-data-governance-ops-sections";
 
 const DEFAULT_POLICY: DataGovernanceSettings = {
   retention_days: 365,
@@ -296,7 +305,14 @@ export function AdminDataGovernancePage() {
 
   return (
     <div className="page">
-      <div className="page__header"><div className="page__header-text"><h1 className="page__title">Data Governance</h1><p className="page__subtitle">Manage retention policies, deletion approvals, and artifact governance</p></div></div>
+      <div className="page__header">
+        <div className="page__header-text">
+          <h1 className="page__title">Data Governance</h1>
+          <p className="page__subtitle">
+            Manage retention policies, deletion approvals, and artifact governance
+          </p>
+        </div>
+      </div>
       {error && (
         <AdminErrorState
           title="Governance Action Failed"
@@ -306,638 +322,56 @@ export function AdminDataGovernancePage() {
       )}
       {notice && <div className="alert alert--success">{notice}</div>}
 
-      <section className="card card--elevated">
-        <h2>Governance Overview</h2>
-        <div className="kpi-grid" style={{ marginBottom: 16 }}>
-          <article className="kpi-card">
-            <h3 className="kpi-card__label">Pending approvals</h3>
-            <div className="kpi-card__value">{overview.pending_approvals_count}</div>
-            <p className="kpi-card__meta">Publish requests awaiting review</p>
-          </article>
-          <article className="kpi-card">
-            <h3 className="kpi-card__label">Retention window</h3>
-            <div className="kpi-card__value">{overview.retention_days}d</div>
-            <p className="kpi-card__meta">
-              {overview.eligible_call_deletions} call(s) eligible for deletion
-            </p>
-          </article>
-          <article className="kpi-card">
-            <h3 className="kpi-card__label">Deletion queue</h3>
-            <div className="kpi-card__value">{overview.pending_deletion_requests_count}</div>
-            <p className="kpi-card__meta">Pending data deletion requests</p>
-          </article>
-        </div>
-        <div className="data-table-wrap" style={{ marginTop: 8 }}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Control</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Legal hold</td>
-                <td>
-                  <span className={`badge ${overview.legal_hold_enabled ? "badge--warning" : "badge--success"}`}>
-                    {overview.legal_hold_enabled ? "Enabled" : "Disabled"}
-                  </span>
-                </td>
-              </tr>
-              <tr>
-                <td>PII exports</td>
-                <td>
-                  <span className={`badge ${overview.pii_export_enabled ? "badge--success" : "badge--danger"}`}>
-                    {overview.pii_export_enabled ? "Allowed" : "Blocked"}
-                  </span>
-                </td>
-              </tr>
-              <tr>
-                <td>Named story exports</td>
-                <td>
-                  <span className={`badge ${overview.allow_named_story_exports ? "badge--success" : "badge--danger"}`}>
-                    {overview.allow_named_story_exports ? "Allowed" : "Blocked"}
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <h3 style={{ marginTop: 16 }}>Recent Audit Events</h3>
-        <div className="data-table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Category</th>
-                <th>Action</th>
-                <th>Severity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {overview.recent_audit_events.length === 0 && (
-                <tr>
-                  <td colSpan={4}>No recent audit events.</td>
-                </tr>
-              )}
-              {overview.recent_audit_events.map((event) => (
-                <tr key={event.id}>
-                  <td>{new Date(event.created_at).toLocaleString()}</td>
-                  <td>{formatEnumLabel(event.category)}</td>
-                  <td>{formatEnumLabel(event.action)}</td>
-                  <td>
-                    <span className={badgeClass(event.severity)}>
-                      {formatEnumLabel(event.severity)}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <GovernanceOverviewSection overview={overview} />
 
-      <section className="card card--elevated">
-        <label className="form-group">
-          Publish approval policy
-          <select
-            value={dashboardSettings.approval_policy}
-            onChange={(e) =>
-              setDashboardSettings((current) => ({
-                ...current,
-                approval_policy: e.target.value as ApprovalPolicyMode,
-              }))
-            }
-          >
-            <option value="ALL_REQUIRED">All stories require approval</option>
-            <option value="ANON_NO_APPROVAL">
-              Anonymous stories publish directly; named require approval
-            </option>
-            <option value="NAMED_NO_APPROVAL">
-              Named stories publish directly; anonymous require approval
-            </option>
-            <option value="ALL_NO_APPROVAL">All stories publish directly</option>
-          </select>
-        </label>
+      <PolicySection
+        dashboardSettings={dashboardSettings}
+        setDashboardSettings={setDashboardSettings}
+        policy={policy}
+        setPolicy={setPolicy}
+        savePolicy={savePolicy}
+        saving={saving}
+      />
 
-        <label className="form-group">
-          Data retention (days)
-          <input
-            type="number"
-            min={30}
-            max={3650}
-            value={policy.retention_days}
-            onChange={(e) =>
-              setPolicy((p) => ({ ...p, retention_days: Number(e.target.value) || 365 }))
-            }
-          />
-        </label>
+      <ArtifactGovernanceSection
+        artifactPolicy={artifactPolicy}
+        setArtifactPolicy={setArtifactPolicy}
+        saveArtifactPolicy={saveArtifactPolicy}
+        saving={saving}
+      />
 
-        <label className="form-group">
-          Audit log retention (days)
-          <input
-            type="number"
-            min={30}
-            max={3650}
-            value={policy.audit_log_retention_days}
-            onChange={(e) =>
-              setPolicy((p) => ({
-                ...p,
-                audit_log_retention_days: Number(e.target.value) || 365,
-              }))
-            }
-          />
-        </label>
+      <DeletionRequestSection
+        targetType={targetType}
+        setTargetType={setTargetType}
+        targetId={targetId}
+        setTargetId={setTargetId}
+        reason={reason}
+        setReason={setReason}
+        requestDeletion={requestDeletion}
+      />
 
-        <label className="form-group">
-          RTO target (minutes)
-          <input
-            type="number"
-            min={5}
-            max={60 * 24 * 14}
-            value={policy.rto_target_minutes}
-            onChange={(e) =>
-              setPolicy((p) => ({
-                ...p,
-                rto_target_minutes: Number(e.target.value) || 240,
-              }))
-            }
-          />
-        </label>
+      <ApprovalGroupsSection
+        approvalGroups={approvalGroups}
+        newGroupName={newGroupName}
+        setNewGroupName={setNewGroupName}
+        newGroupDescription={newGroupDescription}
+        setNewGroupDescription={setNewGroupDescription}
+        groupMemberUserId={groupMemberUserId}
+        setGroupMemberUserId={setGroupMemberUserId}
+        createGroup={createGroup}
+        addGroupMember={addGroupMember}
+        removeGroupMember={removeGroupMember}
+      />
 
-        <label className="form-group">
-          RPO target (minutes)
-          <input
-            type="number"
-            min={5}
-            max={60 * 24 * 14}
-            value={policy.rpo_target_minutes}
-            onChange={(e) =>
-              setPolicy((p) => ({
-                ...p,
-                rpo_target_minutes: Number(e.target.value) || 60,
-              }))
-            }
-          />
-        </label>
+      <TeamApprovalScopesSection
+        teamApprovalScopes={teamApprovalScopes}
+        setTeamScopes={setTeamScopes}
+      />
 
-        <label className="form-row">
-          <input
-            type="checkbox"
-            checked={policy.legal_hold_enabled}
-            onChange={(e) =>
-              setPolicy((p) => ({ ...p, legal_hold_enabled: e.target.checked }))
-            }
-          />
-          Enable legal hold (blocks deletions)
-        </label>
-
-        <label className="form-row">
-          <input
-            type="checkbox"
-            checked={policy.pii_export_enabled}
-            onChange={(e) =>
-              setPolicy((p) => ({ ...p, pii_export_enabled: e.target.checked }))
-            }
-          />
-          Allow exports containing governed data
-        </label>
-
-        <label className="form-row">
-          <input
-            type="checkbox"
-            checked={policy.allow_named_story_exports}
-            onChange={(e) =>
-              setPolicy((p) => ({
-                ...p,
-                allow_named_story_exports: e.target.checked,
-              }))
-            }
-          />
-          Allow named story exports
-        </label>
-
-        <label className="form-row">
-          <input
-            type="checkbox"
-            checked={policy.deletion_requires_approval}
-            onChange={(e) =>
-              setPolicy((p) => ({
-                ...p,
-                deletion_requires_approval: e.target.checked,
-              }))
-            }
-          />
-          Require approval before deletion
-        </label>
-
-        <button className="btn btn--primary" onClick={savePolicy} disabled={saving}>
-          {saving ? "Saving..." : "Save Policy"}
-        </button>
-      </section>
-
-      <section className="card card--elevated">
-        <h2>Artifact Governance (Publishing)</h2>
-
-        <label className="form-row">
-          <input
-            type="checkbox"
-            checked={artifactPolicy.approval_chain_enabled}
-            onChange={(e) =>
-              setArtifactPolicy((p) => ({
-                ...p,
-                approval_chain_enabled: e.target.checked,
-              }))
-            }
-          />
-          Require approval chain before publishing
-        </label>
-
-        <label className="form-row">
-          <input
-            type="checkbox"
-            checked={artifactPolicy.require_provenance}
-            onChange={(e) =>
-              setArtifactPolicy((p) => ({
-                ...p,
-                require_provenance: e.target.checked,
-              }))
-            }
-          />
-          Require release provenance metadata
-        </label>
-
-        <label className="form-group">
-          Max expiration (days, optional)
-          <input
-            type="number"
-            min={1}
-            max={3650}
-            value={artifactPolicy.max_expiration_days ?? ""}
-            onChange={(e) =>
-              setArtifactPolicy((p) => ({
-                ...p,
-                max_expiration_days: e.target.value ? Number(e.target.value) : null,
-              }))
-            }
-          />
-        </label>
-
-        <h3>Approval Steps</h3>
-        <div className="form-row" style={{ marginBottom: 8 }}>
-          <button
-            className="btn btn--secondary"
-            onClick={() =>
-              setArtifactPolicy((p) => ({
-                ...p,
-                steps: [
-                  ...p.steps,
-                  {
-                    step_order: p.steps.length + 1,
-                    min_approvals: 1,
-                    required_role_profile_key: null,
-                    required_user_role: "ADMIN",
-                    enabled: true,
-                  },
-                ],
-              }))
-            }
-          >
-            Add Step
-          </button>
-        </div>
-
-        {artifactPolicy.steps.map((step, idx) => (
-          <div key={`${step.step_order}-${idx}`} className="form-row">
-            <input
-              type="number"
-              min={1}
-              value={step.step_order}
-              onChange={(e) =>
-                setArtifactPolicy((p) => ({
-                  ...p,
-                  steps: p.steps.map((s, i) =>
-                    i === idx ? { ...s, step_order: Number(e.target.value) || s.step_order } : s
-                  ),
-                }))
-              }
-              placeholder="Order"
-            />
-            <input
-              type="number"
-              min={1}
-              value={step.min_approvals}
-              onChange={(e) =>
-                setArtifactPolicy((p) => ({
-                  ...p,
-                  steps: p.steps.map((s, i) =>
-                    i === idx ? { ...s, min_approvals: Number(e.target.value) || 1 } : s
-                  ),
-                }))
-              }
-              placeholder="Min approvals"
-            />
-            <select
-              value={step.required_user_role ?? ""}
-              onChange={(e) =>
-                setArtifactPolicy((p) => ({
-                  ...p,
-                  steps: p.steps.map((s, i) =>
-                    i === idx
-                      ? {
-                          ...s,
-                          required_user_role: e.target.value
-                            ? (e.target.value as "OWNER" | "ADMIN" | "MEMBER" | "VIEWER")
-                            : null,
-                        }
-                      : s
-                  ),
-                }))
-              }
-            >
-              <option value="">Any role</option>
-              <option value="OWNER">{formatEnumLabel("OWNER")}</option>
-              <option value="ADMIN">{formatEnumLabel("ADMIN")}</option>
-              <option value="MEMBER">{formatEnumLabel("MEMBER")}</option>
-              <option value="VIEWER">{formatEnumLabel("VIEWER")}</option>
-            </select>
-            <input
-              value={step.required_role_profile_key ?? ""}
-              onChange={(e) =>
-                setArtifactPolicy((p) => ({
-                  ...p,
-                  steps: p.steps.map((s, i) =>
-                    i === idx
-                      ? {
-                          ...s,
-                          required_role_profile_key: e.target.value || null,
-                        }
-                      : s
-                  ),
-                }))
-              }
-              placeholder="Role profile key (optional)"
-            />
-            <select
-              value={step.approver_scope_type ?? "ROLE_PROFILE"}
-              onChange={(e) =>
-                setArtifactPolicy((p) => ({
-                  ...p,
-                  steps: p.steps.map((s, i) =>
-                    i === idx
-                      ? {
-                          ...s,
-                          approver_scope_type: e.target.value as
-                            | "ROLE_PROFILE"
-                            | "TEAM"
-                            | "USER"
-                            | "GROUP"
-                            | "SELF",
-                        }
-                      : s
-                  ),
-                }))
-              }
-            >
-              <option value="ROLE_PROFILE">{formatEnumLabel("ROLE_PROFILE")}</option>
-              <option value="TEAM">{formatEnumLabel("TEAM")}</option>
-              <option value="USER">{formatEnumLabel("USER")}</option>
-              <option value="GROUP">{formatEnumLabel("GROUP")}</option>
-              <option value="SELF">{formatEnumLabel("SELF")}</option>
-            </select>
-            <input
-              value={step.approver_scope_value ?? ""}
-              onChange={(e) =>
-                setArtifactPolicy((p) => ({
-                  ...p,
-                  steps: p.steps.map((s, i) =>
-                    i === idx
-                      ? {
-                          ...s,
-                          approver_scope_value: e.target.value || null,
-                        }
-                      : s
-                  ),
-                }))
-              }
-              placeholder="Scope value (team key/user id/group id)"
-            />
-            <label className="form-row">
-              <input
-                type="checkbox"
-                checked={step.enabled}
-                onChange={(e) =>
-                  setArtifactPolicy((p) => ({
-                    ...p,
-                    steps: p.steps.map((s, i) =>
-                      i === idx ? { ...s, enabled: e.target.checked } : s
-                    ),
-                  }))
-                }
-              />
-              Enabled
-            </label>
-            <label className="form-row">
-              <input
-                type="checkbox"
-                checked={step.allow_self_approval ?? false}
-                onChange={(e) =>
-                  setArtifactPolicy((p) => ({
-                    ...p,
-                    steps: p.steps.map((s, i) =>
-                      i === idx
-                        ? { ...s, allow_self_approval: e.target.checked }
-                        : s
-                    ),
-                  }))
-                }
-              />
-              Allow self approval
-            </label>
-            <button
-              className="btn btn--secondary"
-              onClick={() =>
-                setArtifactPolicy((p) => ({
-                  ...p,
-                  steps: p.steps.filter((_, i) => i !== idx),
-                }))
-              }
-            >
-              Remove
-            </button>
-          </div>
-        ))}
-
-        <button className="btn btn--primary" onClick={saveArtifactPolicy} disabled={saving}>
-          {saving ? "Saving..." : "Save Artifact Governance"}
-        </button>
-      </section>
-
-      <section className="card card--elevated">
-        <h2>Request Deletion</h2>
-        <div className="form-row">
-          <select value={targetType} onChange={(e) => setTargetType(e.target.value as "CALL" | "STORY" | "LANDING_PAGE")}>
-            <option value="CALL">Call</option>
-            <option value="STORY">Story</option>
-            <option value="LANDING_PAGE">Landing Page</option>
-          </select>
-          <input
-            value={targetId}
-            onChange={(e) => setTargetId(e.target.value)}
-            placeholder="Target ID"
-          />
-          <input
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="Reason (optional)"
-          />
-          <button className="btn btn--secondary" onClick={requestDeletion}>
-            Submit
-          </button>
-        </div>
-      </section>
-
-      <section className="card card--elevated">
-        <h2>Approval Groups</h2>
-        <div className="form-row">
-          <input
-            value={newGroupName}
-            onChange={(e) => setNewGroupName(e.target.value)}
-            placeholder="Group name"
-          />
-          <input
-            value={newGroupDescription}
-            onChange={(e) => setNewGroupDescription(e.target.value)}
-            placeholder="Description (optional)"
-          />
-          <button className="btn btn--secondary" onClick={createGroup}>
-            Create Group
-          </button>
-        </div>
-        {approvalGroups.map((g) => (
-          <div key={g.id} className="card card--elevated" style={{ marginTop: 8 }}>
-            <h3>{g.name}</h3>
-            <div>{g.description || "-"}</div>
-            <div className="form-row">
-              <input
-                value={groupMemberUserId[g.id] ?? ""}
-                onChange={(e) =>
-                  setGroupMemberUserId((prev) => ({ ...prev, [g.id]: e.target.value }))
-                }
-                placeholder="User ID to add"
-              />
-              <button className="btn btn--secondary" onClick={() => addGroupMember(g.id)}>
-                Add Member
-              </button>
-            </div>
-            <ul>
-              {g.members.map((m) => (
-                <li key={m.id}>
-                  {m.name || m.email} ({m.id}){" "}
-                  <button className="btn btn--secondary" onClick={() => removeGroupMember(g.id, m.id)}>
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </section>
-
-      <section className="card card--elevated">
-        <h2>Team Approval Admin Scopes</h2>
-        <p>Billing admins can set which team keys each Team Approval Admin can approve.</p>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>User</th>
-              <th>Email</th>
-              <th>Team keys (comma-separated)</th>
-              <th>Save</th>
-            </tr>
-          </thead>
-          <tbody>
-            {teamApprovalScopes.map((row) => (
-              <tr key={row.user.id}>
-                <td>{row.user.name || row.user.id}</td>
-                <td>{row.user.email}</td>
-                <td>
-                  <input
-                    defaultValue={row.team_keys.join(",")}
-                    id={`scope-${row.user.id}`}
-                  />
-                </td>
-                <td>
-                  <button
-                    className="btn btn--secondary"
-                    onClick={() => {
-                      const input = document.getElementById(
-                        `scope-${row.user.id}`
-                      ) as HTMLInputElement | null;
-                      setTeamScopes(row.user.id, input?.value || "");
-                    }}
-                  >
-                    Save
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      <section className="card card--elevated">
-        <h2>Deletion Approval Queue</h2>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Created</th>
-              <th>Status</th>
-              <th>Target</th>
-              <th>Target ID</th>
-              <th>Reason</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {requests.map((r) => {
-              const payload =
-                r.request_payload && typeof r.request_payload === "object"
-                  ? (r.request_payload as { reason?: string | null })
-                  : {};
-              return (
-                <tr key={r.id}>
-                  <td>{new Date(r.created_at).toLocaleString()}</td>
-                  <td><span className={badgeClass(r.status)}>{formatEnumLabel(r.status)}</span></td>
-                  <td>{formatEnumLabel(r.target_type)}</td>
-                  <td>{r.target_id}</td>
-                  <td>{payload.reason ?? "-"}</td>
-                  <td>
-                    {r.status === "PENDING" ? (
-                      <>
-                        <button
-                          className="btn btn--secondary"
-                          onClick={() => review(r.id, "APPROVE")}
-                        >
-                          Approve
-                        </button>{" "}
-                        <button
-                          className="btn btn--secondary"
-                          onClick={() => review(r.id, "REJECT")}
-                        >
-                          Reject
-                        </button>
-                      </>
-                    ) : (
-                      "-"
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </section>
+      <DeletionApprovalQueueSection
+        requests={requests}
+        review={review}
+      />
     </div>
   );
 }

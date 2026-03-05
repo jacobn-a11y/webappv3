@@ -24,15 +24,24 @@ export function PublicApp() {
   useEffect(() => {
     const main = mainRef.current;
     if (!main) return;
-    const heading = main.querySelector("h1");
-    if (heading instanceof HTMLElement) {
-      heading.setAttribute("tabindex", "-1");
-      heading.focus();
-      setRouteAnnouncement(`Navigated to ${heading.textContent ?? "page"}.`);
-      return;
-    }
-    main.focus();
-    setRouteAnnouncement("Navigated to page.");
+
+    // Defer focus work until after route content has committed.
+    const raf = window.requestAnimationFrame(() => {
+      const heading = main.querySelector("h1");
+      if (heading instanceof HTMLElement) {
+        heading.setAttribute("tabindex", "-1");
+        heading.focus();
+        setRouteAnnouncement(`Navigated to ${heading.textContent ?? "page"}.`);
+        return;
+      }
+
+      main.focus();
+      setRouteAnnouncement("Navigated to page.");
+    });
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+    };
   }, [location.pathname, location.search]);
 
   useEffect(() => {

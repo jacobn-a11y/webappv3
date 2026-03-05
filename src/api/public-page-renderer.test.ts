@@ -7,7 +7,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { sanitizeCustomCss, renderLandingPageHtml } from "./public-page-renderer.js";
+import { renderLandingPageHtml } from "./public-page/renderer.js";
+import { sanitizeCustomCss } from "./public-page/sanitizers.js";
 
 describe("sanitizeCustomCss", () => {
   it("should return null for null input", () => {

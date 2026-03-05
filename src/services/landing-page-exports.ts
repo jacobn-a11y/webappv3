@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import type { PrismaClient } from "@prisma/client";
 import { google } from "googleapis";
-import { renderLandingPageHtml } from "../api/public-page-renderer.js";
+import { renderLandingPageHtml } from "../api/public-page/renderer.js";
 import type { CalloutBox } from "./landing-page-editor.js";
 import { decodeCalloutBoxes } from "../types/json-boundaries.js";
 import type { StoryContextSettings } from "../types/story-generation.js";

@@ -22,11 +22,11 @@ import { createGrainWebhookHandler } from "./webhooks/grain-webhook.js";
 import { createAuthRoutes } from "./api/auth-routes.js";
 import { createScimRoutes } from "./api/scim-routes.js";
 import { createRAGRoutes } from "./api/rag-routes.js";
-import { createStoryRoutes } from "./api/story-routes.js";
+import { createStoryRoutes } from "./api/story/routes.js";
 import { createStoryCommentRoutes } from "./api/story-comments-routes.js";
-import { createLandingPageRoutes } from "./api/landing-page-routes.js";
+import { createLandingPageRoutes } from "./api/landing-page/routes.js";
 import { createExportRoutes } from "./api/export-routes.js";
-import { createPublicPageRoutes } from "./api/public-page-renderer.js";
+import { createPublicPageRoutes } from "./api/public-page/renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
 import { createAdminMetricsRoutes } from "./api/admin-metrics-routes.js";
 import { createQueueHealthRoutes } from "./api/queue-health-routes.js";
@@ -38,20 +38,14 @@ import { createPlatformAdminRoutes } from "./api/platform-admin-routes.js";
 import { createPlatformRoutes } from "./api/platform-routes.js";
 import { createTranscriptViewerRoutes } from "./api/transcript-viewer-routes.js";
 import { createEntityResolutionRoutes } from "./api/entity-resolution-routes.js";
-import { createEditorPageRoutes } from "./api/editor-page-renderer.js";
-import { createDashboardPageRoutes } from "./api/dashboard-page-renderer.js";
-import { createAdminAccountAccessPage } from "./api/admin-account-access-page.js";
-import { createAdminPermissionsPage } from "./api/admin-permissions-page.js";
 import { createOrgSettingsRoutes } from "./api/org-settings-routes.js";
 import { createIntegrationsRoutes } from "./api/integrations-routes.js";
-import { createApiKeysRoutes } from "./api/api-keys-routes.js";
 import { createAccountsRoutes } from "./api/accounts-routes.js";
 import { createAccountJourneyRoutes } from "./api/account-journey-routes.js";
 import { createAccountMergeRoutes } from "./api/account-merge-routes.js";
-import { createChatbotConnectorRoutes } from "./api/chatbot-connector.js";
 import { createSetupRoutes } from "./api/setup-routes.js";
 import { createNotificationRoutes } from "./api/notification-routes.js";
-import { createAnalyticsRoutes } from "./api/analytics-routes.js";
+import { createAnalyticsRoutes } from "./api/analytics/api-routes.js";
 import { createStatusRoutes } from "./api/status-routes.js";
 import { createLifecycleQueueRoutes } from "./api/lifecycle-queue-routes.js";
 import { createQuoteLibraryRoutes } from "./api/quote-library-routes.js";
@@ -129,11 +123,6 @@ export function createApp(deps: AppDeps): express.Application {
     requireSessionIfConfigured: true,
     requireRecentAuthIfConfigured: true,
   });
-  const basicPolicy = requireOrgSecurityPolicy(prisma, {
-    requireMfaIfConfigured: true,
-    enforceIpAllowlistIfConfigured: true,
-  });
-
   // Global middleware
   app.use(helmet({
     contentSecurityPolicy: {
@@ -415,29 +404,6 @@ export function createApp(deps: AppDeps): express.Application {
     requirePermission(prisma, "manage_permissions"),
     createIntegrationsRoutes(prisma, mergeClient)
   );
-  app.use(
-    "/api/settings/api-keys",
-    trialGate,
-    basicPolicy,
-    requirePermission(prisma, "manage_permissions"),
-    createApiKeysRoutes(prisma)
-  );
-
-  // Admin UI Pages (server-rendered)
-  app.use(
-    "/admin/account-access",
-    trialGate,
-    createAdminAccountAccessPage(prisma)
-  );
-  app.use("/admin/permissions", trialGate, createAdminPermissionsPage(prisma));
-
-  // Editor & Dashboard Pages (server-rendered)
-  app.use("/editor", trialGate, createEditorPageRoutes(prisma));
-  app.use("/dashboard", trialGate, createDashboardPageRoutes(prisma));
-
-  // Chatbot Connector UI
-  app.use("/chat", trialGate, createChatbotConnectorRoutes());
-
   // Sentry error handler must be registered after all routes but before other error handlers
   Sentry.setupExpressErrorHandler(app);
 

@@ -5,12 +5,12 @@
  * GET /revops-kpis  — RevOps KPI metrics (90-day window)
  */
 
-import { type Response, type Router } from "express";
+import { Router, type Response } from "express";
 import type { PrismaClient } from "@prisma/client";
 import type { AuthenticatedRequest } from "../../types/authenticated-request.js";
-import { type AnalyticsService, type AnalyticsDashboardData, type RevOpsKpiData } from "../../services/analytics.js";
+import { AnalyticsService, type AnalyticsDashboardData, type RevOpsKpiData } from "../../services/analytics.js";
 import { requirePermission } from "../../middleware/permissions.js";
-import type { ResponseCache } from "../../lib/response-cache.js";
+import { ResponseCache } from "../../lib/response-cache.js";
 import { asyncHandler } from "../../lib/async-handler.js";
 import { sendUnauthorized, sendSuccess } from "../_shared/responses.js";
 
@@ -22,6 +22,16 @@ interface RegisterApiRoutesOptions {
   analytics: AnalyticsService;
   analyticsCache: ResponseCache<AnalyticsDashboardData>;
   revopsKpiCache: ResponseCache<RevOpsKpiData>;
+}
+
+export function createAnalyticsRoutes(prisma: PrismaClient): Router {
+  const router = Router();
+  const analytics = new AnalyticsService(prisma);
+  const analyticsCache = new ResponseCache<AnalyticsDashboardData>(30_000);
+  const revopsKpiCache = new ResponseCache<RevOpsKpiData>(30_000);
+
+  registerApiRoutes({ router, prisma, analytics, analyticsCache, revopsKpiCache });
+  return router;
 }
 
 export function registerApiRoutes({

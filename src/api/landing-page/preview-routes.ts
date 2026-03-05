@@ -12,7 +12,7 @@ import type { LandingPageEditor } from "../../services/landing-page-editor.js";
 import type { RoleProfileService } from "../../services/role-profiles.js";
 import { decodeDataGovernancePolicy, decodeCalloutBoxes } from "../../types/json-boundaries.js";
 import { maskPII } from "../../middleware/pii-masker.js";
-import { renderLandingPageHtml } from "../public-page-renderer.js";
+import { renderLandingPageHtml } from "../public-page/renderer.js";
 import { requirePageOwnerOrPermission } from "../../middleware/permissions.js";
 import { canAccessNamedStories } from "../../services/landing-page-approval.js";
 import logger from "../../lib/logger.js";

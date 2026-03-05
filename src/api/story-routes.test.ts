@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
-import { createStoryRoutes } from "./story-routes.js";
+import { createStoryRoutes } from "./story/routes.js";
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 

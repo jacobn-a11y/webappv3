@@ -9,7 +9,7 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import { requestServer } from "./request-server.js";
 import { createRAGRoutes } from "../../src/api/rag-routes.js";
-import { createStoryRoutes } from "../../src/api/story-routes.js";
+import { createStoryRoutes } from "../../src/api/story/routes.js";
 import { createTrialGate } from "../../src/middleware/billing.js";
 import type { RAGEngine } from "../../src/services/rag-engine.js";
 import type { StoryBuilder } from "../../src/services/story-builder.js";

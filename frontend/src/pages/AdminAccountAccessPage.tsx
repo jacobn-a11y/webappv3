@@ -9,35 +9,14 @@ import {
   syncAccessGrant,
   getCrmReports,
   type AccessUser,
-  type AccessGrant,
   type AccountSearchResult,
   type CrmReport,
 } from "../lib/api";
 import { AdminErrorState } from "../components/admin/AdminErrorState";
-
-// ─── Utility Functions ────────────────────────────────────────────────────────
-
-function getInitials(name: string): string {
-  if (!name) return "?";
-  const parts = name.split(/[\s@]+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return parts[0].substring(0, 2).toUpperCase();
-}
-
-function formatRelativeTime(dateStr: string): string {
-  const d = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return diffMins + "m ago";
-  if (diffHours < 24) return diffHours + "h ago";
-  if (diffDays < 7) return diffDays + "d ago";
-  return d.toLocaleDateString();
-}
+import {
+  AccessUserCard,
+  GrantAccessModal,
+} from "./admin-account-access-components";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -380,477 +359,6 @@ export function AdminAccountAccessPage() {
     [showToast, loadUsers]
   );
 
-  // ─── Render: Grant Row ────────────────────────────────────────────────────
-
-  function renderGrantRow(grant: AccessGrant) {
-    let badge: React.ReactNode = null;
-    let detail: React.ReactNode = null;
-    let syncButton: React.ReactNode = null;
-
-    switch (grant.scope_type) {
-      case "ALL_ACCOUNTS":
-        badge = <span className="admin-access__badge admin-access__badge--all">All Accounts</span>;
-        break;
-
-      case "SINGLE_ACCOUNT":
-        badge = <span className="admin-access__badge admin-access__badge--account">Single Account</span>;
-        if (grant.account) {
-          detail = (
-            <span className="admin-access__grant-accounts">
-              {grant.account.name}
-              {grant.account.domain && (
-                <span className="admin-access__grant-domain">
-                  {" "}({grant.account.domain})
-                </span>
-              )}
-            </span>
-          );
-        }
-        break;
-
-      case "ACCOUNT_LIST":
-        badge = <span className="admin-access__badge admin-access__badge--list">Specific Accounts</span>;
-        detail = (
-          <span className="admin-access__grant-accounts">
-            {grant.cached_account_count} account
-            {grant.cached_account_count !== 1 ? "s" : ""}
-          </span>
-        );
-        break;
-
-      case "CRM_REPORT":
-        badge = <span className="admin-access__badge admin-access__badge--crm">CRM Report</span>;
-        detail = (
-          <>
-            <span className="admin-access__grant-accounts">
-              {grant.crm_report_name || grant.crm_report_id || "Unknown"}
-            </span>
-            <span className="admin-access__crm-sync-info">
-              {grant.crm_provider && <>{grant.crm_provider}</>}
-              {" \u00B7 "}
-              {grant.cached_account_count} account
-              {grant.cached_account_count !== 1 ? "s" : ""}
-              {" \u00B7 "}
-              {grant.last_synced_at
-                ? "Synced " + formatRelativeTime(grant.last_synced_at)
-                : "Never synced"}
-            </span>
-          </>
-        );
-        syncButton = (
-          <button
-            type="button"
-            className="admin-access__btn admin-access__btn--sync"
-            onClick={() => handleSync(grant.id)}
-            title="Sync Now"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M23 4v6h-6M1 20v-6h6" />
-              <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
-            </svg>
-            {" "}Sync
-          </button>
-        );
-        break;
-    }
-
-    return (
-      <div className="admin-access__grant-row" key={grant.id}>
-        <div className="admin-access__grant-info">
-          {badge}
-          {detail}
-        </div>
-        <div className="admin-access__grant-actions">
-          {syncButton}
-          <button
-            type="button"
-            className="admin-access__btn admin-access__btn--danger"
-            onClick={() => handleRevoke(grant.id)}
-            title="Revoke"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-            {" "}Revoke
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ─── Render: User Card ────────────────────────────────────────────────────
-
-  function renderUserCard(user: AccessUser) {
-    const displayName = user.user_name || user.user_email.split("@")[0];
-    const initials = getInitials(user.user_name || user.user_email);
-    const isAdmin = user.role === "OWNER" || user.role === "ADMIN";
-    const roleClass =
-      "admin-access__role admin-access__role--" + user.role.toLowerCase();
-
-    let grantsContent: React.ReactNode;
-
-    if (isAdmin && user.grants.length === 0) {
-      grantsContent = (
-        <div className="admin-access__grant-row">
-          <div className="admin-access__grant-info">
-            <span className="admin-access__badge admin-access__badge--all">All Accounts</span>
-            <span className="admin-access__grant-accounts">
-              Implicit via {user.role} role
-            </span>
-          </div>
-        </div>
-      );
-    } else if (user.grants.length === 0) {
-      grantsContent = (
-        <div className="admin-access__grants-empty">No account access granted</div>
-      );
-    } else {
-      grantsContent = user.grants.map((grant) => renderGrantRow(grant));
-    }
-
-    return (
-      <div className="admin-access__user-card" key={user.user_id}>
-        <div className="admin-access__user-header">
-          <div className="admin-access__user-info">
-            <div className="admin-access__avatar">{initials}</div>
-            <div>
-              <div className="admin-access__user-name">{displayName}</div>
-              <div className="admin-access__user-email">{user.user_email}</div>
-            </div>
-          </div>
-          <div className="admin-access__user-header-right">
-            <span className={roleClass}>{user.role}</span>
-            <div className="admin-access__user-actions">
-              <button
-                type="button"
-                className="admin-access__btn admin-access__btn--primary admin-access__btn--sm"
-                onClick={() => openModal(user.user_id, displayName)}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-                Grant Access
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="admin-access__user-grants">{grantsContent}</div>
-      </div>
-    );
-  }
-
-  // ─── Render: Search Results Dropdown ──────────────────────────────────────
-
-  function renderSearchResults(
-    results: AccountSearchResult[],
-    onSelect: (account: AccountSearchResult) => void,
-    excludeIds?: Set<string>,
-    emptyLabel?: string
-  ) {
-    const filtered = excludeIds
-      ? results.filter((a) => !excludeIds.has(a.id))
-      : results;
-
-    if (filtered.length === 0) {
-      return (
-        <div className="admin-access__search-results active">
-          <div className="admin-access__search-result-item admin-access__search-result-item--empty">
-            {emptyLabel || "No accounts found"}
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="admin-access__search-results active" role="listbox">
-        {filtered.map((account) => (
-          <div
-            key={account.id}
-            className="admin-access__search-result-item"
-            role="option"
-            tabIndex={0}
-            onMouseDown={() => onSelect(account)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(account); } }}
-          >
-            <span className="admin-access__search-result-name">{account.name}</span>
-            {account.domain && (
-              <span className="admin-access__search-result-domain">{account.domain}</span>
-            )}
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  // ─── Render: Modal Tabs ───────────────────────────────────────────────────
-
-  function renderTabAll() {
-    return (
-      <div className="admin-access__tab-panel">
-        <p className="admin-access__tab-description">
-          Grant unrestricted access to all current and future accounts.
-        </p>
-        <div className="admin-access__all-accounts-notice">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-            <polyline points="22,4 12,14.01 9,11.01" />
-          </svg>
-          This user will be able to access all accounts.
-        </div>
-      </div>
-    );
-  }
-
-  function renderTabSingle() {
-    return (
-      <div className="admin-access__tab-panel">
-        <div className="admin-access__form-group">
-          <label className="admin-access__label">Search for an account</label>
-          <div className="admin-access__search-wrap" ref={singleSearchRef}>
-            <div className="admin-access__search-input-wrap">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="11" cy="11" r="8" />
-                <path d="M21 21l-4.35-4.35" />
-              </svg>
-              <input
-                type="search"
-                className="admin-access__input"
-                placeholder="Type account name or domain..."
-                value={singleSearchQuery}
-                onChange={(e) => handleSingleSearch(e.target.value)}
-                autoComplete="off"
-              />
-            </div>
-            {singleSearchOpen &&
-              renderSearchResults(singleSearchResults, selectSingleAccount)}
-          </div>
-        </div>
-        {singleSelected && (
-          <div className="admin-access__single-selected">
-            <div className="admin-access__selected-label">Selected:</div>
-            <span className="admin-access__badge admin-access__badge--account">
-              {singleSelected.name}
-              {singleSelected.domain ? " (" + singleSelected.domain + ")" : ""}
-            </span>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  function renderTabList() {
-    const excludeIds = new Set<string>(listSelected.keys());
-
-    return (
-      <div className="admin-access__tab-panel">
-        <div className="admin-access__form-group">
-          <label className="admin-access__label">Search and add accounts</label>
-          <div className="admin-access__search-wrap" ref={listSearchRef}>
-            <div className="admin-access__search-input-wrap">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="11" cy="11" r="8" />
-                <path d="M21 21l-4.35-4.35" />
-              </svg>
-              <input
-                type="search"
-                className="admin-access__input"
-                placeholder="Type to search accounts..."
-                value={listSearchQuery}
-                onChange={(e) => handleListSearch(e.target.value)}
-                autoComplete="off"
-              />
-            </div>
-            {listSearchOpen &&
-              renderSearchResults(
-                listSearchResults,
-                addListAccount,
-                excludeIds,
-                "No more accounts found"
-              )}
-          </div>
-        </div>
-        <div className="admin-access__selected-accounts">
-          {(Array.from(listSelected.entries()) as [string, string][]).map(([id, name]) => (
-            <span className="admin-access__selected-tag" key={id}>
-              {name}
-              <button
-                type="button"
-                onClick={() => removeListAccount(id)}
-                title="Remove"
-              >
-                &times;
-              </button>
-            </span>
-          ))}
-        </div>
-        <p className="admin-access__hint">
-          {listSelected.size} account{listSelected.size !== 1 ? "s" : ""} selected
-        </p>
-      </div>
-    );
-  }
-
-  function renderTabCrm() {
-    const reportLabel =
-      crmProvider === "SALESFORCE"
-        ? "Select a Salesforce Report"
-        : "Select a HubSpot List";
-
-    return (
-      <div className="admin-access__tab-panel">
-        <div className="admin-access__form-group">
-          <label className="admin-access__label">CRM Provider</label>
-          <div className="admin-access__provider-toggle">
-            <button
-              type="button"
-              className={
-                "admin-access__provider-btn" +
-                (crmProvider === "SALESFORCE" ? " active" : "")
-              }
-              onClick={() => handleProviderChange("SALESFORCE")}
-            >
-              Salesforce Reports
-            </button>
-            <button
-              type="button"
-              className={
-                "admin-access__provider-btn" +
-                (crmProvider === "HUBSPOT" ? " active" : "")
-              }
-              onClick={() => handleProviderChange("HUBSPOT")}
-            >
-              HubSpot Lists
-            </button>
-          </div>
-        </div>
-
-        <div className="admin-access__form-group">
-          <label className="admin-access__label">{reportLabel}</label>
-          {crmReportsLoading ? (
-            <div className="admin-access__reports-loading">
-              <div className="admin-access__spinner admin-access__spinner--sm" />
-              <p>Fetching reports...</p>
-            </div>
-          ) : crmReports.length === 0 ? (
-            <>
-              <select className="admin-access__select" disabled>
-                <option value="">No reports available</option>
-              </select>
-              <div className="admin-access__reports-empty">
-                No reports found. Make sure your CRM is connected via Merge.dev.
-              </div>
-            </>
-          ) : (
-            <select
-              className="admin-access__select"
-              value={selectedReportId}
-              onChange={(e) => setSelectedReportId(e.target.value)}
-            >
-              <option value="">Choose a report...</option>
-              {crmReports.map((report: CrmReport) => (
-                <option key={report.id} value={report.id}>
-                  {report.name}
-                </option>
-              ))}
-            </select>
-          )}
-          <p className="admin-access__hint">
-            Account access will be synced from this report. You can refresh the sync
-            at any time.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ─── Render: Modal ────────────────────────────────────────────────────────
-
-  function renderModal() {
-    if (!modalOpen) return null;
-
-    const tabs: { key: GrantTab; label: string }[] = [
-      { key: "all", label: "All Accounts" },
-      { key: "single", label: "Single Account" },
-      { key: "list", label: "Account List" },
-      { key: "crm", label: "CRM Report" },
-    ];
-
-    return (
-      <div
-        className="admin-access__modal-overlay active"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="admin-access-modal-title"
-        onMouseDown={(e) => {
-          if (e.target === e.currentTarget) closeModal();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") closeModal();
-        }}
-      >
-        <div className="admin-access__modal">
-          <div className="admin-access__modal-header">
-            <h2 id="admin-access-modal-title">Grant Account Access</h2>
-            <button
-              type="button"
-              className="admin-access__modal-close"
-              onClick={closeModal}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          <div className="admin-access__modal-body">
-            <p className="admin-access__modal-user-label">
-              Granting access to: {modalUserName}
-            </p>
-
-            <div className="admin-access__tabs">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  className={
-                    "admin-access__tab" +
-                    (activeTab === tab.key ? " active" : "")
-                  }
-                  onClick={() => setActiveTab(tab.key)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {activeTab === "all" && renderTabAll()}
-            {activeTab === "single" && renderTabSingle()}
-            {activeTab === "list" && renderTabList()}
-            {activeTab === "crm" && renderTabCrm()}
-          </div>
-
-          <div className="admin-access__modal-footer">
-            <button
-              type="button"
-              className="admin-access__btn"
-              onClick={closeModal}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="admin-access__btn admin-access__btn--primary"
-              disabled={submitting}
-              onClick={handleSubmitGrant}
-            >
-              {submitting ? "Granting\u2026" : "Grant Access"}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // ─── Main Render ──────────────────────────────────────────────────────────
 
   return (
@@ -886,11 +394,48 @@ export function AdminAccountAccessPage() {
 
       {!loading && !error && users.length > 0 && (
         <div className="admin-access__user-list">
-          {users.map((user: AccessUser) => renderUserCard(user))}
+          {users.map((user) => (
+            <AccessUserCard
+              key={user.user_id}
+              user={user}
+              onOpenModal={openModal}
+              onRevoke={handleRevoke}
+              onSync={(grantId) => void handleSync(grantId)}
+            />
+          ))}
         </div>
       )}
 
-      {renderModal()}
+      <GrantAccessModal
+        modalOpen={modalOpen}
+        closeModal={closeModal}
+        modalUserName={modalUserName}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        submitting={submitting}
+        onSubmit={() => void handleSubmitGrant()}
+        singleSearchRef={singleSearchRef}
+        singleSearchQuery={singleSearchQuery}
+        onSingleSearch={handleSingleSearch}
+        singleSearchOpen={singleSearchOpen}
+        singleSearchResults={singleSearchResults}
+        onSelectSingle={selectSingleAccount}
+        singleSelected={singleSelected}
+        listSearchRef={listSearchRef}
+        listSearchQuery={listSearchQuery}
+        onListSearch={handleListSearch}
+        listSearchOpen={listSearchOpen}
+        listSearchResults={listSearchResults}
+        onAddList={addListAccount}
+        listSelected={listSelected}
+        onRemoveList={removeListAccount}
+        crmProvider={crmProvider}
+        onProviderChange={handleProviderChange}
+        crmReportsLoading={crmReportsLoading}
+        crmReports={crmReports}
+        selectedReportId={selectedReportId}
+        setSelectedReportId={setSelectedReportId}
+      />
 
       <ConfirmDialog
         open={!!confirmState}

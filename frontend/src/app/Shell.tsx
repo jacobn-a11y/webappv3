@@ -14,8 +14,6 @@ import {
 import {
   buildNav,
   IconMenu,
-  isGroup,
-  type NavEntry,
 } from "./nav-config";
 import { AuthenticatedRoutes } from "./routes";
 import {
@@ -31,6 +29,10 @@ import {
   ensureAccessibleFormLabels,
 } from "./Sidebar";
 import { useTheme } from "./ThemeProvider";
+import {
+  buildAppBreadcrumbItems,
+  buildQuickNavMatches,
+} from "./shell-navigation";
 
 export function Shell({
   user,
@@ -191,87 +193,15 @@ export function Shell({
   }, [mobileOpen]);
 
   const nav = useMemo(() => buildNav(persona, user.role, t), [persona, t, user.role]);
-  const appBreadcrumbItems = useMemo(() => {
-    const path = location.pathname;
-    if (path === "/") return null;
-    if (/^\/accounts\/[^/]+(\/journey)?$/.test(path)) return null;
-    if (/^\/pages\/[^/]+\/edit$/.test(path)) return null;
+  const appBreadcrumbItems = useMemo(
+    () => buildAppBreadcrumbItems(location.pathname),
+    [location.pathname]
+  );
 
-    const labelMap: Record<string, string> = {
-      admin: "Administration",
-      account: "Account",
-      "account-access": "Account Access",
-      permissions: "Permissions",
-      roles: "Roles",
-      "story-context": "Story Context",
-      "audit-logs": "Audit Logs",
-      ops: "Operations",
-      security: "Security",
-      governance: "Governance",
-      "publish-approvals": "Publish Approvals",
-      "data-quality": "Data Quality",
-      "ai-usage": "AI Usage",
-      setup: "Setup",
-      billing: "Billing",
-      accounts: "Accounts",
-      stories: "Stories",
-      quotes: "Quotes",
-      taxonomy: "Taxonomy",
-      "my-queue": "My Queue",
-      "content-queue": "Content Queue",
-      dashboard: "Dashboard",
-      pages: "Pages",
-      chat: "Chat",
-      analytics: "Analytics",
-      calls: "Calls",
-      transcript: "Transcript",
-      workspaces: "Workspaces",
-      writebacks: "Writebacks",
-      automations: "Automations",
-      status: "Status",
-      platform: "Platform",
-      "account-settings": "Account Settings",
-      settings: "Settings",
-      auth: "Auth",
-      invite: "Invite",
-    };
-
-    const segments = path.split("/").filter(Boolean);
-    let builtPath = "";
-    const items: Array<{ label: string; to?: string }> = [{ label: "Home", to: "/" }];
-
-    for (let index = 0; index < segments.length; index += 1) {
-      const segment = segments[index] ?? "";
-      builtPath += `/${segment}`;
-      const isLast = index === segments.length - 1;
-      const isLikelyId = /^[a-z0-9-]{10,}$/i.test(segment);
-      const label = isLikelyId ? "Details" : (labelMap[segment] ?? segment);
-      items.push({
-        label,
-        to: isLast ? undefined : builtPath,
-      });
-    }
-
-    return items;
-  }, [location.pathname]);
-
-  const quickNavMatches = useMemo(() => {
-    const normalized = commandQuery.trim().toLowerCase();
-    if (!normalized) return [] as Array<{ to: string; label: string }>;
-    const flattened: Array<{ to: string; label: string }> = [];
-    for (const entry of nav) {
-      if (isGroup(entry)) {
-        for (const item of entry.items) {
-          flattened.push({ to: item.to, label: item.label });
-        }
-      } else {
-        flattened.push({ to: entry.to, label: entry.label });
-      }
-    }
-    return flattened
-      .filter((item) => item.label.toLowerCase().includes(normalized))
-      .slice(0, 10);
-  }, [commandQuery, nav]);
+  const quickNavMatches = useMemo(
+    () => buildQuickNavMatches(nav, commandQuery),
+    [commandQuery, nav]
+  );
 
   useEffect(() => {
     shouldRestoreMobileFocusRef.current = false;

@@ -1,12 +1,7 @@
 /**
- * Transcript Viewer
+ * Transcript Viewer API
  *
- * Renders a full transcript page for a given callId with:
- *   - Speaker-attributed segments with timestamp markers
- *   - Inline taxonomy tag highlights (hover for topic + confidence)
- *   - Client-side search bar that highlights matching text
- *   - Sidebar with call metadata, participants, and entity resolution result
- *
+ * Provides JSON transcript payloads for React transcript pages.
  * Served at /api/calls/:callId/transcript (behind auth + trial gate).
  */
 
@@ -16,39 +11,23 @@ import type { PrismaClient } from "@prisma/client";
 import { RoleProfileService } from "../services/role-profiles.js";
 import { CompanyScrubber } from "../services/company-scrubber.js";
 import { maskPII } from "../middleware/pii-masker.js";
-import {
-  renderTranscriptPage,
-  type CallMetadata,
-  type TranscriptSegment,
-  type ParticipantInfo,
-  type EntityResolutionInfo,
-  type SegmentTag,
-} from "./templates/transcript-viewer-template.js";
 import { sendUnauthorized, sendNotFound, sendSuccess } from "./_shared/responses.js";
-
-// ─── Route Factory ──────────────────────────────────────────────────────────
 
 export function createTranscriptViewerRoutes(prisma: PrismaClient): Router {
   const router = Router();
   const roleProfiles = new RoleProfileService(prisma);
   const scrubber = new CompanyScrubber(prisma);
 
-  /**
-   * GET /api/calls/:callId/transcript
-   *
-   * Renders the Transcript Viewer page for the given call.
-   * Requires authentication (organizationId on request).
-   */
   router.get("/:callId/transcript", async (req: Request, res: Response) => {
     const authReq = req as AuthenticatedRequest;
-    const organizationId = authReq.organizationId!;
-    if (!organizationId || !authReq.userId!) {
+    const organizationId = authReq.organizationId;
+    if (!organizationId || !authReq.userId) {
       sendUnauthorized(res, "Authentication required");
       return;
     }
 
     const callId = req.params.callId as string;
-    const userId = authReq.userId!;
+    const userId = authReq.userId;
     const userRole = authReq.userRole;
 
     const [rolePolicy, rawPermissionGrant, attributionDisplay] = await Promise.all([
@@ -66,13 +45,13 @@ export function createTranscriptViewerRoutes(prisma: PrismaClient): Router {
         select: { quoteAttributionDisplay: true },
       }),
     ]);
+
     const canViewRaw =
       userRole === "OWNER" ||
       userRole === "ADMIN" ||
       rolePolicy.permissions.includes("VIEW_RAW_TRANSCRIPTS") ||
       !!rawPermissionGrant;
-    const forceScrub =
-      String(req.query.mode ?? "").toLowerCase() === "scrubbed" || !canViewRaw;
+    const forceScrub = String(req.query.mode ?? "").toLowerCase() === "scrubbed" || !canViewRaw;
     const obfuscated = attributionDisplay?.quoteAttributionDisplay === "OBFUSCATED";
 
     const call = await prisma.call.findFirst({
@@ -108,7 +87,7 @@ export function createTranscriptViewerRoutes(prisma: PrismaClient): Router {
       return;
     }
 
-    const meta: CallMetadata = {
+    const meta = {
       id: call.id,
       title: obfuscated ? null : call.title,
       provider: call.provider,
@@ -120,7 +99,7 @@ export function createTranscriptViewerRoutes(prisma: PrismaClient): Router {
       viewMode: forceScrub || obfuscated ? "SCRUBBED" : "RAW",
     };
 
-    const segments: TranscriptSegment[] = await Promise.all(
+    const segments = await Promise.all(
       (call.transcript?.chunks ?? []).map(
         async (chunk: {
           id: string;
@@ -141,6 +120,7 @@ export function createTranscriptViewerRoutes(prisma: PrismaClient): Router {
               text = piiMasked;
             }
           }
+
           return {
             id: chunk.id,
             chunkIndex: chunk.chunkIndex,
@@ -148,47 +128,46 @@ export function createTranscriptViewerRoutes(prisma: PrismaClient): Router {
             text,
             startMs: forceScrub || obfuscated ? null : chunk.startMs,
             endMs: forceScrub || obfuscated ? null : chunk.endMs,
-            tags: chunk.tags.map(
-              (t: { funnelStage: string; topic: string; confidence: number }) => ({
-                funnelStage: t.funnelStage,
-                topic: t.topic,
-                confidence: t.confidence,
-              })
-            ),
+            tags: chunk.tags.map((t: { funnelStage: string; topic: string; confidence: number }) => ({
+              funnelStage: t.funnelStage,
+              topic: t.topic,
+              confidence: t.confidence,
+            })),
           };
         }
       )
     );
 
-    const participants: ParticipantInfo[] = call.participants.map((p: { name: string | null; email: string | null; isHost: boolean; contact: { name: string | null; title: string | null } | null }) => ({
-      name: forceScrub || obfuscated ? null : p.name,
-      email: forceScrub || obfuscated ? null : p.email,
-      isHost: p.isHost,
-      contactName: forceScrub || obfuscated ? null : p.contact?.name ?? null,
-      contactTitle: forceScrub || obfuscated ? null : p.contact?.title ?? null,
-    }));
+    const participants = call.participants.map(
+      (p: {
+        name: string | null;
+        email: string | null;
+        isHost: boolean;
+        contact: { name: string | null; title: string | null } | null;
+      }) => ({
+        name: forceScrub || obfuscated ? null : p.name,
+        email: forceScrub || obfuscated ? null : p.email,
+        isHost: p.isHost,
+        contactName: forceScrub || obfuscated ? null : p.contact?.name ?? null,
+        contactTitle: forceScrub || obfuscated ? null : p.contact?.title ?? null,
+      })
+    );
 
-    const entity: EntityResolutionInfo = {
+    const entity = {
       accountId: forceScrub || obfuscated ? null : call.account?.id ?? null,
       accountName: forceScrub || obfuscated ? null : call.account?.name ?? null,
       accountDomain: forceScrub || obfuscated ? null : call.account?.domain ?? null,
       accountIndustry: forceScrub || obfuscated ? null : call.account?.industry ?? null,
     };
 
-    const callTags: SegmentTag[] = call.tags.map((t: { funnelStage: string; topic: string; confidence: number }) => ({
+    const callTags = call.tags.map((t: { funnelStage: string; topic: string; confidence: number }) => ({
       funnelStage: t.funnelStage,
       topic: t.topic,
       confidence: t.confidence,
     }));
 
-    const acceptHeader = req.get("Accept") || "";
-    if (acceptHeader.includes("application/json")) {
-      sendSuccess(res, { meta, segments, participants, entity, callTags });
-      return;
-    }
-
     res.setHeader("Cache-Control", "private, no-store");
-    res.send(renderTranscriptPage(meta, segments, participants, entity, callTags));
+    sendSuccess(res, { meta, segments, participants, entity, callTags });
   });
 
   return router;

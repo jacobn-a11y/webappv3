@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import express from "express";
-import { createPublicPageRoutes } from "../../src/api/public-page-renderer.js";
+import { createPublicPageRoutes } from "../../src/api/public-page/renderer.js";
 import { LandingPageEditor } from "../../src/services/landing-page-editor.js";
 import { hashPagePassword } from "../../src/lib/page-password.js";
 import { withRequestServer } from "../helpers/request-server.js";

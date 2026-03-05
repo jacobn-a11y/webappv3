@@ -25,115 +25,16 @@ import {
 } from "./entity-resolution.js";
 import { enqueueProcessCallJob } from "../lib/queue-policy.js";
 import logger from "../lib/logger.js";
-
-// ─── Configuration ──────────────────────────────────────────────────────────
-
-const MERGE_BASE_URL = "https://api.merge.dev/api";
-const PAGE_SIZE = 100;
-
-// ─── Merge API Response Types ───────────────────────────────────────────────
-
-interface MergePaginatedResponse<T> {
-  next: string | null;
-  previous: string | null;
-  results: T[];
-}
-
-interface MergeAccountTokenResponse {
-  account_token: string;
-  integration: {
-    name: string;
-    slug: string;
-    categories: string[];
-  };
-}
-
-interface MergeLinkedAccountInfo {
-  id: string;
-  integration: string;
-  integration_slug: string;
-  category: string;
-  status: string;
-  end_user_organization_name: string;
-}
-
-interface MergeRecording {
-  id: string;
-  remote_id: string | null;
-  name: string | null;
-  recording_url: string | null;
-  duration: number | null;
-  start_time: string | null;
-  participants: Array<{
-    email: string | null;
-    name: string | null;
-    is_organizer: boolean | null;
-  }> | null;
-  transcript: string | null;
-}
-
-interface MergeCRMContact {
-  id: string;
-  remote_id: string | null;
-  first_name: string | null;
-  last_name: string | null;
-  title: string | null;
-  email_addresses: Array<{
-    email_address: string;
-    email_address_type: string | null;
-  }> | null;
-  phone_numbers: Array<{
-    phone_number: string;
-    phone_number_type: string | null;
-  }> | null;
-  account: string | null; // Merge account ID reference
-  remote_data: Array<{
-    path: string;
-    data: Record<string, unknown>;
-  }> | null;
-}
-
-interface MergeCRMAccount {
-  id: string;
-  remote_id: string | null;
-  name: string | null;
-  domain: string | null;
-  industry: string | null;
-  number_of_employees: number | null;
-  website: string | null;
-}
-
-interface MergeCRMOpportunity {
-  id: string;
-  remote_id: string | null;
-  name: string | null;
-  amount: number | null;
-  stage: string | null;
-  close_date: string | null;
-  status: string | null; // OPEN, WON, LOST
-  account: string | null; // Merge account ID reference
-}
-
-// ─── Provider Mapping ───────────────────────────────────────────────────────
-
-function integrationSlugToProvider(slug: string): CallProvider {
-  const map: Record<string, CallProvider> = {
-    gong: "GONG",
-    chorus: "CHORUS",
-    zoom: "ZOOM",
-    "google-meet": "GOOGLE_MEET",
-    google_meet: "GOOGLE_MEET",
-    teams: "TEAMS",
-    "microsoft-teams": "TEAMS",
-    fireflies: "FIREFLIES",
-    dialpad: "DIALPAD",
-    aircall: "AIRCALL",
-    ringcentral: "RINGCENTRAL",
-    salesloft: "SALESLOFT",
-    outreach: "OUTREACH",
-  };
-  return map[slug.toLowerCase()] ?? "OTHER";
-}
+import { MergeHttpClient } from "./merge-api-http.js";
+import {
+  integrationSlugToProvider,
+  type MergeAccountTokenResponse,
+  type MergeLinkedAccountInfo,
+  type MergeRecording,
+  type MergeCRMContact,
+  type MergeCRMAccount,
+  type MergeCRMOpportunity,
+} from "./merge-api-types.js";
 
 // ─── Core Service ───────────────────────────────────────────────────────────
 
@@ -142,6 +43,7 @@ export class MergeApiClient {
   private processingQueue: Queue;
   private resolver: EntityResolver;
   private apiKey: string;
+  private http: MergeHttpClient;
 
   constructor(deps: {
     prisma: PrismaClient;
@@ -152,6 +54,7 @@ export class MergeApiClient {
     this.processingQueue = deps.processingQueue;
     this.resolver = new EntityResolver(deps.prisma);
     this.apiKey = deps.mergeApiKey;
+    this.http = new MergeHttpClient(deps.mergeApiKey);
   }
 
   // ─── OAuth Token Management ─────────────────────────────────────────
@@ -166,7 +69,7 @@ export class MergeApiClient {
     publicToken: string
   ): Promise<LinkedAccount> {
     // Exchange public_token for account_token via Merge API
-    const tokenResponse = await this.mergePost<MergeAccountTokenResponse>(
+    const tokenResponse = await this.http.post<MergeAccountTokenResponse>(
       "/account-token",
       { public_token: publicToken }
     );
@@ -213,11 +116,9 @@ export class MergeApiClient {
   private async fetchLinkedAccountInfo(
     accountToken: string
   ): Promise<MergeLinkedAccountInfo> {
-    const resp = await this.mergeGet<MergePaginatedResponse<MergeLinkedAccountInfo>>(
-      "/linked-accounts",
-      {},
-      accountToken
-    );
+    const resp = await this.http.get<{
+      results: MergeLinkedAccountInfo[];
+    }>("/linked-accounts", {}, accountToken);
     // The token is scoped to one linked account, so there's exactly one result
     if (!resp.results.length) {
       throw new Error("No linked account found for the provided account token");
@@ -274,31 +175,15 @@ export class MergeApiClient {
   private async fetchHistoricalRecordings(
     linkedAccount: LinkedAccount
   ): Promise<void> {
-    let cursor: string | null = null;
     const provider = integrationSlugToProvider(linkedAccount.integrationSlug);
-
-    do {
-      const params: Record<string, string> = {
-        page_size: String(PAGE_SIZE),
-      };
-      if (cursor) params.cursor = cursor;
-
-      const page = await this.mergeGet<MergePaginatedResponse<MergeRecording>>(
-        "/filestorage/v1/recordings",
-        params,
-        linkedAccount.accountToken
-      );
-
-      for (const recording of page.results) {
-        await this.ingestRecording(
-          linkedAccount.organizationId,
-          recording,
-          provider
-        );
+    await this.http.paginate<MergeRecording>(
+      "/filestorage/v1/recordings",
+      linkedAccount.accountToken,
+      undefined,
+      async (recording) => {
+        await this.ingestRecording(linkedAccount.organizationId, recording, provider);
       }
-
-      cursor = page.next;
-    } while (cursor);
+    );
   }
 
   /**
@@ -425,7 +310,7 @@ export class MergeApiClient {
   private async syncCRMAccounts(linkedAccount: LinkedAccount): Promise<void> {
     const modifiedAfter = linkedAccount.lastSyncedAt?.toISOString();
 
-    await this.paginateMergeEndpoint<MergeCRMAccount>(
+    await this.http.paginate<MergeCRMAccount>(
       "/crm/v1/accounts",
       linkedAccount.accountToken,
       modifiedAfter,
@@ -493,7 +378,7 @@ export class MergeApiClient {
   private async syncCRMContacts(linkedAccount: LinkedAccount): Promise<void> {
     const modifiedAfter = linkedAccount.lastSyncedAt?.toISOString();
 
-    await this.paginateMergeEndpoint<MergeCRMContact>(
+    await this.http.paginate<MergeCRMContact>(
       "/crm/v1/contacts",
       linkedAccount.accountToken,
       modifiedAfter,
@@ -630,7 +515,7 @@ export class MergeApiClient {
   ): Promise<void> {
     const modifiedAfter = linkedAccount.lastSyncedAt?.toISOString();
 
-    await this.paginateMergeEndpoint<MergeCRMOpportunity>(
+    await this.http.paginate<MergeCRMOpportunity>(
       "/crm/v1/opportunities",
       linkedAccount.accountToken,
       modifiedAfter,
@@ -700,160 +585,6 @@ export class MergeApiClient {
     );
   }
 
-  // ─── HTTP Helpers ──────────────────────────────────────────────────
-
-  private async withRetry<T>(operation: () => Promise<T>, retries = 3): Promise<T> {
-    for (let attempt = 0; attempt < retries; attempt++) {
-      try {
-        return await operation();
-      } catch (err) {
-        const isRetryable = err instanceof MergeApiError &&
-          (err.statusCode >= 500 || err.statusCode === 429);
-        if (!isRetryable || attempt === retries - 1) throw err;
-        const delay = Math.min(1000 * Math.pow(2, attempt), 10_000);
-        await new Promise(r => setTimeout(r, delay));
-      }
-    }
-    throw new Error("Retry exhausted");
-  }
-
-  /**
-   * Generic paginated fetch for any Merge list endpoint. Supports
-   * modified_after for incremental sync and cursor-based pagination.
-   */
-  private async paginateMergeEndpoint<T>(
-    path: string,
-    accountToken: string,
-    modifiedAfter: string | undefined,
-    handler: (item: T) => Promise<void>
-  ): Promise<void> {
-    let cursor: string | null = null;
-
-    do {
-      const params: Record<string, string> = {
-        page_size: String(PAGE_SIZE),
-      };
-      if (cursor) params.cursor = cursor;
-      if (modifiedAfter) params.modified_after = modifiedAfter;
-
-      const page = await this.mergeGet<MergePaginatedResponse<T>>(
-        path,
-        params,
-        accountToken
-      );
-
-      for (const item of page.results) {
-        await handler(item);
-      }
-
-      cursor = page.next;
-    } while (cursor);
-  }
-
-  /**
-   * Make an authenticated GET request to the Merge API.
-   */
-  private async mergeGet<T>(
-    path: string,
-    params: Record<string, string> = {},
-    accountToken?: string
-  ): Promise<T> {
-    return this.withRetry(async () => {
-      const url = new URL(`${MERGE_BASE_URL}${path}`);
-      for (const [key, value] of Object.entries(params)) {
-        url.searchParams.set(key, value);
-      }
-
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      };
-
-      if (accountToken) {
-        headers["X-Account-Token"] = accountToken;
-      }
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30_000);
-
-      try {
-        const response = await fetch(url.toString(), {
-          method: "GET",
-          headers,
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        if (!response.ok) {
-          const body = await response.text();
-          throw new MergeApiError(
-            `Merge API GET ${path} failed: ${response.status} ${response.statusText}`,
-            response.status,
-            body
-          );
-        }
-
-        return response.json() as Promise<T>;
-      } catch (err) {
-        clearTimeout(timeout);
-        if (err instanceof Error && err.name === "AbortError") {
-          throw new MergeApiError(`Merge API GET ${path} timed out after 30s`, 408, "");
-        }
-        throw err;
-      }
-    });
-  }
-
-  /**
-   * Make an authenticated POST request to the Merge API.
-   */
-  private async mergePost<T>(
-    path: string,
-    body: Record<string, unknown>,
-    accountToken?: string
-  ): Promise<T> {
-    return this.withRetry(async () => {
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      };
-
-      if (accountToken) {
-        headers["X-Account-Token"] = accountToken;
-      }
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30_000);
-
-      try {
-        const response = await fetch(`${MERGE_BASE_URL}${path}`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        if (!response.ok) {
-          const respBody = await response.text();
-          throw new MergeApiError(
-            `Merge API POST ${path} failed: ${response.status} ${response.statusText}`,
-            response.status,
-            respBody
-          );
-        }
-
-        return response.json() as Promise<T>;
-      } catch (err) {
-        clearTimeout(timeout);
-        if (err instanceof Error && err.name === "AbortError") {
-          throw new MergeApiError(`Merge API POST ${path} timed out after 30s`, 408, "");
-        }
-        throw err;
-      }
-    });
-  }
-
   /**
    * Extract a clean domain from a URL or domain string.
    */
@@ -867,19 +598,5 @@ export class MergeApiClient {
     } catch {
       return input.toLowerCase().replace(/^www\./, "").trim() || null;
     }
-  }
-}
-
-// ─── Custom Error ───────────────────────────────────────────────────────────
-
-export class MergeApiError extends Error {
-  public statusCode: number;
-  public responseBody: string;
-
-  constructor(message: string, statusCode: number, responseBody: string) {
-    super(message);
-    this.name = "MergeApiError";
-    this.statusCode = statusCode;
-    this.responseBody = responseBody;
   }
 }
