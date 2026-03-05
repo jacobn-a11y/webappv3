@@ -14,5 +14,3 @@ export * from "./api/admin";
 export * from "./api/integrations";
 export * from "./api/integrations-settings";
 export * from "./api/ai";
-export * from "./api/analytics";
-export * from "./api/quotes";

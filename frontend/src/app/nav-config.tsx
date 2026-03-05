@@ -175,22 +175,16 @@ export function buildNav(
   const isMarketing = persona === "MARKETING_ANALYST";
   const isSales = persona === "SALES_MANAGER";
   const isCSM = persona === "CSM";
-  const isExec = persona === "EXEC";
-  const isViewer = userRole === "VIEWER";
   const isMember = userRole === "MEMBER";
 
   if (isSales || isCSM || isMember || isAdmin) {
     coreItems.push({ to: "/accounts", label: t("nav.accounts", "Accounts"), icon: IconAccounts });
   }
   coreItems.push({ to: "/stories", label: t("nav.stories", "Stories"), icon: IconBook });
-  coreItems.push({ to: "/quotes", label: t("nav.quotes", "Quotes"), icon: IconBook });
   coreItems.push({ to: "/taxonomy", label: t("nav.taxonomy", "Taxonomy"), icon: IconFolder });
   coreItems.push({ to: "/my-queue", label: t("nav.my_queue", "My Queue"), icon: IconClipboard });
   coreItems.push({ to: "/content-queue", label: t("nav.content_queue", "Content Queue"), icon: IconActivity });
   coreItems.push({ to: "/dashboard/pages", label: t("nav.pages", "Pages"), icon: IconPages });
-  if (!isMember) {
-    coreItems.push({ to: "/analytics", label: t("nav.analytics", "Analytics"), icon: IconAnalytics });
-  }
 
   if (isAdmin || isMarketing || isSales) {
     coreItems.push({ to: "/chat", label: t("nav.chat", "Chat"), icon: IconChat });
@@ -202,13 +196,7 @@ export function buildNav(
         { to: "/admin/permissions", label: t("nav.permissions", "Permissions"), icon: IconKey },
         { to: "/admin/roles", label: t("nav.roles", "Roles"), icon: IconUsers },
         { to: "/admin/story-context", label: t("nav.story_context", "Story Context"), icon: IconBook },
-        { to: "/admin/audit-logs", label: t("nav.audit_logs", "Audit Logs"), icon: IconClipboard },
-        { to: "/admin/ops", label: t("nav.operations", "Operations"), icon: IconActivity },
-        { to: "/admin/security", label: t("nav.security", "Security"), icon: IconLock },
-        { to: "/admin/governance", label: t("nav.governance", "Governance"), icon: IconDatabase },
         { to: "/admin/publish-approvals", label: t("nav.approvals", "Approvals"), icon: IconCheckCircle },
-        { to: "/admin/data-quality", label: t("nav.data_quality", "Data Quality"), icon: IconStar },
-        { to: "/admin/ai-usage", label: t("nav.ai_usage", "AI Usage"), icon: IconActivity },
         { to: "/admin/setup", label: t("nav.setup", "Setup"), icon: IconTool },
         { to: "/admin/settings/integrations", label: t("nav.integrations", "Integrations"), icon: IconRefresh },
       );
@@ -218,14 +206,6 @@ export function buildNav(
     }
   } else if (isMarketing) {
     adminItems.push({ to: "/admin/story-context", label: t("nav.story_context", "Story Context"), icon: IconBook });
-  }
-
-  if (!isViewer && !isExec && !isMember) {
-    workItems.push({ to: "/workspaces", label: t("nav.workspaces", "Workspaces"), icon: IconFolder });
-    if (isAdmin || isMarketing || isSales) {
-      workItems.push({ to: "/writebacks", label: t("nav.writebacks", "Writebacks"), icon: IconRefresh });
-      workItems.push({ to: "/automations", label: t("nav.automations", "Automations"), icon: IconZap });
-    }
   }
 
   const nav: NavEntry[] = [...primary, ...coreItems];

@@ -31,6 +31,7 @@ import type {
   RoleAssignableUser,
   RoleAwareHome,
   RoleProfile,
+  SellerAdoptionEventType,
   ScimProvisioningSettings,
   SecurityPolicySettings,
   SecuritySession,
@@ -44,6 +45,26 @@ import type {
   WritebackRequest,
 } from "./types";
 import { BASE_URL, buildRequestHeaders, request, requestBlob } from "./http";
+
+export interface TrackSellerAdoptionEventRequest {
+  event_type: SellerAdoptionEventType;
+  flow_id: string;
+  account_id?: string;
+  story_id?: string;
+  stage_preset?: string;
+  visibility_mode?: "ANONYMOUS" | "NAMED";
+  step?: string;
+  action_name?: string;
+  duration_ms?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export async function trackSellerAdoptionEvent(
+  _body: TrackSellerAdoptionEventRequest
+): Promise<{ tracked: boolean }> {
+  // Telemetry endpoint retired in this slimmed app surface.
+  return { tracked: false };
+}
 
 // ─── Admin Account Access ───────────────────────────────────────────────────
 

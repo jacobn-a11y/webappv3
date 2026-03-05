@@ -28,15 +28,12 @@ import { createLandingPageRoutes } from "./api/landing-page/routes.js";
 import { createExportRoutes } from "./api/export-routes.js";
 import { createPublicPageRoutes } from "./api/public-page/renderer.js";
 import { createDashboardRoutes } from "./api/dashboard-routes.js";
-import { createAdminMetricsRoutes } from "./api/admin-metrics-routes.js";
-import { createQueueHealthRoutes } from "./api/queue-health-routes.js";
 import { createApiKeyRoutes } from "./api/api-key-routes.js";
 import { createMergeRoutes } from "./api/merge-routes.js";
 import { createIntegrationRoutes } from "./api/integration-routes.js";
 import { createAISettingsRoutes } from "./api/ai-settings-routes.js";
 import { createPlatformAdminRoutes } from "./api/platform-admin-routes.js";
 import { createPlatformRoutes } from "./api/platform-routes.js";
-import { createTranscriptViewerRoutes } from "./api/transcript-viewer-routes.js";
 import { createEntityResolutionRoutes } from "./api/entity-resolution-routes.js";
 import { createOrgSettingsRoutes } from "./api/org-settings-routes.js";
 import { createIntegrationsRoutes } from "./api/integrations-routes.js";
@@ -45,12 +42,8 @@ import { createAccountJourneyRoutes } from "./api/account-journey-routes.js";
 import { createAccountMergeRoutes } from "./api/account-merge-routes.js";
 import { createSetupRoutes } from "./api/setup-routes.js";
 import { createNotificationRoutes } from "./api/notification-routes.js";
-import { createAnalyticsRoutes } from "./api/analytics/api-routes.js";
 import { createStatusRoutes } from "./api/status-routes.js";
 import { createLifecycleQueueRoutes } from "./api/lifecycle-queue-routes.js";
-import { createQuoteLibraryRoutes } from "./api/quote-library-routes.js";
-import { AccountAccessService } from "./services/account-access.js";
-import { RoleProfileService } from "./services/role-profiles.js";
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 import { requireAuth } from "./middleware/auth.js";
@@ -105,8 +98,6 @@ export function createApp(deps: AppDeps): express.Application {
     aiUsageTracker,
     notificationService,
   } = services;
-  const accountAccessService = new AccountAccessService(prisma);
-  const roleProfiles = new RoleProfileService(prisma);
 
   const app = express();
   configureTrustProxy(app);
@@ -320,9 +311,6 @@ export function createApp(deps: AppDeps): express.Application {
     createDashboardRoutes(prisma, ragEngine)
   );
 
-  // Transcript Viewer
-  app.use("/api/calls", trialGate, createTranscriptViewerRoutes(prisma));
-
   // Entity Resolution Queue
   app.use(
     "/api/entity-resolution",
@@ -361,33 +349,8 @@ export function createApp(deps: AppDeps): express.Application {
     createNotificationRoutes(notificationService)
   );
 
-  // Analytics Dashboard
-  app.use("/api/analytics", trialGate, createAnalyticsRoutes(prisma));
-
-  // vNext lifecycle queues
+  // Lifecycle queues and approvals
   app.use("/api", trialGate, apiRateLimiter, createLifecycleQueueRoutes(prisma));
-  app.use(
-    "/api",
-    trialGate,
-    apiRateLimiter,
-    createQuoteLibraryRoutes(prisma, accountAccessService, roleProfiles)
-  );
-
-  // Admin operational APIs (tenant scoped + privileged only)
-  app.use(
-    "/api/admin/metrics",
-    trialGate,
-    strictPolicy,
-    requirePermission(prisma, "manage_permissions"),
-    createAdminMetricsRoutes(prisma)
-  );
-  app.use(
-    "/api/admin/queues",
-    trialGate,
-    strictPolicy,
-    requirePermission(prisma, "manage_permissions"),
-    createQueueHealthRoutes({ queues, prisma })
-  );
 
   // Admin Settings Pages
   app.use(
