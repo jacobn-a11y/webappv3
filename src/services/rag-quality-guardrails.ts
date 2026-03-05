@@ -1,4 +1,4 @@
-import type { RAGSource } from "./rag-engine.js";
+import type { RAGSource } from "./rag-types.js";
 
 const SOURCE_CITATION_PATTERN = /\[Source\s+\d+\]/i;
 

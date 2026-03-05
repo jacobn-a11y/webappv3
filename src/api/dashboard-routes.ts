@@ -29,13 +29,16 @@ import { registerCollaborationRoutes } from "./dashboard/collaboration-routes.js
 import { registerWritebackRoutes } from "./dashboard/writeback-routes.js";
 import { registerAutomationRoutes } from "./dashboard/automation-routes.js";
 import { registerAccountAccessRoutes } from "./dashboard/account-access-routes.js";
-import { registerOpsDiagnosticsRoutes } from "./dashboard/ops-diagnostics-routes.js";
 import { registerBillingReadinessRoutes } from "./dashboard/billing-readiness-routes.js";
 import { registerAccountReportingRoutes } from "./dashboard/account-reporting-routes.js";
 import { registerArtifactGovernanceRoutes } from "./dashboard/artifact-governance-routes.js";
 import { registerDataQualityRoutes } from "./dashboard/data-quality-routes.js";
 import { registerSellerAdoptionRoutes } from "./dashboard/seller-adoption-routes.js";
 import type { RAGEngine } from "../services/rag-engine.js";
+import { OpsDiagnosticsService } from "../services/ops-diagnostics.js";
+import { registerHealthRoutes } from "./dashboard/ops-diagnostics/health-routes.js";
+import { registerRunsRoutes } from "./dashboard/ops-diagnostics/runs-routes.js";
+import { registerAuditRoutes } from "./dashboard/ops-diagnostics/audit-routes.js";
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
 
@@ -166,11 +169,10 @@ export function createDashboardRoutes(
     auditLogs,
   });
 
-  registerOpsDiagnosticsRoutes({
-    router,
-    prisma,
-    auditLogs,
-  });
+  const opsDiagnostics = new OpsDiagnosticsService(prisma);
+  registerHealthRoutes({ router, prisma, service: opsDiagnostics });
+  registerRunsRoutes({ router, prisma, service: opsDiagnostics });
+  registerAuditRoutes({ router, prisma, auditLogs });
 
   registerBillingReadinessRoutes({
     router,

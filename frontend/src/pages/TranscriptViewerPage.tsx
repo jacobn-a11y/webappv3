@@ -19,6 +19,7 @@ import {
 import { TranscriptBody, TagPill } from "./transcript/TranscriptBody";
 import { TranscriptSidebar } from "./transcript/TranscriptSidebar";
 import { TranscriptSearch } from "./transcript/TranscriptSearch";
+import "../styles/transcript.css";
 import "./TranscriptViewerPage.css";
 
 // Re-export sub-components for backward compatibility

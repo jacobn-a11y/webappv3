@@ -8,8 +8,8 @@
 
 import express, { type Request, type Response, type NextFunction } from "express";
 import { PrismaClient } from "@prisma/client";
-import { createLandingPageRoutes } from "../src/api/landing-page-routes.js";
-import { createPublicPageRoutes } from "../src/api/public-page-renderer.js";
+import { createLandingPageRoutes } from "../src/api/landing-page/routes.js";
+import { createPublicPageRoutes } from "../src/api/public-page/renderer.js";
 
 // ─── Test Prisma Client ──────────────────────────────────────────────────────
 

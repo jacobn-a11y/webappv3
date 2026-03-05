@@ -27,16 +27,10 @@ import {
   type StoryTemplateOption,
 } from "./StoryFormStep";
 import {
-  type FunnelStage,
-  type TaxonomyTopic,
   type StoryFormat,
   type StoryLength,
   type StoryOutline,
   type StoryTypeInput,
-  FUNNEL_STAGE_LABELS,
-  TOPIC_LABELS,
-  STORY_LENGTH_LABELS,
-  STORY_OUTLINE_LABELS,
 } from "../../types/taxonomy";
 import {
   createSharedAsset,
@@ -44,24 +38,21 @@ import {
   getAvailableAIProviders,
   getSharedAssets,
   getStoryContextSettings,
-  type SharedAsset,
   type StoryContextSettings,
   type BuildStoryRequest,
 } from "../../lib/api";
 import { useToast } from "../Toast";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface PersistedStorySettings {
-  selectedStages: FunnelStage[];
-  selectedTopics: TaxonomyTopic[];
-  customTitle: string;
-  selectedFormat: StoryFormat | "";
-  storyLength: StoryLength;
-  storyOutline: StoryOutline;
-  storyType: StoryTypeInput;
-  isAdvanced: boolean;
-}
+import {
+  type AIModelOption,
+  type PersistedStorySettings,
+  type StoryGenerationOverrides,
+  parseSavedTemplate,
+  loadPersistedSettings,
+  savePersistedSettings,
+  loadDefaultStoryModePreference,
+  buildStoryGenerationRequest,
+} from "./useStoryFormState.helpers";
+import { useStoryOnboarding } from "./useStoryFormState.onboarding";
 
 export interface UseStoryFormStateOptions {
   accountId: string;
@@ -86,126 +77,6 @@ export interface UseStoryFormStateOptions {
       metadata?: Record<string, unknown>;
     },
   ) => void;
-}
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const PERSIST_KEY = "story_generator_preferences_v1";
-const ONBOARDING_KEY = "story_generator_onboarding_seen_v1";
-
-const STORY_LENGTH_VALUES = Object.keys(STORY_LENGTH_LABELS) as StoryLength[];
-const STORY_OUTLINE_VALUES = Object.keys(
-  STORY_OUTLINE_LABELS,
-) as StoryOutline[];
-const STORY_FORMAT_LIST = [
-  "before_after_transformation",
-  "day_in_the_life",
-  "by_the_numbers_snapshot",
-  "video_testimonial_soundbite",
-  "joint_webinar_presentation",
-  "peer_reference_call_guide",
-  "analyst_validated_study",
-] as const satisfies readonly StoryFormat[];
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function parseSavedTemplate(asset: SharedAsset): StoryTemplateOption | null {
-  if (asset.asset_type !== "TEMPLATE") {
-    return null;
-  }
-  const metadata =
-    asset.metadata && typeof asset.metadata === "object"
-      ? (asset.metadata as Record<string, unknown>)
-      : null;
-  const rawValues =
-    metadata?.template_values && typeof metadata.template_values === "object"
-      ? (metadata.template_values as Record<string, unknown>)
-      : null;
-  if (!rawValues) {
-    return null;
-  }
-
-  const rawLength = rawValues.story_length;
-  const rawOutline = rawValues.story_outline;
-  const rawType = rawValues.story_type;
-  const rawFormat = rawValues.story_format;
-  if (
-    typeof rawLength !== "string" ||
-    !STORY_LENGTH_VALUES.includes(rawLength as StoryLength) ||
-    typeof rawOutline !== "string" ||
-    !STORY_OUTLINE_VALUES.includes(rawOutline as StoryOutline) ||
-    typeof rawType !== "string" ||
-    !(
-      rawType === "FULL_ACCOUNT_JOURNEY" ||
-      STORY_TYPE_TOPIC_OPTIONS.some(([topic]) => topic === rawType)
-    )
-  ) {
-    return null;
-  }
-
-  const selectedStages = Array.isArray(rawValues.selected_stages)
-    ? rawValues.selected_stages.filter(
-        (stage): stage is FunnelStage =>
-          typeof stage === "string" && stage in FUNNEL_STAGE_LABELS,
-      )
-    : undefined;
-  const selectedTopics = Array.isArray(rawValues.selected_topics)
-    ? rawValues.selected_topics.filter(
-        (topic): topic is TaxonomyTopic =>
-          typeof topic === "string" && topic in TOPIC_LABELS,
-      )
-    : undefined;
-
-  const storyFormat =
-    typeof rawFormat === "string" &&
-    STORY_FORMAT_LIST.includes(rawFormat as StoryFormat)
-      ? (rawFormat as StoryFormat)
-      : "";
-
-  return {
-    id: `saved-${asset.id}`,
-    label: asset.title,
-    description: asset.description ?? "Reusable team preset",
-    source: "saved",
-    assetId: asset.id,
-    values: {
-      storyLength: rawLength as StoryLength,
-      storyOutline: rawOutline as StoryOutline,
-      storyType: rawType as StoryTypeInput,
-      storyFormat,
-      selectedStages,
-      selectedTopics,
-    },
-  };
-}
-
-function loadPersistedSettings(): PersistedStorySettings | null {
-  try {
-    const raw = localStorage.getItem(PERSIST_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as PersistedStorySettings;
-  } catch {
-    return null;
-  }
-}
-
-function savePersistedSettings(settings: PersistedStorySettings): void {
-  try {
-    localStorage.setItem(PERSIST_KEY, JSON.stringify(settings));
-  } catch {
-    // Ignore storage errors in restricted environments.
-  }
-}
-
-function loadDefaultStoryModePreference(): StoryVisibilityMode {
-  try {
-    const raw = localStorage.getItem("user_preferences_v1");
-    if (!raw) return "ANONYMOUS";
-    const parsed = JSON.parse(raw) as { default_story_mode?: string };
-    return parsed.default_story_mode === "named" ? "NAMED" : "ANONYMOUS";
-  } catch {
-    return "ANONYMOUS";
-  }
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -282,9 +153,7 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
   );
   const [namedPermissionConfirmed, setNamedPermissionConfirmed] =
     useState(false);
-  const [aiModelOptions, setAiModelOptions] = useState<
-    Array<{ provider: "openai" | "anthropic" | "google"; model: string }>
-  >([]);
+  const [aiModelOptions, setAiModelOptions] = useState<AIModelOption[]>([]);
   const [selectedAIModelKey, setSelectedAIModelKey] = useState("");
 
   // ── Template state ──────────────────────────────────────────────────────
@@ -489,44 +358,18 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
 
   // ── Onboarding state ──────────────────────────────────────────────────
 
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  const {
+    showOnboarding,
+    firstStoryShared,
+    onboardingElapsedSeconds,
+    onboardingWithinTarget,
+    handleDismissOnboarding,
+    handleShareAction,
+  } = useStoryOnboarding({
+    flowOpenedAt,
+    trackSellerEvent,
+  });
   const [firstStoryGenerated, setFirstStoryGenerated] = useState(false);
-  const [firstStoryShared, setFirstStoryShared] = useState(false);
-  const [onboardingElapsedSeconds, setOnboardingElapsedSeconds] = useState(0);
-  const onboardingWithinTarget = onboardingElapsedSeconds <= 60;
-
-  useEffect(() => {
-    try {
-      const seen = localStorage.getItem(ONBOARDING_KEY) === "1";
-      setShowOnboarding(!seen);
-      if (seen) {
-        setFirstStoryShared(true);
-      }
-    } catch {
-      setShowOnboarding(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    trackSellerEvent("modal_open", {
-      step: "opened",
-      metadata: { onboarding_visible: true },
-    });
-    // Intentionally once per modal mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!showOnboarding) return;
-    const interval = window.setInterval(() => {
-      const elapsed = Math.max(
-        0,
-        Math.floor((Date.now() - flowOpenedAt) / 1000),
-      );
-      setOnboardingElapsedSeconds(elapsed);
-    }, 1000);
-    return () => window.clearInterval(interval);
-  }, [flowOpenedAt, showOnboarding]);
 
   // ── Completion / failure telemetry effects ────────────────────────────
 
@@ -565,16 +408,7 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
   // ── Generation trigger ──────────────────────────────────────────────────
 
   const triggerGeneration = useCallback(
-    (
-      overrides?: Partial<{
-        storyLength: StoryLength;
-        storyOutline: StoryOutline;
-        storyType: StoryTypeInput;
-        selectedFormat: StoryFormat | "";
-        selectedStages: FunnelStage[];
-        selectedTopics: TaxonomyTopic[];
-      }>,
-    ) => {
+    (overrides?: StoryGenerationOverrides) => {
       if (visibilityMode === "NAMED" && !namedPermissionConfirmed) {
         onError(
           "Named mode requires explicit customer permission confirmation before generation.",
@@ -608,12 +442,6 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
         setSelectedTopics(overrides.selectedTopics);
       }
 
-      const audienceLabel =
-        audienceMode === "EXEC"
-          ? "Executive"
-          : audienceMode === "PROCUREMENT"
-            ? "Procurement"
-            : "Champion";
       generationStartedAtRef.current = Date.now();
       completionTelemetryRef.current = { success: false, failed: false };
       trackSellerEvent("generation_started", {
@@ -625,22 +453,22 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
           title_override: customTitle.trim().length > 0,
         },
       });
-      void runStoryGeneration({
-        account_id: accountId,
-        funnel_stages:
-          effectiveStages.length > 0 ? effectiveStages : undefined,
-        filter_topics:
-          effectiveTopics.length > 0 ? effectiveTopics : undefined,
-        title:
-          customTitle.trim() ||
-          `${accountName} ${stageLabel} ${audienceLabel} Story`,
-        format: effectiveStoryFormat || undefined,
-        story_length: effectiveStoryLength,
-        story_outline: effectiveStoryOutline,
-        story_type: effectiveStoryType,
-        ai_provider: selectedAIModel?.provider,
-        ai_model: selectedAIModel?.model,
-      });
+      void runStoryGeneration(
+        buildStoryGenerationRequest({
+          accountId,
+          accountName,
+          customTitle,
+          stageLabel,
+          audienceMode,
+          selectedAIModel,
+          storyLength: effectiveStoryLength,
+          storyOutline: effectiveStoryOutline,
+          storyType: effectiveStoryType,
+          selectedFormat: effectiveStoryFormat,
+          selectedStages: effectiveStages,
+          selectedTopics: effectiveTopics,
+        })
+      );
     },
     [
       accountId,
@@ -791,31 +619,6 @@ export function useStoryFormState(options: UseStoryFormStateOptions) {
     },
     [loadSavedTemplates, onError, onPhaseError, showToast],
   );
-
-  // ── Onboarding handlers ────────────────────────────────────────────────
-
-  const handleDismissOnboarding = useCallback(() => {
-    setShowOnboarding(false);
-    trackSellerEvent("library_action", {
-      action_name: "dismiss_onboarding",
-      step: "onboarding",
-    });
-    try {
-      localStorage.setItem(ONBOARDING_KEY, "1");
-    } catch {
-      // Ignore storage errors in restricted environments.
-    }
-  }, [trackSellerEvent]);
-
-  const handleShareAction = useCallback(() => {
-    setFirstStoryShared(true);
-    setShowOnboarding(false);
-    try {
-      localStorage.setItem(ONBOARDING_KEY, "1");
-    } catch {
-      // Ignore storage errors in restricted environments.
-    }
-  }, []);
 
   return {
     // Quote selection

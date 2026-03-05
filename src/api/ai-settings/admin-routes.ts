@@ -3,7 +3,7 @@ import type { Response } from "express";
 import { requirePermission } from "../../middleware/permissions.js";
 import { sendUnauthorized, sendSuccess, sendBadRequest } from "../_shared/responses.js";
 import { parseRequestBody } from "../_shared/validators.js";
-import { PROVIDER_MODELS, type AIProviderName } from "../../services/ai-client.js";
+import type { AIProviderName } from "../../services/ai-client.js";
 import { AISettingsService } from "../../services/ai-settings.js";
 import { parseAIProviderName } from "../../services/provider-policy.js";
 import {
@@ -18,6 +18,12 @@ import {
 import { decodeDataGovernancePolicy, encodeJsonValue } from "../../types/json-boundaries.js";
 import type { AISettingsRouteContext, AuthReq } from "./types.js";
 import { asyncHandler } from "../../lib/async-handler.js";
+import {
+  presentProviderConfig,
+  presentUsageLimit,
+  presentUsageRecord,
+  presentUsageSummaryBucket,
+} from "./admin-presenters.js";
 
 export function registerAISettingsAdminRoutes({
   configService,
@@ -75,21 +81,7 @@ export function registerAISettingsAdminRoutes({
 
         const configs = await configService.listOrgConfigs(req.organizationId!);
 
-        sendSuccess(res, {
-          providers: configs.map((config) => ({
-            id: config.id,
-            provider: config.provider,
-            display_name: config.displayName,
-            default_model: config.defaultModel,
-            embedding_model: config.embeddingModel,
-            is_default: config.isDefault,
-            is_active: config.isActive,
-            api_key_preview: config.apiKeyPreview,
-            available_models: PROVIDER_MODELS[config.provider as AIProviderName] ?? [],
-            created_at: config.createdAt,
-            updated_at: config.updatedAt,
-          })),
-        });
+        sendSuccess(res, { providers: configs.map(presentProviderConfig) });
       
     }
   ));
@@ -289,24 +281,7 @@ export function registerAISettingsAdminRoutes({
 
         const limits = await usageTracker.listLimits(req.organizationId!);
         sendSuccess(res, {
-          limits: limits.map((limit) => ({
-            id: limit.id,
-            user: limit.user
-              ? { id: limit.user.id, name: limit.user.name, email: limit.user.email }
-              : null,
-            is_org_default: !limit.userId,
-            max_tokens_per_week: limit.maxTokensPerWeek,
-            max_tokens_per_day: limit.maxTokensPerDay,
-            max_tokens_per_month: limit.maxTokensPerMonth,
-            max_requests_per_week: limit.maxRequestsPerWeek,
-            max_requests_per_day: limit.maxRequestsPerDay,
-            max_requests_per_month: limit.maxRequestsPerMonth,
-            max_stories_per_week: limit.maxStoriesPerWeek,
-            max_stories_per_month: limit.maxStoriesPerMonth,
-            warning_threshold_pct: limit.warningThresholdPct,
-            created_at: limit.createdAt,
-            updated_at: limit.updatedAt,
-          })),
+          limits: limits.map(presentUsageLimit),
         });
       
     }
@@ -380,18 +355,7 @@ export function registerAISettingsAdminRoutes({
         const records = await usageTracker.getUsageHistory(req.organizationId!, userId, days);
 
         sendSuccess(res, {
-          records: records.map((record) => ({
-            id: record.id,
-            user_id: record.userId,
-            provider: record.provider,
-            model: record.model,
-            operation: record.operation,
-            input_tokens: record.inputTokens,
-            output_tokens: record.outputTokens,
-            total_tokens: record.totalTokens,
-            cost_cents: record.costCents,
-            created_at: record.createdAt.toISOString(),
-          })),
+          records: records.map(presentUsageRecord),
         });
       
     }
@@ -417,14 +381,7 @@ export function registerAISettingsAdminRoutes({
 
         sendSuccess(res, {
           period_start: startOfMonth.toISOString(),
-          users: buckets.map((b) => ({
-            user_id: b.userId,
-            user_name: b.userName,
-            user_email: b.userEmail,
-            total_tokens: b.totalTokens,
-            total_cost_cents: b.totalCostCents,
-            total_requests: b.totalRequests,
-          })),
+          users: buckets.map(presentUsageSummaryBucket),
         });
       
     }

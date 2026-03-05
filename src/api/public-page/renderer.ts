@@ -11,7 +11,7 @@
  *   - Route registration (`registerRoutes`)
  */
 
-import type { Router, Request, Response } from "express";
+import { Router, type Request, type Response } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { escapeHtml } from "../../lib/html-utils.js";
 import { LandingPageEditor, type CalloutBox } from "../../services/landing-page-editor.js";
@@ -401,4 +401,10 @@ export function registerRoutes(deps: { router: Router; prisma: PrismaClient }): 
    * Handles password submission via POST to avoid password in URL.
    */
   router.post("/:slug", handleSlugRequest);
+}
+
+export function createPublicPageRoutes(prisma: PrismaClient): Router {
+  const router = Router();
+  registerRoutes({ router, prisma });
+  return router;
 }

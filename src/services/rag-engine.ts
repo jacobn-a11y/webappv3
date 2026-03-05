@@ -17,80 +17,30 @@
 import OpenAI from "openai";
 import { Pinecone } from "@pinecone-database/pinecone";
 import type { PrismaClient } from "@prisma/client";
-import crypto from "crypto";
-import { createClient, type RedisClientType } from "redis";
 import { resolveOperationRuntimePolicy } from "./ai-operation-policy.js";
 import {
   ensureGroundedCitations,
   filterGroundedSources,
 } from "./rag-quality-guardrails.js";
+import {
+  buildRagChatCacheKey,
+  buildRagQueryCacheKey,
+} from "./rag-cache-keys.js";
+import { getRagRedisCache, setRagRedisCache } from "./rag-redis-cache.js";
+import {
+  pruneRagVectors,
+  pruneRagVectorsForCall,
+  pruneRagVectorsForStory,
+} from "./rag-vector-retention.js";
+import { resolvePositiveFloat, resolvePositiveInt } from "./rag-config.js";
+import type {
+  RAGChatQuery,
+  RAGChatResponse,
+  RAGQuery,
+  RAGResponse,
+  RAGSource,
+} from "./rag-types.js";
 import logger from "../lib/logger.js";
-
-// ─── Redis Singleton ─────────────────────────────────────────────────────────
-
-let redisClient: RedisClientType | null = null;
-
-async function getRedisClient(): Promise<RedisClientType | null> {
-  if (redisClient) return redisClient;
-  const url = process.env.REDIS_URL;
-  if (!url) return null;
-  try {
-    redisClient = createClient({ url }) as RedisClientType;
-    await redisClient.connect();
-    return redisClient;
-  } catch {
-    return null;
-  }
-}
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-export interface RAGQuery {
-  query: string;
-  accountId: string;
-  organizationId: string;
-  /** Max chunks to retrieve. Defaults to 8. */
-  topK?: number;
-  /** Filter to specific funnel stages. */
-  funnelStages?: string[];
-}
-
-export interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
-
-export interface RAGChatQuery {
-  query: string;
-  accountId: string | null;
-  organizationId: string;
-  /** Previous messages for conversation context. */
-  history: ChatMessage[];
-  topK?: number;
-  funnelStages?: string[];
-}
-
-export interface RAGChatResponse {
-  answer: string;
-  sources: RAGSource[];
-  tokensUsed: number;
-}
-
-export interface RAGResponse {
-  answer: string;
-  sources: RAGSource[];
-  tokensUsed: number;
-}
-
-export interface RAGSource {
-  chunkId: string;
-  callId: string;
-  callTitle: string | null;
-  callDate: string;
-  text: string;
-  speaker: string | null;
-  relevanceScore: number;
-}
 
 const RAG_RUNTIME_POLICY = resolveOperationRuntimePolicy({
   operation: "RAG_QUERY",
@@ -142,11 +92,11 @@ export class RAGEngine {
    */
   async query(input: RAGQuery): Promise<RAGResponse> {
     const topK = input.topK ?? 8;
-    const cacheKey = this.buildQueryCacheKey(input, topK);
+    const cacheKey = buildRagQueryCacheKey(input, topK);
     const redisKey = `rag:query:${cacheKey}`;
 
     // Try Redis first, fall back to in-memory
-    const redisCached = await this.getRedisCache<RAGResponse>(redisKey);
+    const redisCached = await getRagRedisCache<RAGResponse>(redisKey);
     if (redisCached) return redisCached;
 
     const cached = this.getCacheEntry(this.queryCache, cacheKey);
@@ -189,7 +139,7 @@ export class RAGEngine {
         sources: [],
         tokensUsed: 0,
       };
-      await this.setRedisCache(redisKey, empty);
+      await setRagRedisCache(redisKey, empty, this.cacheTtlMs);
       this.setCacheEntry(this.queryCache, cacheKey, empty);
       return empty;
     }
@@ -236,7 +186,7 @@ ${contextBlock}`,
     const tokensUsed = response.usage?.total_tokens ?? 0;
 
     const result: RAGResponse = { answer, sources, tokensUsed };
-    await this.setRedisCache(redisKey, result);
+    await setRagRedisCache(redisKey, result, this.cacheTtlMs);
     this.setCacheEntry(this.queryCache, cacheKey, result);
     return result;
   }
@@ -247,11 +197,11 @@ ${contextBlock}`,
    */
   async chat(input: RAGChatQuery): Promise<RAGChatResponse> {
     const topK = input.topK ?? 8;
-    const cacheKey = this.buildChatCacheKey(input, topK);
+    const cacheKey = buildRagChatCacheKey(input, topK);
     const redisKey = `rag:chat:${cacheKey}`;
 
     // Try Redis first, fall back to in-memory
-    const redisCached = await this.getRedisCache<RAGChatResponse>(redisKey);
+    const redisCached = await getRagRedisCache<RAGChatResponse>(redisKey);
     if (redisCached) return redisCached;
 
     const cached = this.getCacheEntry(this.chatCache, cacheKey);
@@ -296,7 +246,7 @@ ${contextBlock}`,
         sources: [],
         tokensUsed: 0,
       };
-      await this.setRedisCache(redisKey, empty);
+      await setRagRedisCache(redisKey, empty, this.cacheTtlMs);
       this.setCacheEntry(this.chatCache, cacheKey, empty);
       return empty;
     }
@@ -353,7 +303,7 @@ ${contextBlock}`,
     const tokensUsed = response.usage?.total_tokens ?? 0;
 
     const result: RAGChatResponse = { answer, sources, tokensUsed };
-    await this.setRedisCache(redisKey, result);
+    await setRagRedisCache(redisKey, result, this.cacheTtlMs);
     this.setCacheEntry(this.chatCache, cacheKey, result);
     return result;
   }
@@ -406,154 +356,21 @@ ${contextBlock}`,
     olderThan: Date;
     limit?: number;
   }): Promise<number> {
-    const limit = Math.max(1, input.limit ?? this.vectorRetentionDeleteLimit);
-    const candidates = await this.prisma.transcriptChunk.findMany({
-      where: {
-        embeddingId: { not: null },
-        transcript: {
-          call: {
-            organizationId: input.organizationId,
-            occurredAt: { lt: input.olderThan },
-          },
-        },
-      },
-      select: {
-        id: true,
-        embeddingId: true,
-      },
-      take: limit,
-      orderBy: { createdAt: "asc" },
-    });
-
-    const vectorIds = candidates
-      .map((chunk) => chunk.embeddingId)
-      .filter((value): value is string => !!value);
-    if (vectorIds.length === 0) {
-      return 0;
-    }
-
-    const index = this.pinecone.Index(this.indexName);
-    for (let i = 0; i < vectorIds.length; i += 100) {
-      const batch = vectorIds.slice(i, i + 100);
-      if (batch.length === 0) continue;
-      await this.withRetry(() => index.deleteMany(batch));
-    }
-
-    await this.prisma.transcriptChunk.updateMany({
-      where: { id: { in: candidates.map((c) => c.id) } },
-      data: { embeddingId: null },
-    });
-
-    return vectorIds.length;
+    return pruneRagVectors(this.vectorRetentionDeps(), input);
   }
 
   async pruneVectorsForCall(input: {
     organizationId: string;
     callId: string;
   }): Promise<number> {
-    const candidates = await this.prisma.transcriptChunk.findMany({
-      where: {
-        embeddingId: { not: null },
-        transcript: {
-          call: {
-            id: input.callId,
-            organizationId: input.organizationId,
-          },
-        },
-      },
-      select: { id: true, embeddingId: true },
-      orderBy: { createdAt: "asc" },
-    });
-
-    const vectorIds = candidates
-      .map((chunk) => chunk.embeddingId)
-      .filter((value): value is string => !!value);
-    if (vectorIds.length === 0) {
-      return 0;
-    }
-
-    const index = this.pinecone.Index(this.indexName);
-    for (let i = 0; i < vectorIds.length; i += 100) {
-      const batch = vectorIds.slice(i, i + 100);
-      if (batch.length === 0) continue;
-      await this.withRetry(() => index.deleteMany(batch));
-    }
-
-    await this.prisma.transcriptChunk.updateMany({
-      where: { id: { in: candidates.map((candidate) => candidate.id) } },
-      data: { embeddingId: null },
-    });
-
-    return vectorIds.length;
+    return pruneRagVectorsForCall(this.vectorRetentionDeps(), input);
   }
 
   async pruneVectorsForStory(input: {
     organizationId: string;
     storyId: string;
   }): Promise<number> {
-    const lineageRows = await this.prisma.storyClaimLineage.findMany({
-      where: {
-        organizationId: input.organizationId,
-        storyId: input.storyId,
-        sourceChunkId: { not: null },
-      },
-      select: { sourceChunkId: true },
-    });
-    const candidateChunkIds = Array.from(new Set(
-      lineageRows
-        .map((row) => row.sourceChunkId)
-        .filter((value): value is string => !!value)
-    ));
-    if (candidateChunkIds.length === 0) {
-      return 0;
-    }
-
-    const referencedElsewhere = await this.prisma.storyClaimLineage.findMany({
-      where: {
-        organizationId: input.organizationId,
-        storyId: { not: input.storyId },
-        sourceChunkId: { in: candidateChunkIds },
-      },
-      select: { sourceChunkId: true },
-    });
-    const protectedChunkIds = new Set(
-      referencedElsewhere
-        .map((row) => row.sourceChunkId)
-        .filter((value): value is string => !!value)
-    );
-    const prunableChunkIds = candidateChunkIds.filter((id) => !protectedChunkIds.has(id));
-    if (prunableChunkIds.length === 0) {
-      return 0;
-    }
-
-    const candidates = await this.prisma.transcriptChunk.findMany({
-      where: {
-        id: { in: prunableChunkIds },
-        embeddingId: { not: null },
-        transcript: { call: { organizationId: input.organizationId } },
-      },
-      select: { id: true, embeddingId: true },
-    });
-    const vectorIds = candidates
-      .map((chunk) => chunk.embeddingId)
-      .filter((value): value is string => !!value);
-    if (vectorIds.length === 0) {
-      return 0;
-    }
-
-    const index = this.pinecone.Index(this.indexName);
-    for (let i = 0; i < vectorIds.length; i += 100) {
-      const batch = vectorIds.slice(i, i + 100);
-      if (batch.length === 0) continue;
-      await this.withRetry(() => index.deleteMany(batch));
-    }
-
-    await this.prisma.transcriptChunk.updateMany({
-      where: { id: { in: candidates.map((candidate) => candidate.id) } },
-      data: { embeddingId: null },
-    });
-
-    return vectorIds.length;
+    return pruneRagVectorsForStory(this.vectorRetentionDeps(), input);
   }
 
   // ─── Private ──────────────────────────────────────────────────────
@@ -630,17 +447,6 @@ ${contextBlock}`,
     return sources;
   }
 
-  private buildQueryCacheKey(input: RAGQuery, topK: number): string {
-    return hashCacheKey(
-      "query",
-      input.organizationId,
-      input.accountId,
-      String(topK),
-      normalizeQueryKey(input.query),
-      normalizeArrayKey(input.funnelStages)
-    );
-  }
-
   private logRuntimePolicy(): void {
     logger.info("Resolved AI operation runtime policy", {
       operation: "RAG_QUERY",
@@ -653,40 +459,14 @@ ${contextBlock}`,
     });
   }
 
-  private buildChatCacheKey(input: RAGChatQuery, topK: number): string {
-    return hashCacheKey(
-      "chat",
-      input.organizationId,
-      input.accountId ?? "all",
-      String(topK),
-      normalizeQueryKey(input.query),
-      normalizeArrayKey(input.funnelStages),
-      normalizeHistoryKey(input.history)
-    );
-  }
-
-  private async getRedisCache<T>(redisKey: string): Promise<T | null> {
-    try {
-      const redis = await getRedisClient();
-      if (!redis) return null;
-      const raw = await redis.get(redisKey);
-      if (!raw) return null;
-      return JSON.parse(raw) as T;
-    } catch {
-      return null;
-    }
-  }
-
-  private async setRedisCache<T>(redisKey: string, value: T): Promise<boolean> {
-    try {
-      const redis = await getRedisClient();
-      if (!redis) return false;
-      const ttlSeconds = Math.max(1, Math.ceil(this.cacheTtlMs / 1000));
-      await redis.set(redisKey, JSON.stringify(value), { EX: ttlSeconds });
-      return true;
-    } catch {
-      return false;
-    }
+  private vectorRetentionDeps() {
+    return {
+      prisma: this.prisma,
+      pinecone: this.pinecone,
+      indexName: this.indexName,
+      vectorRetentionDeleteLimit: this.vectorRetentionDeleteLimit,
+      withRetry: <T>(fn: () => Promise<T>) => this.withRetry(fn),
+    };
   }
 
   private getCacheEntry<T>(
@@ -713,42 +493,4 @@ ${contextBlock}`,
     }
     cache.set(key, { value, expiresAt: Date.now() + this.cacheTtlMs });
   }
-}
-
-function normalizeQueryKey(query: string): string {
-  return query.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-function normalizeArrayKey(values?: string[]): string {
-  if (!values || values.length === 0) return "";
-  return [...values].map((v) => v.trim()).filter(Boolean).sort().join("|");
-}
-
-function normalizeHistoryKey(history: ChatMessage[]): string {
-  if (!history || history.length === 0) return "";
-  return history
-    .map((item) => `${item.role}:${normalizeQueryKey(item.content)}`)
-    .join("::");
-}
-
-function hashCacheKey(...parts: string[]): string {
-  return crypto.createHash("sha256").update(parts.join("||")).digest("hex");
-}
-
-function resolvePositiveInt(raw: string | undefined, fallback: number): number {
-  if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback;
-  }
-  return parsed;
-}
-
-function resolvePositiveFloat(raw: string | undefined, fallback: number): number {
-  if (!raw) return fallback;
-  const parsed = Number.parseFloat(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback;
-  }
-  return parsed;
 }

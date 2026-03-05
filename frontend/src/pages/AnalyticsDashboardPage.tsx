@@ -22,6 +22,7 @@ import {
   QuoteLeaderboardTable,
   TopPagesTable,
 } from "./analytics/AnalyticsCharts";
+import "../styles/analytics.css";
 
 // Re-export sub-components for backward compatibility
 export { SummaryCards, SummaryCard } from "./analytics/SummaryCards";
